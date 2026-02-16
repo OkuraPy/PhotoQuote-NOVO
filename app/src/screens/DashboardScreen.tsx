@@ -6,14 +6,22 @@ import {
   ScrollView,
   TouchableOpacity,
 } from 'react-native';
-import { useApp } from '../context/AppContext';
+import { useApp, EstimateStatus } from '../context/AppContext';
+
+const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
+  Draft: { bg: '#e8f0fe', text: '#1a73e8' },
+  Sent: { bg: '#fef7e0', text: '#e37400' },
+  Approved: { bg: '#e6f4ea', text: '#34a853' },
+  'In Progress': { bg: '#fff3e0', text: '#f57c00' },
+  Completed: { bg: '#e0f2f1', text: '#00897b' },
+};
 
 interface DashboardScreenProps {
   navigation: any;
 }
 
 export default function DashboardScreen({ navigation }: DashboardScreenProps) {
-  const { clients, projects, estimates, getClient } = useApp();
+  const { clients, projects, estimates, getClient, getProjectEstimates } = useApp();
 
   const totalEstimateValue = estimates.reduce((sum, e) => sum + e.total, 0);
 
@@ -25,6 +33,14 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
 
   const recentProjects = projects.slice(0, 5);
 
+  // Get the effective status for a project based on its most recent estimate
+  const getProjectStatus = (projectId: string): string => {
+    const projectEstimates = getProjectEstimates(projectId);
+    if (projectEstimates.length === 0) return 'Draft';
+    // Use the most recent estimate's status (estimates are ordered newest first)
+    return projectEstimates[0].status;
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -32,7 +48,10 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
           <Text style={styles.greeting}>Welcome back!</Text>
           <Text style={styles.companyName}>PhotoQuote AI</Text>
         </View>
-        <TouchableOpacity style={styles.settingsButton}>
+        <TouchableOpacity
+          style={styles.settingsButton}
+          onPress={() => navigation.navigate('CompanyProfile')}
+        >
           <Text style={styles.settingsIcon}>⚙️</Text>
         </TouchableOpacity>
       </View>
@@ -88,6 +107,8 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
           )}
           {recentProjects.map((project) => {
             const client = getClient(project.clientId);
+            const status = getProjectStatus(project.id);
+            const colors = STATUS_COLORS[status] ?? STATUS_COLORS.Draft;
             return (
               <TouchableOpacity
                 key={project.id}
@@ -103,11 +124,8 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
                     Client: {client?.name ?? 'Unknown'}
                   </Text>
                 </View>
-                <View style={[
-                  styles.statusBadge,
-                  project.status === 'Sent' ? styles.statusSent : styles.statusDraft,
-                ]}>
-                  <Text style={styles.statusText}>{project.status}</Text>
+                <View style={[styles.statusBadge, { backgroundColor: colors.bg }]}>
+                  <Text style={[styles.statusText, { color: colors.text }]}>{status}</Text>
                 </View>
               </TouchableOpacity>
             );
@@ -166,7 +184,5 @@ const styles = StyleSheet.create({
   projectName: { fontSize: 16, fontWeight: '600', color: '#333', marginBottom: 4 },
   projectClient: { fontSize: 14, color: '#666' },
   statusBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-  statusDraft: { backgroundColor: '#e8f0fe' },
-  statusSent: { backgroundColor: '#e6f4ea' },
-  statusText: { fontSize: 12, fontWeight: '600', color: '#333' },
+  statusText: { fontSize: 12, fontWeight: '600' },
 });

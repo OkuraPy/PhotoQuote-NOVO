@@ -157,6 +157,36 @@ interface ProjectConditions {
   floorLevel: string;
   hasElevator: boolean;
   parkingType: string;
+  city: string;
+  zip: string;
+}
+
+// Florida city cost-of-living tiers (higher tier = higher prices)
+const HIGH_COST_CITIES = ['miami', 'miami beach', 'fort lauderdale', 'boca raton', 'palm beach', 'west palm beach', 'naples', 'key west', 'aventura', 'coral gables', 'sunny isles', 'bal harbour', 'fisher island'];
+const MEDIUM_COST_CITIES = ['orlando', 'tampa', 'st. petersburg', 'sarasota', 'jacksonville', 'clearwater', 'brickell', 'doral', 'weston', 'pembroke pines', 'hollywood', 'delray beach', 'boynton beach', 'jupiter', 'stuart', 'bonita springs'];
+
+// ZIP code prefixes for high-cost areas
+const HIGH_COST_ZIPS = ['331', '332', '333', '334', '305'];
+const MEDIUM_COST_ZIPS = ['328', '336', '337', '339', '346', '347'];
+
+function getLocationMultiplier(city: string, zip: string): number {
+  const cityLower = city.toLowerCase().trim();
+
+  if (HIGH_COST_CITIES.some(c => cityLower.includes(c))) return 1.20;
+  if (MEDIUM_COST_CITIES.some(c => cityLower.includes(c))) return 1.10;
+
+  // Fallback to ZIP prefix
+  const zipPrefix = zip.substring(0, 3);
+  if (HIGH_COST_ZIPS.includes(zipPrefix)) return 1.15;
+  if (MEDIUM_COST_ZIPS.includes(zipPrefix)) return 1.08;
+
+  return 1.0;
+}
+
+function getLocationLabel(multiplier: number): string {
+  if (multiplier >= 1.15) return 'High-cost area';
+  if (multiplier >= 1.05) return 'Medium-cost area';
+  return 'Standard area';
 }
 
 function getDifficultyMultiplier(conditions: ProjectConditions): number {
@@ -182,6 +212,10 @@ function getDifficultyMultiplier(conditions: ProjectConditions): number {
   // Parking
   if (conditions.parkingType === 'Paid') multiplier += 0.03;
   if (conditions.parkingType === 'Hard') multiplier += 0.08;
+
+  // Location
+  const locationMult = getLocationMultiplier(conditions.city, conditions.zip);
+  multiplier *= locationMult;
 
   return multiplier;
 }
@@ -397,18 +431,6 @@ function buildLineItems(
       });
     }
 
-    // Always add a description-based custom item so the user sees their notes reflected
-    if (description.trim().length > 20) {
-      idCounter++;
-      items.push({
-        id: String(idCounter),
-        category: 'Additional Work (per description)',
-        description: description.trim(),
-        unit: 'job',
-        quantity: 1,
-        unitPrice: 0,
-      });
-    }
   }
 
   return items;
@@ -433,9 +455,13 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
     floorLevel: project?.floorLevel ?? '0',
     hasElevator: project?.hasElevator ?? false,
     parkingType: project?.parkingType ?? 'Easy',
+    city: project?.city ?? '',
+    zip: project?.zip ?? '',
   };
   const difficultyMultiplier = getDifficultyMultiplier(conditions);
   const difficultyLabel = getDifficultyLabel(difficultyMultiplier);
+  const locationMult = getLocationMultiplier(conditions.city, conditions.zip);
+  const locationLabel = getLocationLabel(locationMult);
 
   const [lineItems, setLineItems] = useState<EditableLineItem[]>(
     () => buildLineItems(services, description, sqft, lf, conditions)
@@ -555,6 +581,7 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
               {parseInt(conditions.floorLevel) > 0 ? `, Floor ${conditions.floorLevel}` : ''}
               {parseInt(conditions.floorLevel) >= 2 && !conditions.hasElevator ? ', No elevator' : ''}
               {conditions.parkingType !== 'Easy' ? `, ${conditions.parkingType} parking` : ''}
+              {locationMult > 1.0 ? `, ${locationLabel} (${conditions.city || 'ZIP ' + conditions.zip})` : ''}
             </Text>
           </View>
         )}

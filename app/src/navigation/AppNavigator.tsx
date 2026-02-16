@@ -16,6 +16,7 @@ import EstimatesListScreen from '../screens/EstimatesListScreen';
 import EstimateDetailScreen from '../screens/EstimateDetailScreen';
 import InvoicesListScreen from '../screens/InvoicesListScreen';
 import InvoiceDetailScreen from '../screens/InvoiceDetailScreen';
+import CompanyProfileScreen from '../screens/CompanyProfileScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -90,6 +91,7 @@ export default function AppNavigator() {
         <Stack.Screen name="EstimatePreview" component={EstimatePreviewScreen} />
         <Stack.Screen name="EstimateDetail" component={EstimateDetailScreen} />
         <Stack.Screen name="InvoiceDetail" component={InvoiceDetailScreen} />
+        <Stack.Screen name="CompanyProfile" component={CompanyProfileScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

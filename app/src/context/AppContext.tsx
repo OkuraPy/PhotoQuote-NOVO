@@ -12,6 +12,20 @@ export interface Client {
   createdAt: string;
 }
 
+export interface CompanyProfile {
+  name: string;
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  phone: string;
+  email: string;
+  website: string;
+  licenseNumber: string;
+  logoUri: string;
+  logoScale: number;
+}
+
 export type ProjectStatus = 'Draft' | 'Approved' | 'In Progress' | 'Completed';
 export type EstimateStatus = 'Draft' | 'Sent' | 'Approved' | 'In Progress' | 'Completed';
 export type InvoiceStatus = 'Unpaid' | 'Sent' | 'Paid' | 'Overdue';
@@ -101,6 +115,8 @@ interface AppState {
   addInvoice: (invoice: Omit<Invoice, 'id' | 'createdAt'>) => Invoice;
   updateInvoice: (id: string, data: Partial<Invoice>) => void;
   getEstimateInvoice: (estimateId: string) => Invoice | undefined;
+  companyProfile: CompanyProfile;
+  updateCompanyProfile: (data: Partial<CompanyProfile>) => void;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -117,6 +133,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [estimates, setEstimates] = useState<Estimate[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [companyProfile, setCompanyProfile] = useState<CompanyProfile>({
+    name: '', address: '', city: '', state: 'FL', zip: '',
+    phone: '', email: '', website: '', licenseNumber: '', logoUri: '', logoScale: 1,
+  });
 
   const addClient = useCallback((data: Omit<Client, 'id' | 'createdAt'>): Client => {
     const client: Client = {
@@ -204,6 +224,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return invoices.find(inv => inv.estimateId === estimateId);
   }, [invoices]);
 
+  const updateCompanyProfile = useCallback((data: Partial<CompanyProfile>) => {
+    setCompanyProfile(prev => ({ ...prev, ...data }));
+  }, []);
+
   return (
     <AppContext.Provider value={{
       clients,
@@ -225,6 +249,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addInvoice,
       updateInvoice,
       getEstimateInvoice,
+      companyProfile,
+      updateCompanyProfile,
     }}>
       {children}
     </AppContext.Provider>
