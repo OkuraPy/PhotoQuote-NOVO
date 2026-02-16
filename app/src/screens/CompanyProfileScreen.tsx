@@ -42,8 +42,6 @@ export default function CompanyProfileScreen({ navigation }: CompanyProfileScree
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
       quality: 0.8,
     });
 
@@ -110,6 +108,7 @@ export default function CompanyProfileScreen({ navigation }: CompanyProfileScree
               <Image
                 source={{ uri: logoUri }}
                 style={[styles.logoImage, { transform: [{ scale: logoScale }] }]}
+                resizeMode="contain"
               />
             ) : (
               <View style={styles.logoPlaceholder}>
@@ -272,7 +271,7 @@ const styles = StyleSheet.create({
 
   logoSection: { alignItems: 'center', marginBottom: 20 },
   logoContainer: {
-    width: 120, height: 120, borderRadius: 16, overflow: 'hidden',
+    width: 160, height: 120, borderRadius: 16, overflow: 'hidden',
     borderWidth: 2, borderColor: '#e0e0e0', borderStyle: 'dashed',
   },
   logoImage: { width: '100%', height: '100%' },

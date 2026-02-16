@@ -59,6 +59,7 @@ export interface LineItem {
   quantity: number;
   unitPrice: number;
   subtotal: number;
+  taxable: boolean;
 }
 
 export interface Estimate {

@@ -43,38 +43,50 @@ function buildPdfHtml(estimate: Estimate, projectName: string, clientName: strin
     ? `<div class="info-item"><div class="info-label">Invoice #</div><div class="info-value">${invoiceNumber}</div></div>`
     : '';
 
+  const taxableSubtotal = estimate.lineItems.filter(i => i.taxable).reduce((sum, i) => sum + i.subtotal, 0);
+  const marginRow = estimate.marginRate > 0
+    ? `<div class="total-row"><span>Margin (${estimate.marginRate}%)</span><span>$${estimate.margin.toFixed(2)}</span></div>`
+    : '';
+
   return `
     <html>
     <head><meta charset="utf-8"><style>
-      body { font-family: Helvetica, Arial, sans-serif; padding: 40px; color: #333; }
+      body { font-family: Helvetica, Arial, sans-serif; padding: 0; color: #333; margin: 0; }
       h1 { color: #1a73e8; margin-bottom: 4px; }
       .subtitle { color: #666; font-size: 14px; margin-bottom: 30px; }
       .info-grid { display: flex; flex-wrap: wrap; margin-bottom: 24px; }
       .info-item { width: 50%; margin-bottom: 12px; }
       .info-label { font-size: 12px; color: #555; text-transform: uppercase; font-weight: 600; }
       .info-value { font-size: 14px; font-weight: 600; }
-      table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
-      th { background: #f8f9fa; padding: 10px 8px; text-align: left; font-size: 12px; color: #666; text-transform: uppercase; border-bottom: 2px solid #e0e0e0; }
+      .items-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+      .items-table th { background: #f8f9fa; padding: 10px 8px; text-align: left; font-size: 12px; color: #666; text-transform: uppercase; border-bottom: 2px solid #e0e0e0; }
       .totals { margin-left: auto; width: 280px; }
       .total-row { display: flex; justify-content: space-between; padding: 6px 0; }
       .grand-total { border-top: 2px solid #333; padding-top: 12px; margin-top: 8px; }
       .grand-total .label { font-size: 18px; font-weight: 700; }
-      .grand-total .value { font-size: 22px; font-weight: 700; color: #34a853; }
+      .grand-total .value { font-size: 22px; font-weight: 700; color: #1b6d2f; }
       .notes { background: #f8f9fa; padding: 16px; border-radius: 8px; margin-top: 24px; }
       .notes h3 { margin-top: 0; color: #333; font-size: 14px; }
       .notes p { font-size: 13px; color: #666; line-height: 1.6; }
-      .footer { margin-top: 40px; text-align: center; font-size: 11px; color: #999; border-top: 1px solid #eee; padding-top: 16px; }
+      .page-table { width: 100%; border-collapse: collapse; }
+      .page-table > thead > tr > td { padding: 20px 40px 10px; border-bottom: 1px solid #ddd; }
+      .page-table > tbody > tr > td { padding: 10px 40px 40px; }
+      .page-table > tfoot > tr > td { padding: 12px 40px; border-top: 1px solid #ddd; text-align: center; font-size: 12px; color: #555; font-weight: 500; }
     </style></head>
     <body>
-      <div style="display:flex;align-items:center;margin-bottom:10px;">
-        ${company.logoUri ? `<img src="${company.logoUri}" style="width:60px;height:60px;border-radius:8px;margin-right:16px;" />` : ''}
-        <div>
-          <h1 style="margin:0;">${company.name || 'PhotoQuote AI'}</h1>
-          ${company.address ? `<p style="margin:2px 0;font-size:13px;color:#666;">${company.address}${company.city ? `, ${company.city}` : ''}${company.state ? `, ${company.state}` : ''} ${company.zip}</p>` : ''}
-          ${company.phone ? `<p style="margin:2px 0;font-size:13px;color:#666;">${company.phone}${company.email ? ` | ${company.email}` : ''}</p>` : ''}
-          ${company.licenseNumber ? `<p style="margin:2px 0;font-size:12px;color:#555;">License: ${company.licenseNumber}</p>` : ''}
-        </div>
-      </div>
+      <table class="page-table">
+        <thead><tr><td>
+          <div style="display:flex;align-items:center;">
+            ${company.logoUri ? `<img src="${company.logoUri}" style="max-width:60px;max-height:60px;border-radius:8px;margin-right:16px;object-fit:contain;" />` : ''}
+            <div>
+              <h1 style="margin:0;font-size:18px;">${company.name || 'PhotoQuote AI'}</h1>
+              ${company.address ? `<p style="margin:2px 0;font-size:11px;color:#666;">${company.address}${company.city ? `, ${company.city}` : ''}${company.state ? `, ${company.state}` : ''} ${company.zip}</p>` : ''}
+              ${company.phone ? `<p style="margin:2px 0;font-size:11px;color:#666;">${company.phone}${company.email ? ` | ${company.email}` : ''}</p>` : ''}
+              ${company.licenseNumber ? `<p style="margin:2px 0;font-size:11px;color:#555;">License: ${company.licenseNumber}</p>` : ''}
+            </div>
+          </div>
+        </td></tr></thead>
+        <tbody><tr><td>
       <p class="subtitle">Professional ${docType}</p>
 
       <div class="info-grid">
@@ -85,7 +97,7 @@ function buildPdfHtml(estimate: Estimate, projectName: string, clientName: strin
         <div class="info-item"><div class="info-label">Services</div><div class="info-value">${serviceType}</div></div>
       </div>
 
-      <table>
+      <table class="items-table">
         <thead>
           <tr><th>Category</th><th>Description</th><th style="text-align:center;">Qty</th><th style="text-align:right;">Unit Price</th><th style="text-align:right;">Subtotal</th></tr>
         </thead>
@@ -94,8 +106,8 @@ function buildPdfHtml(estimate: Estimate, projectName: string, clientName: strin
 
       <div class="totals">
         <div class="total-row"><span>Subtotal</span><span>$${estimate.subtotal.toFixed(2)}</span></div>
-        <div class="total-row"><span>Tax (${estimate.taxRate}%)</span><span>$${estimate.tax.toFixed(2)}</span></div>
-        <div class="total-row"><span>Margin (${estimate.marginRate}%)</span><span>$${estimate.margin.toFixed(2)}</span></div>
+        <div class="total-row"><span>Tax (${estimate.taxRate}% on $${taxableSubtotal.toFixed(2)})</span><span>$${estimate.tax.toFixed(2)}</span></div>
+        ${marginRow}
         <div class="total-row grand-total"><span class="label">Total</span><span class="value">$${estimate.total.toFixed(2)}</span></div>
       </div>
 
@@ -104,9 +116,11 @@ function buildPdfHtml(estimate: Estimate, projectName: string, clientName: strin
         <p>${estimate.notes.replace(/\n/g, '<br>')}</p>
       </div>
 
-      <div class="footer">
-        ${company.name || 'PhotoQuote AI'} &bull; ${docType === 'Invoice' ? 'Payment due within 30 days' : 'Valid for 30 days'} &bull; ${new Date(estimate.createdAt).toLocaleDateString()}
-      </div>
+        </td></tr></tbody>
+        <tfoot><tr><td>
+          ${company.name || 'PhotoQuote AI'} &bull; ${docType === 'Invoice' ? 'Payment due within 30 days' : 'Valid for 30 days'} &bull; ${new Date(estimate.createdAt).toLocaleDateString()}
+        </td></tr></tfoot>
+      </table>
     </body>
     </html>
   `;
@@ -117,7 +131,8 @@ function buildShareText(estimate: Estimate, projectName: string, clientName: str
   const header = docType === 'Invoice' && invoiceNumber
     ? `*PhotoQuote AI - Invoice #${invoiceNumber}*`
     : '*PhotoQuote AI - Estimate*';
-  return `${header}\n\nClient: ${clientName}\nProject: ${projectName}\nAddress: ${address}\nServices: ${serviceType}\n\n${items}\n\nSubtotal: $${estimate.subtotal.toFixed(2)}\nTax (${estimate.taxRate}%): $${estimate.tax.toFixed(2)}\nMargin (${estimate.marginRate}%): $${estimate.margin.toFixed(2)}\n*Total: $${estimate.total.toFixed(2)}*\n\n${docType === 'Invoice' ? 'Payment due within 30 days.' : 'Valid for 30 days.'}`;
+  const marginLine = estimate.marginRate > 0 ? `\nMargin (${estimate.marginRate}%): $${estimate.margin.toFixed(2)}` : '';
+  return `${header}\n\nClient: ${clientName}\nProject: ${projectName}\nAddress: ${address}\nServices: ${serviceType}\n\n${items}\n\nSubtotal: $${estimate.subtotal.toFixed(2)}\nTax (${estimate.taxRate}%): $${estimate.tax.toFixed(2)}${marginLine}\n*Total: $${estimate.total.toFixed(2)}*\n\n${docType === 'Invoice' ? 'Payment due within 30 days.' : 'Valid for 30 days.'}`;
 }
 
 export default function EstimateDetailScreen({ navigation, route }: EstimateDetailScreenProps) {
@@ -263,10 +278,7 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
       notes: estimate.notes,
       status: 'Unpaid',
     });
-    Alert.alert('Invoice Created', `Invoice ${invNumber} has been generated.`, [
-      { text: 'View Invoice', onPress: () => navigation.navigate('InvoiceDetail', { invoiceId: newInvoice.id }) },
-      { text: 'OK' },
-    ]);
+    navigation.navigate('InvoiceDetail', { invoiceId: newInvoice.id });
   };
 
   return (
@@ -414,10 +426,12 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
             <Text style={styles.totalLabel}>Tax ({estimate.taxRate}%)</Text>
             <Text style={styles.totalValue}>${estimate.tax.toFixed(2)}</Text>
           </View>
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Margin ({estimate.marginRate}%)</Text>
-            <Text style={styles.totalValue}>${estimate.margin.toFixed(2)}</Text>
-          </View>
+          {estimate.marginRate > 0 && (
+            <View style={styles.totalRow}>
+              <Text style={styles.totalLabel}>Margin ({estimate.marginRate}%)</Text>
+              <Text style={styles.totalValue}>${estimate.margin.toFixed(2)}</Text>
+            </View>
+          )}
           <View style={styles.divider} />
           <View style={styles.totalRow}>
             <Text style={styles.grandTotalLabel}>Total</Text>
@@ -540,7 +554,7 @@ const styles = StyleSheet.create({
   totalValue: { fontSize: 15, color: '#333', fontWeight: '500' },
   divider: { height: 1, backgroundColor: '#e0e0e0', marginVertical: 12 },
   grandTotalLabel: { fontSize: 20, fontWeight: '700', color: '#333' },
-  grandTotalValue: { fontSize: 24, fontWeight: '700', color: '#34a853' },
+  grandTotalValue: { fontSize: 24, fontWeight: '700', color: '#1b6d2f' },
 
   note: { fontSize: 14, color: '#666', lineHeight: 22 },
 

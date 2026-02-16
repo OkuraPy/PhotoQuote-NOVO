@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,8 +9,10 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useApp } from '../context/AppContext';
+import { generateAIEstimate } from '../services/openaiService';
 
 interface EditableLineItem {
   id: string;
@@ -19,7 +21,16 @@ interface EditableLineItem {
   unit: string;
   quantity: number;
   unitPrice: number;
+  taxable: boolean;
 }
+
+// US state sales tax rates
+const STATE_TAX_RATES: Record<string, number> = {
+  FL: 7.0, CA: 7.25, TX: 6.25, NY: 8.0, NJ: 6.625, PA: 6.0, IL: 6.25, OH: 5.75,
+  GA: 4.0, NC: 4.75, MI: 6.0, VA: 5.3, WA: 6.5, AZ: 5.6, MA: 6.25, TN: 7.0,
+  IN: 7.0, MO: 4.225, MD: 6.0, WI: 5.0, CO: 2.9, MN: 6.875, SC: 6.0, AL: 4.0,
+  LA: 4.45, KY: 6.0, OR: 0, MT: 0, NH: 0, DE: 0, AK: 0,
+};
 
 interface EstimatePreviewScreenProps {
   navigation: any;
@@ -30,122 +41,122 @@ interface EstimatePreviewScreenProps {
 
 const SERVICE_ITEMS: Record<string, EditableLineItem[]> = {
   Flooring: [
-    { id: '', category: 'Floor Preparation', description: 'Protect surrounding areas, remove furniture, clean and level the subfloor. Includes moisture barrier inspection and repair of minor subfloor imperfections.', unit: 'sqft', quantity: 120, unitPrice: 1.50 },
-    { id: '', category: 'Existing Flooring Removal', description: 'Careful removal of current flooring material (tile, vinyl, laminate, or carpet). Includes scraping of adhesive residue and disposal of old material.', unit: 'sqft', quantity: 120, unitPrice: 3.00 },
-    { id: '', category: 'New Flooring Installation', description: 'Supply and install new flooring material according to manufacturer specifications. Includes underlayment, precise cuts around obstacles, and proper expansion gaps.', unit: 'sqft', quantity: 120, unitPrice: 6.50 },
-    { id: '', category: 'Trim & Transitions', description: 'Install baseboards, quarter-round molding, and transition strips between rooms. Includes painting/staining of new trim to match existing decor.', unit: 'lf', quantity: 45, unitPrice: 12.00 },
-    { id: '', category: 'Final Cleanup & Inspection', description: 'Remove all debris and construction waste. Vacuum and mop installed floor. Conduct walkthrough inspection to ensure quality and client satisfaction.', unit: 'job', quantity: 1, unitPrice: 150.00 },
+    { id: '', taxable: true, category: 'Floor Preparation', description: 'Protect surrounding areas, remove furniture, clean and level the subfloor. Includes moisture barrier inspection and repair of minor subfloor imperfections.', unit: 'sqft', quantity: 120, unitPrice: 1.50 },
+    { id: '', taxable: true, category: 'Existing Flooring Removal', description: 'Careful removal of current flooring material (tile, vinyl, laminate, or carpet). Includes scraping of adhesive residue and disposal of old material.', unit: 'sqft', quantity: 120, unitPrice: 3.00 },
+    { id: '', taxable: true, category: 'New Flooring Installation', description: 'Supply and install new flooring material according to manufacturer specifications. Includes underlayment, precise cuts around obstacles, and proper expansion gaps.', unit: 'sqft', quantity: 120, unitPrice: 6.50 },
+    { id: '', taxable: true, category: 'Trim & Transitions', description: 'Install baseboards, quarter-round molding, and transition strips between rooms. Includes painting/staining of new trim to match existing decor.', unit: 'lf', quantity: 45, unitPrice: 12.00 },
+    { id: '', taxable: true, category: 'Final Cleanup & Inspection', description: 'Remove all debris and construction waste. Vacuum and mop installed floor. Conduct walkthrough inspection to ensure quality and client satisfaction.', unit: 'job', quantity: 1, unitPrice: 150.00 },
   ],
   Painting: [
-    { id: '', category: 'Surface Preparation', description: 'Repair cracks and holes with spackle, sand rough surfaces smooth, apply painter\'s tape to edges, cover floors and furniture with drop cloths.', unit: 'sqft', quantity: 400, unitPrice: 0.50 },
-    { id: '', category: 'Primer Application', description: 'Apply one coat of high-quality primer to ensure proper paint adhesion and uniform color coverage. Includes stain-blocking primer for problem areas.', unit: 'sqft', quantity: 400, unitPrice: 0.75 },
-    { id: '', category: 'Paint Application (2 Coats)', description: 'Apply two coats of premium interior/exterior paint using brush, roller, and spray as appropriate. Includes drying time between coats and touch-ups.', unit: 'sqft', quantity: 400, unitPrice: 1.50 },
-    { id: '', category: 'Trim & Baseboard Painting', description: 'Sand, prime, and paint all trim, baseboards, door frames, and window casings. Includes detailed cut-in work for clean edges.', unit: 'lf', quantity: 80, unitPrice: 2.50 },
-    { id: '', category: 'Final Cleanup', description: 'Remove all tape and drop cloths, clean paint drips and overspray, touch up any imperfections, and dispose of materials.', unit: 'job', quantity: 1, unitPrice: 100.00 },
+    { id: '', taxable: true, category: 'Surface Preparation', description: 'Repair cracks and holes with spackle, sand rough surfaces smooth, apply painter\'s tape to edges, cover floors and furniture with drop cloths.', unit: 'sqft', quantity: 400, unitPrice: 0.50 },
+    { id: '', taxable: true, category: 'Primer Application', description: 'Apply one coat of high-quality primer to ensure proper paint adhesion and uniform color coverage. Includes stain-blocking primer for problem areas.', unit: 'sqft', quantity: 400, unitPrice: 0.75 },
+    { id: '', taxable: true, category: 'Paint Application (2 Coats)', description: 'Apply two coats of premium interior/exterior paint using brush, roller, and spray as appropriate. Includes drying time between coats and touch-ups.', unit: 'sqft', quantity: 400, unitPrice: 1.50 },
+    { id: '', taxable: true, category: 'Trim & Baseboard Painting', description: 'Sand, prime, and paint all trim, baseboards, door frames, and window casings. Includes detailed cut-in work for clean edges.', unit: 'lf', quantity: 80, unitPrice: 2.50 },
+    { id: '', taxable: true, category: 'Final Cleanup', description: 'Remove all tape and drop cloths, clean paint drips and overspray, touch up any imperfections, and dispose of materials.', unit: 'job', quantity: 1, unitPrice: 100.00 },
   ],
   Drywall: [
-    { id: '', category: 'Damaged Drywall Removal', description: 'Carefully remove damaged or water-stained drywall sections. Inspect framing behind for mold, rot, or structural issues. Dispose of old material.', unit: 'sqft', quantity: 100, unitPrice: 2.00 },
-    { id: '', category: 'New Drywall Installation', description: 'Cut and install new drywall sheets (1/2" standard or 5/8" as needed). Secure with screws to studs at proper intervals.', unit: 'sqft', quantity: 100, unitPrice: 3.50 },
-    { id: '', category: 'Taping & Mudding Joints', description: 'Apply joint tape and three coats of joint compound to all seams and screw holes. Feather edges for seamless transition.', unit: 'lf', quantity: 60, unitPrice: 3.00 },
-    { id: '', category: 'Sanding & Texture Finish', description: 'Sand all joint compound smooth. Apply matching wall texture to blend with surrounding area.', unit: 'sqft', quantity: 100, unitPrice: 1.50 },
-    { id: '', category: 'Cleanup & Debris Removal', description: 'Vacuum all drywall dust, remove debris from work area, wipe down surfaces.', unit: 'job', quantity: 1, unitPrice: 120.00 },
+    { id: '', taxable: true, category: 'Damaged Drywall Removal', description: 'Carefully remove damaged or water-stained drywall sections. Inspect framing behind for mold, rot, or structural issues. Dispose of old material.', unit: 'sqft', quantity: 100, unitPrice: 2.00 },
+    { id: '', taxable: true, category: 'New Drywall Installation', description: 'Cut and install new drywall sheets (1/2" standard or 5/8" as needed). Secure with screws to studs at proper intervals.', unit: 'sqft', quantity: 100, unitPrice: 3.50 },
+    { id: '', taxable: true, category: 'Taping & Mudding Joints', description: 'Apply joint tape and three coats of joint compound to all seams and screw holes. Feather edges for seamless transition.', unit: 'lf', quantity: 60, unitPrice: 3.00 },
+    { id: '', taxable: true, category: 'Sanding & Texture Finish', description: 'Sand all joint compound smooth. Apply matching wall texture to blend with surrounding area.', unit: 'sqft', quantity: 100, unitPrice: 1.50 },
+    { id: '', taxable: true, category: 'Cleanup & Debris Removal', description: 'Vacuum all drywall dust, remove debris from work area, wipe down surfaces.', unit: 'job', quantity: 1, unitPrice: 120.00 },
   ],
   Bathroom: [
-    { id: '', category: 'Demolition & Removal', description: 'Remove existing fixtures (toilet, vanity, shower/tub), tear out old tile, flooring, and damaged drywall. Cap plumbing lines.', unit: 'job', quantity: 1, unitPrice: 650.00 },
-    { id: '', category: 'Plumbing Rough-In', description: 'Install or relocate water supply lines and drain connections. Includes new shut-off valves, shower valve installation, and pressure testing.', unit: 'job', quantity: 1, unitPrice: 950.00 },
-    { id: '', category: 'Waterproofing & Tile Installation', description: 'Apply waterproof membrane to shower/wet areas. Install cement backer board, lay floor and wall tile with proper spacing, grout, and seal.', unit: 'sqft', quantity: 60, unitPrice: 14.00 },
-    { id: '', category: 'Fixture Installation', description: 'Install new vanity with countertop and faucet, toilet, shower head/controls, towel bars, mirror, and medicine cabinet.', unit: 'each', quantity: 3, unitPrice: 280.00 },
-    { id: '', category: 'Finishing & Caulking', description: 'Apply silicone caulk around tub, shower, and vanity. Install trim, baseboards, and door hardware. Final inspection.', unit: 'job', quantity: 1, unitPrice: 350.00 },
+    { id: '', taxable: true, category: 'Demolition & Removal', description: 'Remove existing fixtures (toilet, vanity, shower/tub), tear out old tile, flooring, and damaged drywall. Cap plumbing lines.', unit: 'job', quantity: 1, unitPrice: 650.00 },
+    { id: '', taxable: true, category: 'Plumbing Rough-In', description: 'Install or relocate water supply lines and drain connections. Includes new shut-off valves, shower valve installation, and pressure testing.', unit: 'job', quantity: 1, unitPrice: 950.00 },
+    { id: '', taxable: true, category: 'Waterproofing & Tile Installation', description: 'Apply waterproof membrane to shower/wet areas. Install cement backer board, lay floor and wall tile with proper spacing, grout, and seal.', unit: 'sqft', quantity: 60, unitPrice: 14.00 },
+    { id: '', taxable: true, category: 'Fixture Installation', description: 'Install new vanity with countertop and faucet, toilet, shower head/controls, towel bars, mirror, and medicine cabinet.', unit: 'each', quantity: 3, unitPrice: 280.00 },
+    { id: '', taxable: true, category: 'Finishing & Caulking', description: 'Apply silicone caulk around tub, shower, and vanity. Install trim, baseboards, and door hardware. Final inspection.', unit: 'job', quantity: 1, unitPrice: 350.00 },
   ],
   Kitchen: [
-    { id: '', category: 'Demolition & Removal', description: 'Remove old cabinets, countertops, backsplash, and appliances. Disconnect plumbing and electrical as needed. Haul away all debris.', unit: 'job', quantity: 1, unitPrice: 750.00 },
-    { id: '', category: 'Cabinet Installation', description: 'Install new wall and base cabinets, leveled and secured to studs. Includes shelving, drawer hardware, soft-close hinges.', unit: 'lf', quantity: 20, unitPrice: 160.00 },
-    { id: '', category: 'Countertop Fabrication & Install', description: 'Template, fabricate, and install new countertops (granite, quartz, or laminate). Includes sink cutout and edge profiling.', unit: 'sqft', quantity: 30, unitPrice: 50.00 },
-    { id: '', category: 'Backsplash Installation', description: 'Install tile backsplash from countertop to upper cabinets. Includes tile layout design, precise cuts, grouting, and sealing.', unit: 'sqft', quantity: 25, unitPrice: 18.00 },
-    { id: '', category: 'Final Cleanup & Haul-Away', description: 'Clean all surfaces, cabinets inside and out, wipe down countertops. Remove debris. Final walkthrough with client.', unit: 'job', quantity: 1, unitPrice: 250.00 },
+    { id: '', taxable: true, category: 'Demolition & Removal', description: 'Remove old cabinets, countertops, backsplash, and appliances. Disconnect plumbing and electrical as needed. Haul away all debris.', unit: 'job', quantity: 1, unitPrice: 750.00 },
+    { id: '', taxable: true, category: 'Cabinet Installation', description: 'Install new wall and base cabinets, leveled and secured to studs. Includes shelving, drawer hardware, soft-close hinges.', unit: 'lf', quantity: 20, unitPrice: 160.00 },
+    { id: '', taxable: true, category: 'Countertop Fabrication & Install', description: 'Template, fabricate, and install new countertops (granite, quartz, or laminate). Includes sink cutout and edge profiling.', unit: 'sqft', quantity: 30, unitPrice: 50.00 },
+    { id: '', taxable: true, category: 'Backsplash Installation', description: 'Install tile backsplash from countertop to upper cabinets. Includes tile layout design, precise cuts, grouting, and sealing.', unit: 'sqft', quantity: 25, unitPrice: 18.00 },
+    { id: '', taxable: true, category: 'Final Cleanup & Haul-Away', description: 'Clean all surfaces, cabinets inside and out, wipe down countertops. Remove debris. Final walkthrough with client.', unit: 'job', quantity: 1, unitPrice: 250.00 },
   ],
   Plumbing: [
-    { id: '', category: 'Diagnostic & Inspection', description: 'Inspect existing plumbing system, identify issues, check water pressure, and locate leaks or blockages.', unit: 'job', quantity: 1, unitPrice: 150.00 },
-    { id: '', category: 'Pipe Repair / Replacement', description: 'Repair or replace damaged, corroded, or leaking pipes. Includes fittings, connectors, and soldering.', unit: 'lf', quantity: 30, unitPrice: 18.00 },
-    { id: '', category: 'Fixture Installation', description: 'Install or replace faucets, sinks, toilets, or water heater connections. Includes supply lines and shut-off valves.', unit: 'each', quantity: 2, unitPrice: 250.00 },
-    { id: '', category: 'Drain Cleaning & Testing', description: 'Snake and clear drain blockages, test all connections for leaks, verify proper water flow and drainage.', unit: 'job', quantity: 1, unitPrice: 200.00 },
+    { id: '', taxable: true, category: 'Diagnostic & Inspection', description: 'Inspect existing plumbing system, identify issues, check water pressure, and locate leaks or blockages.', unit: 'job', quantity: 1, unitPrice: 150.00 },
+    { id: '', taxable: true, category: 'Pipe Repair / Replacement', description: 'Repair or replace damaged, corroded, or leaking pipes. Includes fittings, connectors, and soldering.', unit: 'lf', quantity: 30, unitPrice: 18.00 },
+    { id: '', taxable: true, category: 'Fixture Installation', description: 'Install or replace faucets, sinks, toilets, or water heater connections. Includes supply lines and shut-off valves.', unit: 'each', quantity: 2, unitPrice: 250.00 },
+    { id: '', taxable: true, category: 'Drain Cleaning & Testing', description: 'Snake and clear drain blockages, test all connections for leaks, verify proper water flow and drainage.', unit: 'job', quantity: 1, unitPrice: 200.00 },
   ],
   Electrical: [
-    { id: '', category: 'Electrical Inspection', description: 'Inspect existing wiring, panel capacity, outlets, and switches. Identify code violations and safety hazards.', unit: 'job', quantity: 1, unitPrice: 200.00 },
-    { id: '', category: 'Wiring Installation', description: 'Run new electrical wiring through walls/ceiling. Includes conduit, wire, junction boxes, and proper connections.', unit: 'lf', quantity: 50, unitPrice: 8.00 },
-    { id: '', category: 'Outlet & Switch Installation', description: 'Install new outlets, switches, dimmers, or GFCI receptacles. Includes cover plates and proper grounding.', unit: 'each', quantity: 6, unitPrice: 85.00 },
-    { id: '', category: 'Light Fixture Installation', description: 'Install ceiling lights, recessed cans, pendants, or under-cabinet lighting. Includes mounting hardware and wiring.', unit: 'each', quantity: 4, unitPrice: 120.00 },
-    { id: '', category: 'Panel & Testing', description: 'Update breaker panel if needed, label circuits, test all connections, and ensure code compliance.', unit: 'job', quantity: 1, unitPrice: 350.00 },
+    { id: '', taxable: true, category: 'Electrical Inspection', description: 'Inspect existing wiring, panel capacity, outlets, and switches. Identify code violations and safety hazards.', unit: 'job', quantity: 1, unitPrice: 200.00 },
+    { id: '', taxable: true, category: 'Wiring Installation', description: 'Run new electrical wiring through walls/ceiling. Includes conduit, wire, junction boxes, and proper connections.', unit: 'lf', quantity: 50, unitPrice: 8.00 },
+    { id: '', taxable: true, category: 'Outlet & Switch Installation', description: 'Install new outlets, switches, dimmers, or GFCI receptacles. Includes cover plates and proper grounding.', unit: 'each', quantity: 6, unitPrice: 85.00 },
+    { id: '', taxable: true, category: 'Light Fixture Installation', description: 'Install ceiling lights, recessed cans, pendants, or under-cabinet lighting. Includes mounting hardware and wiring.', unit: 'each', quantity: 4, unitPrice: 120.00 },
+    { id: '', taxable: true, category: 'Panel & Testing', description: 'Update breaker panel if needed, label circuits, test all connections, and ensure code compliance.', unit: 'job', quantity: 1, unitPrice: 350.00 },
   ],
   Roofing: [
-    { id: '', category: 'Roof Inspection & Prep', description: 'Inspect roof structure, decking, and existing shingles. Set up safety equipment and protect landscaping below.', unit: 'job', quantity: 1, unitPrice: 300.00 },
-    { id: '', category: 'Old Roofing Removal', description: 'Strip old shingles, underlayment, and damaged decking. Dispose of materials properly.', unit: 'sqft', quantity: 1500, unitPrice: 1.50 },
-    { id: '', category: 'New Roofing Installation', description: 'Install new underlayment, ice barrier, and shingles/tiles. Includes flashing around vents, chimneys, and edges.', unit: 'sqft', quantity: 1500, unitPrice: 4.50 },
-    { id: '', category: 'Ridge & Ventilation', description: 'Install ridge cap, soffit vents, and ridge vents for proper attic ventilation.', unit: 'lf', quantity: 60, unitPrice: 12.00 },
-    { id: '', category: 'Cleanup & Final Inspection', description: 'Magnetic sweep for nails, debris removal, gutter cleaning, and final quality walkthrough.', unit: 'job', quantity: 1, unitPrice: 250.00 },
+    { id: '', taxable: true, category: 'Roof Inspection & Prep', description: 'Inspect roof structure, decking, and existing shingles. Set up safety equipment and protect landscaping below.', unit: 'job', quantity: 1, unitPrice: 300.00 },
+    { id: '', taxable: true, category: 'Old Roofing Removal', description: 'Strip old shingles, underlayment, and damaged decking. Dispose of materials properly.', unit: 'sqft', quantity: 1500, unitPrice: 1.50 },
+    { id: '', taxable: true, category: 'New Roofing Installation', description: 'Install new underlayment, ice barrier, and shingles/tiles. Includes flashing around vents, chimneys, and edges.', unit: 'sqft', quantity: 1500, unitPrice: 4.50 },
+    { id: '', taxable: true, category: 'Ridge & Ventilation', description: 'Install ridge cap, soffit vents, and ridge vents for proper attic ventilation.', unit: 'lf', quantity: 60, unitPrice: 12.00 },
+    { id: '', taxable: true, category: 'Cleanup & Final Inspection', description: 'Magnetic sweep for nails, debris removal, gutter cleaning, and final quality walkthrough.', unit: 'job', quantity: 1, unitPrice: 250.00 },
   ],
   'Windows & Doors': [
-    { id: '', category: 'Old Window/Door Removal', description: 'Carefully remove existing windows or doors, trim, and hardware. Inspect framing for rot or damage.', unit: 'each', quantity: 3, unitPrice: 80.00 },
-    { id: '', category: 'Frame Preparation', description: 'Repair or replace damaged framing, apply flashing tape and weatherproofing around opening.', unit: 'each', quantity: 3, unitPrice: 120.00 },
-    { id: '', category: 'New Window/Door Installation', description: 'Install new windows or doors, shim and level, apply expanding foam insulation around frame.', unit: 'each', quantity: 3, unitPrice: 350.00 },
-    { id: '', category: 'Trim & Caulking', description: 'Install interior and exterior trim, caulk all joints, and paint/stain to match existing finish.', unit: 'each', quantity: 3, unitPrice: 100.00 },
+    { id: '', taxable: true, category: 'Old Window/Door Removal', description: 'Carefully remove existing windows or doors, trim, and hardware. Inspect framing for rot or damage.', unit: 'each', quantity: 3, unitPrice: 80.00 },
+    { id: '', taxable: true, category: 'Frame Preparation', description: 'Repair or replace damaged framing, apply flashing tape and weatherproofing around opening.', unit: 'each', quantity: 3, unitPrice: 120.00 },
+    { id: '', taxable: true, category: 'New Window/Door Installation', description: 'Install new windows or doors, shim and level, apply expanding foam insulation around frame.', unit: 'each', quantity: 3, unitPrice: 350.00 },
+    { id: '', taxable: true, category: 'Trim & Caulking', description: 'Install interior and exterior trim, caulk all joints, and paint/stain to match existing finish.', unit: 'each', quantity: 3, unitPrice: 100.00 },
   ],
   HVAC: [
-    { id: '', category: 'System Inspection', description: 'Inspect existing HVAC system, ductwork, thermostat, and refrigerant levels. Diagnose issues.', unit: 'job', quantity: 1, unitPrice: 200.00 },
-    { id: '', category: 'Equipment Removal', description: 'Disconnect and remove old HVAC unit, including refrigerant recovery and safe disposal.', unit: 'job', quantity: 1, unitPrice: 400.00 },
-    { id: '', category: 'New Unit Installation', description: 'Install new AC unit/heat pump, connect refrigerant lines, electrical, and thermostat wiring.', unit: 'job', quantity: 1, unitPrice: 3500.00 },
-    { id: '', category: 'Ductwork Repair', description: 'Seal leaky ducts, replace damaged sections, add insulation where needed.', unit: 'lf', quantity: 30, unitPrice: 15.00 },
-    { id: '', category: 'Testing & Commissioning', description: 'Charge system with refrigerant, test cooling/heating cycles, calibrate thermostat, verify airflow.', unit: 'job', quantity: 1, unitPrice: 250.00 },
+    { id: '', taxable: true, category: 'System Inspection', description: 'Inspect existing HVAC system, ductwork, thermostat, and refrigerant levels. Diagnose issues.', unit: 'job', quantity: 1, unitPrice: 200.00 },
+    { id: '', taxable: true, category: 'Equipment Removal', description: 'Disconnect and remove old HVAC unit, including refrigerant recovery and safe disposal.', unit: 'job', quantity: 1, unitPrice: 400.00 },
+    { id: '', taxable: true, category: 'New Unit Installation', description: 'Install new AC unit/heat pump, connect refrigerant lines, electrical, and thermostat wiring.', unit: 'job', quantity: 1, unitPrice: 3500.00 },
+    { id: '', taxable: true, category: 'Ductwork Repair', description: 'Seal leaky ducts, replace damaged sections, add insulation where needed.', unit: 'lf', quantity: 30, unitPrice: 15.00 },
+    { id: '', taxable: true, category: 'Testing & Commissioning', description: 'Charge system with refrigerant, test cooling/heating cycles, calibrate thermostat, verify airflow.', unit: 'job', quantity: 1, unitPrice: 250.00 },
   ],
   Fencing: [
-    { id: '', category: 'Old Fence Removal', description: 'Remove existing fence posts, panels, and hardware. Dispose of materials.', unit: 'lf', quantity: 80, unitPrice: 3.00 },
-    { id: '', category: 'Post Installation', description: 'Dig holes, set posts in concrete, allow proper cure time. Ensure level and aligned.', unit: 'each', quantity: 12, unitPrice: 45.00 },
-    { id: '', category: 'Panel/Board Installation', description: 'Attach fence panels, boards, or chain link to posts. Install rails and hardware.', unit: 'lf', quantity: 80, unitPrice: 12.00 },
-    { id: '', category: 'Gate & Hardware', description: 'Install gate(s) with hinges, latch, and lock. Ensure proper swing and alignment.', unit: 'each', quantity: 1, unitPrice: 250.00 },
+    { id: '', taxable: true, category: 'Old Fence Removal', description: 'Remove existing fence posts, panels, and hardware. Dispose of materials.', unit: 'lf', quantity: 80, unitPrice: 3.00 },
+    { id: '', taxable: true, category: 'Post Installation', description: 'Dig holes, set posts in concrete, allow proper cure time. Ensure level and aligned.', unit: 'each', quantity: 12, unitPrice: 45.00 },
+    { id: '', taxable: true, category: 'Panel/Board Installation', description: 'Attach fence panels, boards, or chain link to posts. Install rails and hardware.', unit: 'lf', quantity: 80, unitPrice: 12.00 },
+    { id: '', taxable: true, category: 'Gate & Hardware', description: 'Install gate(s) with hinges, latch, and lock. Ensure proper swing and alignment.', unit: 'each', quantity: 1, unitPrice: 250.00 },
   ],
   Landscaping: [
-    { id: '', category: 'Site Clearing', description: 'Remove overgrowth, dead plants, debris, and old mulch. Grade and level soil as needed.', unit: 'sqft', quantity: 500, unitPrice: 0.75 },
-    { id: '', category: 'Planting & Sod', description: 'Install new plants, shrubs, trees, or sod. Includes soil amendment and root preparation.', unit: 'sqft', quantity: 500, unitPrice: 2.50 },
-    { id: '', category: 'Hardscape Installation', description: 'Install pavers, stepping stones, edging, or retaining walls.', unit: 'sqft', quantity: 100, unitPrice: 8.00 },
-    { id: '', category: 'Irrigation & Mulch', description: 'Install or repair irrigation lines/sprinklers, spread mulch over planting beds.', unit: 'sqft', quantity: 500, unitPrice: 1.00 },
+    { id: '', taxable: true, category: 'Site Clearing', description: 'Remove overgrowth, dead plants, debris, and old mulch. Grade and level soil as needed.', unit: 'sqft', quantity: 500, unitPrice: 0.75 },
+    { id: '', taxable: true, category: 'Planting & Sod', description: 'Install new plants, shrubs, trees, or sod. Includes soil amendment and root preparation.', unit: 'sqft', quantity: 500, unitPrice: 2.50 },
+    { id: '', taxable: true, category: 'Hardscape Installation', description: 'Install pavers, stepping stones, edging, or retaining walls.', unit: 'sqft', quantity: 100, unitPrice: 8.00 },
+    { id: '', taxable: true, category: 'Irrigation & Mulch', description: 'Install or repair irrigation lines/sprinklers, spread mulch over planting beds.', unit: 'sqft', quantity: 500, unitPrice: 1.00 },
   ],
   Concrete: [
-    { id: '', category: 'Demolition & Removal', description: 'Break up and remove existing concrete slab, walkway, or driveway. Haul away debris.', unit: 'sqft', quantity: 200, unitPrice: 3.50 },
-    { id: '', category: 'Grading & Forms', description: 'Grade sub-base, compact soil, install rebar/mesh and concrete forms.', unit: 'sqft', quantity: 200, unitPrice: 2.00 },
-    { id: '', category: 'Concrete Pouring', description: 'Pour and spread concrete to proper depth and slope. Includes finishing (broom, smooth, or stamped).', unit: 'sqft', quantity: 200, unitPrice: 6.00 },
-    { id: '', category: 'Curing & Sealing', description: 'Apply curing compound, saw control joints, and seal surface for protection.', unit: 'sqft', quantity: 200, unitPrice: 1.00 },
+    { id: '', taxable: true, category: 'Demolition & Removal', description: 'Break up and remove existing concrete slab, walkway, or driveway. Haul away debris.', unit: 'sqft', quantity: 200, unitPrice: 3.50 },
+    { id: '', taxable: true, category: 'Grading & Forms', description: 'Grade sub-base, compact soil, install rebar/mesh and concrete forms.', unit: 'sqft', quantity: 200, unitPrice: 2.00 },
+    { id: '', taxable: true, category: 'Concrete Pouring', description: 'Pour and spread concrete to proper depth and slope. Includes finishing (broom, smooth, or stamped).', unit: 'sqft', quantity: 200, unitPrice: 6.00 },
+    { id: '', taxable: true, category: 'Curing & Sealing', description: 'Apply curing compound, saw control joints, and seal surface for protection.', unit: 'sqft', quantity: 200, unitPrice: 1.00 },
   ],
   Siding: [
-    { id: '', category: 'Old Siding Removal', description: 'Remove existing siding, inspect sheathing and vapor barrier. Replace damaged sections.', unit: 'sqft', quantity: 500, unitPrice: 1.50 },
-    { id: '', category: 'New Siding Installation', description: 'Install new vinyl, wood, fiber cement, or aluminum siding. Includes starter strips and J-channel.', unit: 'sqft', quantity: 500, unitPrice: 5.50 },
-    { id: '', category: 'Trim & Corners', description: 'Install corner posts, window/door trim, and soffit. Caulk all joints.', unit: 'lf', quantity: 100, unitPrice: 8.00 },
-    { id: '', category: 'Cleanup', description: 'Remove debris, old nails, and construction waste. Final inspection.', unit: 'job', quantity: 1, unitPrice: 200.00 },
+    { id: '', taxable: true, category: 'Old Siding Removal', description: 'Remove existing siding, inspect sheathing and vapor barrier. Replace damaged sections.', unit: 'sqft', quantity: 500, unitPrice: 1.50 },
+    { id: '', taxable: true, category: 'New Siding Installation', description: 'Install new vinyl, wood, fiber cement, or aluminum siding. Includes starter strips and J-channel.', unit: 'sqft', quantity: 500, unitPrice: 5.50 },
+    { id: '', taxable: true, category: 'Trim & Corners', description: 'Install corner posts, window/door trim, and soffit. Caulk all joints.', unit: 'lf', quantity: 100, unitPrice: 8.00 },
+    { id: '', taxable: true, category: 'Cleanup', description: 'Remove debris, old nails, and construction waste. Final inspection.', unit: 'job', quantity: 1, unitPrice: 200.00 },
   ],
   Tiling: [
-    { id: '', category: 'Surface Preparation', description: 'Clean, level, and prime surfaces. Install cement backer board or waterproof membrane where needed.', unit: 'sqft', quantity: 100, unitPrice: 2.50 },
-    { id: '', category: 'Tile Layout & Cutting', description: 'Plan tile layout for optimal appearance, cut tiles to fit edges, corners, and around fixtures.', unit: 'sqft', quantity: 100, unitPrice: 3.00 },
-    { id: '', category: 'Tile Installation', description: 'Apply thin-set mortar and set tiles with proper spacing. Includes floor, wall, or backsplash areas.', unit: 'sqft', quantity: 100, unitPrice: 8.00 },
-    { id: '', category: 'Grouting & Sealing', description: 'Apply grout between tiles, clean excess, and seal grout lines for moisture protection.', unit: 'sqft', quantity: 100, unitPrice: 2.00 },
-    { id: '', category: 'Final Cleanup', description: 'Clean all tile surfaces, remove haze, inspect for defects, and touch up as needed.', unit: 'job', quantity: 1, unitPrice: 100.00 },
+    { id: '', taxable: true, category: 'Surface Preparation', description: 'Clean, level, and prime surfaces. Install cement backer board or waterproof membrane where needed.', unit: 'sqft', quantity: 100, unitPrice: 2.50 },
+    { id: '', taxable: true, category: 'Tile Layout & Cutting', description: 'Plan tile layout for optimal appearance, cut tiles to fit edges, corners, and around fixtures.', unit: 'sqft', quantity: 100, unitPrice: 3.00 },
+    { id: '', taxable: true, category: 'Tile Installation', description: 'Apply thin-set mortar and set tiles with proper spacing. Includes floor, wall, or backsplash areas.', unit: 'sqft', quantity: 100, unitPrice: 8.00 },
+    { id: '', taxable: true, category: 'Grouting & Sealing', description: 'Apply grout between tiles, clean excess, and seal grout lines for moisture protection.', unit: 'sqft', quantity: 100, unitPrice: 2.00 },
+    { id: '', taxable: true, category: 'Final Cleanup', description: 'Clean all tile surfaces, remove haze, inspect for defects, and touch up as needed.', unit: 'job', quantity: 1, unitPrice: 100.00 },
   ],
   Carpentry: [
-    { id: '', category: 'Measurement & Planning', description: 'Take precise measurements, plan cuts and materials needed. Review design specifications.', unit: 'job', quantity: 1, unitPrice: 150.00 },
-    { id: '', category: 'Framing / Structural Work', description: 'Build or repair wall framing, headers, or structural supports. Ensure level and plumb.', unit: 'lf', quantity: 40, unitPrice: 12.00 },
-    { id: '', category: 'Trim & Finish Carpentry', description: 'Install crown molding, baseboards, chair rail, wainscoting, or custom built-ins.', unit: 'lf', quantity: 60, unitPrice: 8.00 },
-    { id: '', category: 'Door & Cabinet Work', description: 'Hang doors, install cabinet hardware, build or install shelving units.', unit: 'each', quantity: 3, unitPrice: 150.00 },
-    { id: '', category: 'Sanding & Finishing', description: 'Sand all wood surfaces smooth, apply stain or paint, and install final hardware.', unit: 'job', quantity: 1, unitPrice: 200.00 },
+    { id: '', taxable: true, category: 'Measurement & Planning', description: 'Take precise measurements, plan cuts and materials needed. Review design specifications.', unit: 'job', quantity: 1, unitPrice: 150.00 },
+    { id: '', taxable: true, category: 'Framing / Structural Work', description: 'Build or repair wall framing, headers, or structural supports. Ensure level and plumb.', unit: 'lf', quantity: 40, unitPrice: 12.00 },
+    { id: '', taxable: true, category: 'Trim & Finish Carpentry', description: 'Install crown molding, baseboards, chair rail, wainscoting, or custom built-ins.', unit: 'lf', quantity: 60, unitPrice: 8.00 },
+    { id: '', taxable: true, category: 'Door & Cabinet Work', description: 'Hang doors, install cabinet hardware, build or install shelving units.', unit: 'each', quantity: 3, unitPrice: 150.00 },
+    { id: '', taxable: true, category: 'Sanding & Finishing', description: 'Sand all wood surfaces smooth, apply stain or paint, and install final hardware.', unit: 'job', quantity: 1, unitPrice: 200.00 },
   ],
   Demolition: [
-    { id: '', category: 'Preparation & Protection', description: 'Set up dust barriers, protect adjacent areas, disconnect utilities as needed.', unit: 'job', quantity: 1, unitPrice: 200.00 },
-    { id: '', category: 'Interior Demolition', description: 'Remove walls, flooring, fixtures, cabinets, or other interior elements as specified.', unit: 'sqft', quantity: 200, unitPrice: 3.00 },
-    { id: '', category: 'Debris Hauling & Disposal', description: 'Load debris into dumpster, haul to disposal site. Includes dumpster rental.', unit: 'job', quantity: 1, unitPrice: 500.00 },
-    { id: '', category: 'Site Cleanup', description: 'Sweep and clean area, remove dust, inspect for hidden issues (mold, asbestos, rot).', unit: 'job', quantity: 1, unitPrice: 150.00 },
+    { id: '', taxable: true, category: 'Preparation & Protection', description: 'Set up dust barriers, protect adjacent areas, disconnect utilities as needed.', unit: 'job', quantity: 1, unitPrice: 200.00 },
+    { id: '', taxable: true, category: 'Interior Demolition', description: 'Remove walls, flooring, fixtures, cabinets, or other interior elements as specified.', unit: 'sqft', quantity: 200, unitPrice: 3.00 },
+    { id: '', taxable: true, category: 'Debris Hauling & Disposal', description: 'Load debris into dumpster, haul to disposal site. Includes dumpster rental.', unit: 'job', quantity: 1, unitPrice: 500.00 },
+    { id: '', taxable: true, category: 'Site Cleanup', description: 'Sweep and clean area, remove dust, inspect for hidden issues (mold, asbestos, rot).', unit: 'job', quantity: 1, unitPrice: 150.00 },
   ],
   'General Repair': [
-    { id: '', category: 'Inspection & Diagnosis', description: 'Inspect the problem area, identify root cause, and determine repair approach.', unit: 'job', quantity: 1, unitPrice: 100.00 },
-    { id: '', category: 'Repair Work', description: 'Perform necessary repairs including materials and labor. Scope as described by client.', unit: 'job', quantity: 1, unitPrice: 400.00 },
-    { id: '', category: 'Testing & Verification', description: 'Test repaired area to ensure proper function. Verify fix addresses the root cause.', unit: 'job', quantity: 1, unitPrice: 75.00 },
-    { id: '', category: 'Cleanup', description: 'Clean work area, remove debris, and restore to pre-work condition.', unit: 'job', quantity: 1, unitPrice: 50.00 },
+    { id: '', taxable: true, category: 'Inspection & Diagnosis', description: 'Inspect the problem area, identify root cause, and determine repair approach.', unit: 'job', quantity: 1, unitPrice: 100.00 },
+    { id: '', taxable: true, category: 'Repair Work', description: 'Perform necessary repairs including materials and labor. Scope as described by client.', unit: 'job', quantity: 1, unitPrice: 400.00 },
+    { id: '', taxable: true, category: 'Testing & Verification', description: 'Test repaired area to ensure proper function. Verify fix addresses the root cause.', unit: 'job', quantity: 1, unitPrice: 75.00 },
+    { id: '', taxable: true, category: 'Cleanup', description: 'Clean work area, remove debris, and restore to pre-work condition.', unit: 'job', quantity: 1, unitPrice: 50.00 },
   ],
 };
 
@@ -250,27 +261,27 @@ function buildLineItems(
         if (sqft > 0 && item.unit === 'sqft') qty = sqft;
         if (lf > 0 && item.unit === 'lf') qty = lf;
         const adjustedPrice = Math.round(item.unitPrice * multiplier * 100) / 100;
-        items.push({ ...item, id: String(idCounter), quantity: qty, unitPrice: adjustedPrice });
+        items.push({ ...item, id: String(idCounter), quantity: qty, unitPrice: adjustedPrice, taxable: true });
       }
     } else {
       // Custom service type: create generic items
       idCounter++;
       items.push({
-        id: String(idCounter),
+        id: String(idCounter), taxable: true,
         category: `${service} - Assessment`,
         description: `Inspect and assess scope of ${service.toLowerCase()} work. Identify materials and labor required.`,
         unit: 'job', quantity: 1, unitPrice: Math.round(150.00 * multiplier * 100) / 100,
       });
       idCounter++;
       items.push({
-        id: String(idCounter),
+        id: String(idCounter), taxable: true,
         category: `${service} - Labor & Materials`,
         description: `Perform ${service.toLowerCase()} work including all necessary materials and skilled labor.`,
         unit: 'job', quantity: 1, unitPrice: Math.round(500.00 * multiplier * 100) / 100,
       });
       idCounter++;
       items.push({
-        id: String(idCounter),
+        id: String(idCounter), taxable: true,
         category: `${service} - Cleanup`,
         description: `Clean work area, remove debris, and final inspection of ${service.toLowerCase()} work.`,
         unit: 'job', quantity: 1, unitPrice: Math.round(100.00 * multiplier * 100) / 100,
@@ -282,7 +293,7 @@ function buildLineItems(
   if (conditions.parkingType === 'Paid') {
     idCounter++;
     items.push({
-      id: String(idCounter),
+      id: String(idCounter), taxable: true,
       category: 'Parking Fees',
       description: 'Paid parking costs for crew vehicles during project duration.',
       unit: 'day', quantity: 3, unitPrice: 25.00,
@@ -290,7 +301,7 @@ function buildLineItems(
   } else if (conditions.parkingType === 'Hard') {
     idCounter++;
     items.push({
-      id: String(idCounter),
+      id: String(idCounter), taxable: true,
       category: 'Parking & Access Logistics',
       description: 'Additional logistics for difficult parking: crew coordination, loading zone permits, shuttle costs.',
       unit: 'day', quantity: 3, unitPrice: 50.00,
@@ -302,7 +313,7 @@ function buildLineItems(
   if (floor >= 3 && !conditions.hasElevator) {
     idCounter++;
     items.push({
-      id: String(idCounter),
+      id: String(idCounter), taxable: true,
       category: 'Manual Material Hauling (No Elevator)',
       description: `Manually carry materials and equipment up ${floor} floors via stairs. Includes additional labor time.`,
       unit: 'job', quantity: 1, unitPrice: floor * 75.00,
@@ -318,7 +329,7 @@ function buildLineItems(
       if (!items.some(i => i.category.toLowerCase().includes('waterproof'))) {
         idCounter++;
         items.push({
-          id: String(idCounter),
+          id: String(idCounter), taxable: true,
           category: 'Waterproofing',
           description: 'Apply waterproof membrane/coating as described. Includes surface preparation and material.',
           unit: 'sqft', quantity: sqft || 60, unitPrice: 5.00,
@@ -330,7 +341,7 @@ function buildLineItems(
     if (desc.includes('mold') || desc.includes('mofo') || desc.includes('bolor')) {
       idCounter++;
       items.push({
-        id: String(idCounter),
+        id: String(idCounter), taxable: true,
         category: 'Mold Remediation',
         description: 'Treat and remove mold-affected areas. Apply anti-fungal treatment and sealant to prevent recurrence.',
         unit: 'sqft', quantity: sqft || 50, unitPrice: 8.00,
@@ -341,7 +352,7 @@ function buildLineItems(
     if (desc.includes('permit') || desc.includes('licen')) {
       idCounter++;
       items.push({
-        id: String(idCounter),
+        id: String(idCounter), taxable: true,
         category: 'Permits & Inspections',
         description: 'Obtain required building permits and schedule inspections with local building department.',
         unit: 'job', quantity: 1, unitPrice: 350.00,
@@ -353,7 +364,7 @@ function buildLineItems(
       if (!items.some(i => i.category.toLowerCase().includes('insulat'))) {
         idCounter++;
         items.push({
-          id: String(idCounter),
+          id: String(idCounter), taxable: true,
           category: 'Insulation',
           description: 'Install or replace insulation in walls, ceiling, or attic space. Includes vapor barrier.',
           unit: 'sqft', quantity: sqft || 100, unitPrice: 2.50,
@@ -366,7 +377,7 @@ function buildLineItems(
       if (!items.some(i => i.category.toLowerCase().includes('hauling') || i.category.toLowerCase().includes('dumpster'))) {
         idCounter++;
         items.push({
-          id: String(idCounter),
+          id: String(idCounter), taxable: true,
           category: 'Dumpster & Hauling',
           description: 'Rent dumpster for construction debris. Includes delivery, pickup, and disposal fees.',
           unit: 'job', quantity: 1, unitPrice: 450.00,
@@ -378,7 +389,7 @@ function buildLineItems(
     if (desc.includes('pressure wash') || desc.includes('power wash')) {
       idCounter++;
       items.push({
-        id: String(idCounter),
+        id: String(idCounter), taxable: true,
         category: 'Pressure Washing',
         description: 'Pressure wash surfaces before work begins. Removes dirt, mildew, and loose paint.',
         unit: 'sqft', quantity: sqft || 200, unitPrice: 0.50,
@@ -390,7 +401,7 @@ function buildLineItems(
       if (!items.some(i => i.category.toLowerCase().includes('crown') || i.category.toLowerCase().includes('molding'))) {
         idCounter++;
         items.push({
-          id: String(idCounter),
+          id: String(idCounter), taxable: true,
           category: 'Crown Molding Installation',
           description: 'Install decorative crown molding at ceiling-wall junction. Includes mitered corners and caulking.',
           unit: 'lf', quantity: lf || 60, unitPrice: 10.00,
@@ -402,7 +413,7 @@ function buildLineItems(
     if (desc.includes('shower door') || desc.includes('glass door') || desc.includes('porta de vidro')) {
       idCounter++;
       items.push({
-        id: String(idCounter),
+        id: String(idCounter), taxable: true,
         category: 'Shower Door / Glass Installation',
         description: 'Supply and install frameless or framed glass shower door. Includes hardware, seals, and alignment.',
         unit: 'each', quantity: 1, unitPrice: 650.00,
@@ -413,7 +424,7 @@ function buildLineItems(
     if (desc.includes('appliance') || desc.includes('dishwasher') || desc.includes('stove') || desc.includes('refrigerator') || desc.includes('eletrodom')) {
       idCounter++;
       items.push({
-        id: String(idCounter),
+        id: String(idCounter), taxable: true,
         category: 'Appliance Installation',
         description: 'Install kitchen/household appliances. Includes connecting water, gas, or electrical as needed.',
         unit: 'each', quantity: 1, unitPrice: 200.00,
@@ -424,7 +435,7 @@ function buildLineItems(
     if (desc.includes('accent wall') || desc.includes('feature wall') || desc.includes('parede destaque')) {
       idCounter++;
       items.push({
-        id: String(idCounter),
+        id: String(idCounter), taxable: true,
         category: 'Accent / Feature Wall',
         description: 'Create decorative accent wall with special material (shiplap, stone veneer, wood paneling, or wallpaper).',
         unit: 'sqft', quantity: sqft || 80, unitPrice: 12.00,
@@ -439,7 +450,7 @@ function buildLineItems(
 // ── Component ─────────────────────────────────────────────
 
 export default function EstimatePreviewScreen({ navigation, route }: EstimatePreviewScreenProps) {
-  const { getProject, getClient, addEstimate } = useApp();
+  const { getProject, getClient, addEstimate, companyProfile } = useApp();
   const projectId = route.params?.projectId as string | undefined;
   const project = projectId ? getProject(projectId) : undefined;
   const client = project ? getClient(project.clientId) : undefined;
@@ -463,26 +474,84 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
   const locationMult = getLocationMultiplier(conditions.city, conditions.zip);
   const locationLabel = getLocationLabel(locationMult);
 
+  const projectState = companyProfile.state?.toUpperCase() || 'FL';
+  const defaultTaxRate = STATE_TAX_RATES[projectState] ?? 7.0;
+
   const [lineItems, setLineItems] = useState<EditableLineItem[]>(
     () => buildLineItems(services, description, sqft, lf, conditions)
   );
-  const [taxRate, setTaxRate] = useState('7.0');
-  const [marginRate, setMarginRate] = useState('20.0');
+  const [taxRate, setTaxRate] = useState(String(defaultTaxRate));
+  const [marginRate, setMarginRate] = useState('0');
   const [notes, setNotes] = useState(
     'Assumes existing structure is in good condition.\nDoes not include work outside specified scope unless noted.\nAll materials included unless noted otherwise.\nValid for 30 days from date of issue.\nEstimated timeline depends on project scope.'
   );
 
+  // AI integration
+  const [isLoadingAI, setIsLoadingAI] = useState(true);
+  const [aiConfidence, setAiConfidence] = useState(0);
+  const [aiSource, setAiSource] = useState<'ai' | 'fallback'>('fallback');
+  const aiCalled = useRef(false);
+
+  useEffect(() => {
+    if (aiCalled.current || !project) return;
+    aiCalled.current = true;
+
+    (async () => {
+      try {
+        const result = await generateAIEstimate({
+          photoUris: project.photos,
+          services,
+          description,
+          sqft,
+          linearFeet: lf,
+          propertyType: conditions.propertyType,
+          accessLevel: conditions.accessLevel,
+          floorLevel: conditions.floorLevel,
+          hasElevator: conditions.hasElevator,
+          parkingType: conditions.parkingType,
+          city: conditions.city,
+          state: projectState,
+        });
+
+        let idCounter = 0;
+        const aiItems: EditableLineItem[] = result.lineItems.map(item => ({
+          id: String(++idCounter),
+          category: item.category,
+          description: item.description,
+          unit: item.unit,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          taxable: item.taxable,
+        }));
+
+        setLineItems(aiItems);
+        setAiConfidence(result.confidence);
+        setAiSource('ai');
+        if (result.notes) {
+          setNotes(result.notes);
+        }
+      } catch (err) {
+        console.log('AI estimate failed, using local fallback:', err);
+        setAiConfidence(92);
+        setAiSource('fallback');
+      } finally {
+        setIsLoadingAI(false);
+      }
+    })();
+  }, []);
+
   const totals = useMemo(() => {
     const subtotal = lineItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+    const taxableSubtotal = lineItems.filter(i => i.taxable).reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
     const taxPct = parseFloat(taxRate) || 0;
     const marginPct = parseFloat(marginRate) || 0;
-    const tax = subtotal * (taxPct / 100);
+    const tax = taxableSubtotal * (taxPct / 100);
     const margin = (subtotal + tax) * (marginPct / 100);
     const total = subtotal + tax + margin;
-    return { subtotal, tax, margin, total, taxPct, marginPct };
+    return { subtotal, taxableSubtotal, tax, margin, total, taxPct, marginPct };
   }, [lineItems, taxRate, marginRate]);
 
-  const updateLineItem = (id: string, field: keyof EditableLineItem, value: string | number) => {
+  const updateLineItem = (id: string, field: keyof EditableLineItem, value: string | number | boolean) => {
     setLineItems(prev => prev.map(item => item.id !== id ? item : { ...item, [field]: value }));
   };
 
@@ -500,7 +569,7 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
   const addLineItem = () => {
     setLineItems(prev => [
       ...prev,
-      { id: String(Date.now()), category: 'New Item', description: 'Describe the work to be performed...', unit: 'job', quantity: 1, unitPrice: 0 },
+      { id: String(Date.now()), category: 'New Item', description: 'Describe the work to be performed...', unit: 'job', quantity: 1, unitPrice: 0, taxable: true },
     ]);
   };
 
@@ -522,7 +591,7 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
         margin: totals.margin,
         total: totals.total,
         notes,
-        confidence: 92,
+        confidence: aiConfidence || 92,
         status: 'Draft',
       });
     }
@@ -530,6 +599,27 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
       { text: 'OK', onPress: () => navigation.popToTop() },
     ]);
   };
+
+  if (isLoadingAI) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <Text style={styles.backButton}>← Back</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Edit Estimate</Text>
+          <View style={{ width: 50 }} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#1a73e8" />
+          <Text style={styles.loadingTitle}>AI analyzing your project...</Text>
+          <Text style={styles.loadingText}>
+            Reviewing {project?.photos.length ?? 0} photo(s) and project details to generate an accurate estimate.
+          </Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -555,8 +645,9 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
           <View style={styles.successContent}>
             <Text style={styles.successTitle}>Estimate Generated!</Text>
             <Text style={styles.successText}>
-              AI analyzed {project?.photos.length ?? 0} photo(s) for {services.join(', ')} with 92% confidence.
-              Review and edit all items below before saving.
+              {aiSource === 'ai'
+                ? `AI analyzed ${project?.photos.length ?? 0} photo(s) for ${services.join(', ')} with ${aiConfidence}% confidence. Review and edit all items below before saving.`
+                : `Estimate generated for ${services.join(', ')} based on project data. Review and edit all items below before saving.`}
             </Text>
           </View>
         </View>
@@ -680,6 +771,16 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
                 </View>
               </View>
 
+              <TouchableOpacity
+                style={styles.taxToggleRow}
+                onPress={() => updateLineItem(item.id, 'taxable', !item.taxable)}
+              >
+                <View style={[styles.taxCheckbox, item.taxable && styles.taxCheckboxActive]}>
+                  {item.taxable && <Text style={styles.taxCheckmark}>✓</Text>}
+                </View>
+                <Text style={styles.taxToggleLabel}>Taxable</Text>
+              </TouchableOpacity>
+
               <View style={styles.lineItemSubtotalRow}>
                 <Text style={styles.subtotalLabel}>Subtotal</Text>
                 <Text style={styles.subtotalValue}>${(item.quantity * item.unitPrice).toFixed(2)}</Text>
@@ -715,13 +816,15 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
             <Text style={styles.totalValue}>${totals.subtotal.toFixed(2)}</Text>
           </View>
           <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Tax ({totals.taxPct}%)</Text>
+            <Text style={styles.totalLabel}>Taxable ({totals.taxPct}% on ${totals.taxableSubtotal.toFixed(2)})</Text>
             <Text style={styles.totalValue}>${totals.tax.toFixed(2)}</Text>
           </View>
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Margin ({totals.marginPct}%)</Text>
-            <Text style={styles.totalValue}>${totals.margin.toFixed(2)}</Text>
-          </View>
+          {totals.marginPct > 0 && (
+            <View style={styles.totalRow}>
+              <Text style={styles.totalLabel}>Margin ({totals.marginPct}%)</Text>
+              <Text style={styles.totalValue}>${totals.margin.toFixed(2)}</Text>
+            </View>
+          )}
           <View style={styles.divider} />
           <View style={styles.totalRow}>
             <Text style={styles.grandTotalLabel}>Total</Text>
@@ -768,6 +871,10 @@ const styles = StyleSheet.create({
   backButton: { fontSize: 16, color: '#1a73e8' },
   headerTitle: { fontSize: 20, fontWeight: '600', color: '#333' },
   content: { flex: 1, padding: 20 },
+
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
+  loadingTitle: { fontSize: 20, fontWeight: '600', color: '#1a73e8', marginTop: 24, marginBottom: 8 },
+  loadingText: { fontSize: 15, color: '#666', textAlign: 'center', lineHeight: 22 },
 
   successBanner: {
     backgroundColor: '#e6f4ea', borderRadius: 12, padding: 16,
@@ -822,6 +929,12 @@ const styles = StyleSheet.create({
   lineItemSubtotalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
   subtotalLabel: { fontSize: 14, fontWeight: '500', color: '#666' },
   subtotalValue: { fontSize: 16, fontWeight: '700', color: '#1a73e8' },
+
+  taxToggleRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
+  taxCheckbox: { width: 22, height: 22, borderRadius: 4, borderWidth: 2, borderColor: '#ccc', alignItems: 'center', justifyContent: 'center', marginRight: 8 },
+  taxCheckboxActive: { backgroundColor: '#1a73e8', borderColor: '#1a73e8' },
+  taxCheckmark: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  taxToggleLabel: { fontSize: 13, color: '#666' },
 
   addItemButton: { borderWidth: 2, borderColor: '#1a73e8', borderStyle: 'dashed', borderRadius: 8, padding: 14, alignItems: 'center', marginTop: 8 },
   addItemText: { fontSize: 14, fontWeight: '600', color: '#1a73e8' },

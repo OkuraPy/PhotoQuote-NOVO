@@ -38,39 +38,51 @@ function buildInvoicePdf(invoice: Invoice, projectName: string, clientName: stri
     </tr>
   `).join('');
 
+  const taxableSubtotal = invoice.lineItems.filter(i => i.taxable).reduce((sum, i) => sum + i.subtotal, 0);
+  const marginRow = invoice.marginRate > 0
+    ? `<div class="total-row"><span>Margin (${invoice.marginRate}%)</span><span>$${invoice.margin.toFixed(2)}</span></div>`
+    : '';
+
   return `
     <html>
     <head><meta charset="utf-8"><style>
-      body { font-family: Helvetica, Arial, sans-serif; padding: 40px; color: #333; }
+      body { font-family: Helvetica, Arial, sans-serif; padding: 0; color: #333; margin: 0; }
       h1 { color: #1a73e8; margin-bottom: 4px; }
       .subtitle { color: #666; font-size: 14px; margin-bottom: 30px; }
-      .invoice-badge { display: inline-block; background: #34a853; color: #fff; padding: 4px 12px; border-radius: 4px; font-weight: 700; font-size: 14px; margin-bottom: 20px; }
+      .invoice-badge { display: inline-block; background: #1b6d2f; color: #fff; padding: 4px 12px; border-radius: 4px; font-weight: 700; font-size: 14px; margin-bottom: 20px; }
       .info-grid { display: flex; flex-wrap: wrap; margin-bottom: 24px; }
       .info-item { width: 50%; margin-bottom: 12px; }
       .info-label { font-size: 12px; color: #555; text-transform: uppercase; font-weight: 600; }
       .info-value { font-size: 14px; font-weight: 600; }
-      table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
-      th { background: #f8f9fa; padding: 10px 8px; text-align: left; font-size: 12px; color: #666; text-transform: uppercase; border-bottom: 2px solid #e0e0e0; }
+      .items-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+      .items-table th { background: #f8f9fa; padding: 10px 8px; text-align: left; font-size: 12px; color: #666; text-transform: uppercase; border-bottom: 2px solid #e0e0e0; }
       .totals { margin-left: auto; width: 280px; }
       .total-row { display: flex; justify-content: space-between; padding: 6px 0; }
       .grand-total { border-top: 2px solid #333; padding-top: 12px; margin-top: 8px; }
       .grand-total .label { font-size: 18px; font-weight: 700; }
-      .grand-total .value { font-size: 22px; font-weight: 700; color: #34a853; }
+      .grand-total .value { font-size: 22px; font-weight: 700; color: #1b6d2f; }
       .notes { background: #f8f9fa; padding: 16px; border-radius: 8px; margin-top: 24px; }
       .notes h3 { margin-top: 0; color: #333; font-size: 14px; }
       .notes p { font-size: 13px; color: #666; line-height: 1.6; }
-      .footer { margin-top: 40px; text-align: center; font-size: 11px; color: #999; border-top: 1px solid #eee; padding-top: 16px; }
+      .page-table { width: 100%; border-collapse: collapse; }
+      .page-table > thead > tr > td { padding: 20px 40px 10px; border-bottom: 1px solid #ddd; }
+      .page-table > tbody > tr > td { padding: 10px 40px 40px; }
+      .page-table > tfoot > tr > td { padding: 12px 40px; border-top: 1px solid #ddd; text-align: center; font-size: 12px; color: #555; font-weight: 500; }
     </style></head>
     <body>
-      <div style="display:flex;align-items:center;margin-bottom:10px;">
-        ${company.logoUri ? `<img src="${company.logoUri}" style="width:60px;height:60px;border-radius:8px;margin-right:16px;" />` : ''}
-        <div>
-          <h1 style="margin:0;">${company.name || 'PhotoQuote AI'}</h1>
-          ${company.address ? `<p style="margin:2px 0;font-size:13px;color:#666;">${company.address}${company.city ? `, ${company.city}` : ''}${company.state ? `, ${company.state}` : ''} ${company.zip}</p>` : ''}
-          ${company.phone ? `<p style="margin:2px 0;font-size:13px;color:#666;">${company.phone}${company.email ? ` | ${company.email}` : ''}</p>` : ''}
-          ${company.licenseNumber ? `<p style="margin:2px 0;font-size:12px;color:#555;">License: ${company.licenseNumber}</p>` : ''}
-        </div>
-      </div>
+      <table class="page-table">
+        <thead><tr><td>
+          <div style="display:flex;align-items:center;">
+            ${company.logoUri ? `<img src="${company.logoUri}" style="max-width:60px;max-height:60px;border-radius:8px;margin-right:16px;object-fit:contain;" />` : ''}
+            <div>
+              <h1 style="margin:0;font-size:18px;">${company.name || 'PhotoQuote AI'}</h1>
+              ${company.address ? `<p style="margin:2px 0;font-size:11px;color:#666;">${company.address}${company.city ? `, ${company.city}` : ''}${company.state ? `, ${company.state}` : ''} ${company.zip}</p>` : ''}
+              ${company.phone ? `<p style="margin:2px 0;font-size:11px;color:#666;">${company.phone}${company.email ? ` | ${company.email}` : ''}</p>` : ''}
+              ${company.licenseNumber ? `<p style="margin:2px 0;font-size:11px;color:#555;">License: ${company.licenseNumber}</p>` : ''}
+            </div>
+          </div>
+        </td></tr></thead>
+        <tbody><tr><td>
       <p class="subtitle">Professional Invoice</p>
       <div class="invoice-badge">Invoice #${invoice.invoiceNumber}</div>
 
@@ -83,7 +95,7 @@ function buildInvoicePdf(invoice: Invoice, projectName: string, clientName: stri
         <div class="info-item"><div class="info-label">Status</div><div class="info-value">${invoice.status}</div></div>
       </div>
 
-      <table>
+      <table class="items-table">
         <thead>
           <tr><th>Category</th><th>Description</th><th style="text-align:center;">Qty</th><th style="text-align:right;">Unit Price</th><th style="text-align:right;">Subtotal</th></tr>
         </thead>
@@ -92,8 +104,8 @@ function buildInvoicePdf(invoice: Invoice, projectName: string, clientName: stri
 
       <div class="totals">
         <div class="total-row"><span>Subtotal</span><span>$${invoice.subtotal.toFixed(2)}</span></div>
-        <div class="total-row"><span>Tax (${invoice.taxRate}%)</span><span>$${invoice.tax.toFixed(2)}</span></div>
-        <div class="total-row"><span>Margin (${invoice.marginRate}%)</span><span>$${invoice.margin.toFixed(2)}</span></div>
+        <div class="total-row"><span>Tax (${invoice.taxRate}% on $${taxableSubtotal.toFixed(2)})</span><span>$${invoice.tax.toFixed(2)}</span></div>
+        ${marginRow}
         <div class="total-row grand-total"><span class="label">Total Due</span><span class="value">$${invoice.total.toFixed(2)}</span></div>
       </div>
 
@@ -102,9 +114,11 @@ function buildInvoicePdf(invoice: Invoice, projectName: string, clientName: stri
         <p>Payment is due within 30 days of invoice date.<br>Please make payment via check or bank transfer.</p>
       </div>
 
-      <div class="footer">
-        ${company.name || 'PhotoQuote AI'} &bull; Invoice #${invoice.invoiceNumber} &bull; ${new Date(invoice.createdAt).toLocaleDateString()}
-      </div>
+        </td></tr></tbody>
+        <tfoot><tr><td>
+          ${company.name || 'PhotoQuote AI'} &bull; Invoice #${invoice.invoiceNumber} &bull; ${new Date(invoice.createdAt).toLocaleDateString()}
+        </td></tr></tfoot>
+      </table>
     </body>
     </html>
   `;
@@ -112,7 +126,8 @@ function buildInvoicePdf(invoice: Invoice, projectName: string, clientName: stri
 
 function buildInvoiceShareText(invoice: Invoice, projectName: string, clientName: string, address: string, serviceType: string): string {
   const items = invoice.lineItems.map(i => `- ${i.category}: $${i.subtotal.toFixed(2)}`).join('\n');
-  return `*PhotoQuote AI - Invoice #${invoice.invoiceNumber}*\n\nClient: ${clientName}\nProject: ${projectName}\nAddress: ${address}\nServices: ${serviceType}\n\n${items}\n\nSubtotal: $${invoice.subtotal.toFixed(2)}\nTax (${invoice.taxRate}%): $${invoice.tax.toFixed(2)}\nMargin (${invoice.marginRate}%): $${invoice.margin.toFixed(2)}\n*Total Due: $${invoice.total.toFixed(2)}*\n\nPayment due within 30 days.`;
+  const marginLine = invoice.marginRate > 0 ? `\nMargin (${invoice.marginRate}%): $${invoice.margin.toFixed(2)}` : '';
+  return `*PhotoQuote AI - Invoice #${invoice.invoiceNumber}*\n\nClient: ${clientName}\nProject: ${projectName}\nAddress: ${address}\nServices: ${serviceType}\n\n${items}\n\nSubtotal: $${invoice.subtotal.toFixed(2)}\nTax (${invoice.taxRate}%): $${invoice.tax.toFixed(2)}${marginLine}\n*Total Due: $${invoice.total.toFixed(2)}*\n\nPayment due within 30 days.`;
 }
 
 export default function InvoiceDetailScreen({ navigation, route }: InvoiceDetailScreenProps) {
@@ -368,10 +383,12 @@ export default function InvoiceDetailScreen({ navigation, route }: InvoiceDetail
             <Text style={styles.totalLabel}>Tax ({invoice.taxRate}%)</Text>
             <Text style={styles.totalValueText}>${invoice.tax.toFixed(2)}</Text>
           </View>
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Margin ({invoice.marginRate}%)</Text>
-            <Text style={styles.totalValueText}>${invoice.margin.toFixed(2)}</Text>
-          </View>
+          {invoice.marginRate > 0 && (
+            <View style={styles.totalRow}>
+              <Text style={styles.totalLabel}>Margin ({invoice.marginRate}%)</Text>
+              <Text style={styles.totalValueText}>${invoice.margin.toFixed(2)}</Text>
+            </View>
+          )}
           <View style={styles.divider} />
           <View style={styles.totalRow}>
             <Text style={styles.grandTotalLabel}>Total Due</Text>
@@ -449,7 +466,7 @@ const styles = StyleSheet.create({
   totalValueText: { fontSize: 15, color: '#333', fontWeight: '500' },
   divider: { height: 1, backgroundColor: '#e0e0e0', marginVertical: 12 },
   grandTotalLabel: { fontSize: 20, fontWeight: '700', color: '#333' },
-  grandTotalValue: { fontSize: 24, fontWeight: '700', color: '#34a853' },
+  grandTotalValue: { fontSize: 24, fontWeight: '700', color: '#1b6d2f' },
 
   // Send invoice
   sendInvoiceButton: {
