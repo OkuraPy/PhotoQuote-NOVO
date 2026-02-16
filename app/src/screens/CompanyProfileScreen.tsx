@@ -13,6 +13,9 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import { handleError } from '../utils/errorHandler';
+import { storageService } from '../services/storage';
 
 interface CompanyProfileScreenProps {
   navigation: any;
@@ -20,6 +23,8 @@ interface CompanyProfileScreenProps {
 
 export default function CompanyProfileScreen({ navigation }: CompanyProfileScreenProps) {
   const { companyProfile, updateCompanyProfile } = useApp();
+  const { signOut, user } = useAuth();
+  const [loading, setLoading] = useState(false);
 
   const [name, setName] = useState(companyProfile.name);
   const [address, setAddress] = useState(companyProfile.address);
@@ -45,9 +50,13 @@ export default function CompanyProfileScreen({ navigation }: CompanyProfileScree
       quality: 0.8,
     });
 
-    if (!result.canceled && result.assets) {
-      setLogoUri(result.assets[0].uri);
+    if (!result.canceled && result.assets && user) {
+      const localUri = result.assets[0].uri;
+      setLogoUri(localUri); // Show immediately
       setLogoScale(1);
+
+      // Note: Storage upload will happen when user saves the profile
+      // The logo URL will be uploaded in handleSave
     }
   };
 
@@ -58,29 +67,80 @@ export default function CompanyProfileScreen({ navigation }: CompanyProfileScree
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!name.trim()) {
       Alert.alert('Required', 'Please enter your company name.');
       return;
     }
 
-    updateCompanyProfile({
-      name: name.trim(),
-      address: address.trim(),
-      city: city.trim(),
-      state: state.trim(),
-      zip: zip.trim(),
-      phone: phone.trim(),
-      email: email.trim(),
-      website: website.trim(),
-      licenseNumber: licenseNumber.trim(),
-      logoUri,
-      logoScale,
-    });
+    if (!user) {
+      Alert.alert('Error', 'User not authenticated');
+      return;
+    }
 
-    Alert.alert('Saved', 'Company profile has been updated.', [
-      { text: 'OK', onPress: () => navigation.goBack() },
-    ]);
+    setLoading(true);
+    try {
+      let finalLogoUri = logoUri;
+
+      // Upload logo if it's a local file (not already uploaded)
+      if (logoUri && logoUri.startsWith('file://')) {
+        try {
+          finalLogoUri = await storageService.uploadLogo(user.id, logoUri);
+        } catch (uploadError) {
+          console.error('Logo upload failed:', uploadError);
+          // Continue saving profile even if logo upload fails
+          Alert.alert(
+            'Warning',
+            'Logo upload failed, but profile will be saved without logo. Please try again later.'
+          );
+          finalLogoUri = '';
+        }
+      }
+
+      await updateCompanyProfile({
+        name: name.trim(),
+        address: address.trim(),
+        city: city.trim(),
+        state: state.trim(),
+        zip: zip.trim(),
+        phone: phone.trim(),
+        email: email.trim(),
+        website: website.trim(),
+        licenseNumber: licenseNumber.trim(),
+        logoUri: finalLogoUri,
+        logoScale,
+      });
+
+      // Update local state with uploaded URL
+      if (finalLogoUri !== logoUri) {
+        setLogoUri(finalLogoUri);
+      }
+
+      Alert.alert('Saved', 'Company profile has been updated.', [
+        { text: 'OK', onPress: () => navigation.goBack() },
+      ]);
+    } catch (error) {
+      Alert.alert('Error', handleError(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            await signOut();
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -252,6 +312,20 @@ export default function CompanyProfileScreen({ navigation }: CompanyProfileScree
           <Text style={styles.saveButtonText}>Save Profile</Text>
         </TouchableOpacity>
 
+        {/* Account Section */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Account</Text>
+          {user && (
+            <View style={styles.accountInfo}>
+              <Text style={styles.accountLabel}>Email:</Text>
+              <Text style={styles.accountValue}>{user.email}</Text>
+            </View>
+          )}
+          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+            <Text style={styles.logoutButtonText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={{ height: 100 }} />
       </ScrollView>
     </KeyboardAvoidingView>
@@ -308,4 +382,34 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a73e8', borderRadius: 12, padding: 18, alignItems: 'center', marginTop: 8,
   },
   saveButtonText: { color: '#fff', fontSize: 18, fontWeight: '600' },
+
+  accountInfo: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  accountLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 4,
+  },
+  accountValue: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  logoutButton: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#d32f2f',
+  },
+  logoutButtonText: {
+    color: '#d32f2f',
+    fontSize: 16,
+    fontWeight: '600',
+  },
 });

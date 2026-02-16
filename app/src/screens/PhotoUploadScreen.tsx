@@ -10,9 +10,14 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import { storageService } from '../services/storage';
+import { projectService } from '../services/database';
+import { handleError } from '../utils/errorHandler';
 
 const SERVICE_OPTIONS = [
   'Flooring',
@@ -42,10 +47,12 @@ interface PhotoUploadScreenProps {
 
 export default function PhotoUploadScreen({ navigation, route }: PhotoUploadScreenProps) {
   const { updateProject, getProject } = useApp();
+  const { user } = useAuth();
   const projectId = route.params?.projectId as string | undefined;
   const project = projectId ? getProject(projectId) : undefined;
 
   const [photos, setPhotos] = useState<string[]>(project?.photos ?? []);
+  const [uploading, setUploading] = useState(false);
 
   // Multi-select: parse existing serviceType back to array
   const initialServices = project?.serviceType
@@ -80,6 +87,8 @@ export default function PhotoUploadScreen({ navigation, route }: PhotoUploadScre
   };
 
   const pickImage = async () => {
+    if (!user || !projectId) return;
+
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission needed', 'Please allow access to your photo library.');
@@ -93,13 +102,39 @@ export default function PhotoUploadScreen({ navigation, route }: PhotoUploadScre
     });
 
     if (!result.canceled && result.assets) {
-      const newPhotos = result.assets.map(asset => asset.uri);
-      const combined = [...photos, ...newPhotos].slice(0, 30);
-      setPhotos(combined);
+      setUploading(true);
+      try {
+        const uploadedUrls: string[] = [];
+
+        for (const asset of result.assets) {
+          if (photos.length + uploadedUrls.length >= 30) break;
+
+          const photoId = `photo_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          const photoUrl = await storageService.uploadProjectPhoto(
+            user.id,
+            projectId,
+            asset.uri,
+            photoId
+          );
+
+          // Save to media table
+          await projectService.addPhoto(projectId, photoUrl, photos.length + uploadedUrls.length);
+          uploadedUrls.push(photoUrl);
+        }
+
+        const combined = [...photos, ...uploadedUrls];
+        setPhotos(combined);
+      } catch (error) {
+        Alert.alert('Upload Error', handleError(error));
+      } finally {
+        setUploading(false);
+      }
     }
   };
 
   const takePhoto = async () => {
+    if (!user || !projectId) return;
+
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission needed', 'Please allow access to your camera.');
@@ -111,30 +146,57 @@ export default function PhotoUploadScreen({ navigation, route }: PhotoUploadScre
     });
 
     if (!result.canceled && result.assets) {
-      if (photos.length < 30) {
-        setPhotos([...photos, result.assets[0].uri]);
+      if (photos.length >= 30) {
+        Alert.alert('Limit Reached', 'Maximum 30 photos per project');
+        return;
+      }
+
+      setUploading(true);
+      try {
+        const photoId = `photo_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const photoUrl = await storageService.uploadProjectPhoto(
+          user.id,
+          projectId,
+          result.assets[0].uri,
+          photoId
+        );
+
+        // Save to media table
+        await projectService.addPhoto(projectId, photoUrl, photos.length);
+        setPhotos([...photos, photoUrl]);
+      } catch (error) {
+        Alert.alert('Upload Error', handleError(error));
+      } finally {
+        setUploading(false);
       }
     }
   };
 
-  const handleGenerateEstimate = () => {
+  const handleGenerateEstimate = async () => {
     if (selectedServices.length === 0) {
       Alert.alert('Select a service', 'Please select at least one service type before generating an estimate.');
       return;
     }
 
-    // Save photos and service to project
+    // Save service details to project
     if (projectId) {
-      updateProject(projectId, {
-        photos,
-        serviceType: selectedServices.join(', '),
-        serviceDescription,
-        squareFeet,
-        linearFeet,
-      });
-    }
+      setUploading(true);
+      try {
+        await updateProject(projectId, {
+          photos, // Already uploaded
+          serviceType: selectedServices.join(', '),
+          serviceDescription,
+          squareFeet,
+          linearFeet,
+        });
 
-    navigation.navigate('EstimatePreview', { projectId });
+        navigation.navigate('EstimatePreview', { projectId });
+      } catch (error) {
+        Alert.alert('Error', handleError(error));
+      } finally {
+        setUploading(false);
+      }
+    }
   };
 
   return (

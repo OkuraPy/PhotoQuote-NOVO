@@ -8,19 +8,34 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
+import { useAuth } from '../context/AuthContext';
 
 interface LoginScreenProps {
   navigation: any;
 }
 
 export default function LoginScreen({ navigation }: LoginScreenProps) {
+  const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
-    // Mock login - just navigate to dashboard
-    navigation.replace('Main');
+  const handleLogin = async () => {
+    if (!email || !password) {
+      Alert.alert('Error', 'Please enter email and password');
+      return;
+    }
+
+    setLoading(true);
+    const { error } = await signIn(email, password);
+    setLoading(false);
+
+    if (error) {
+      Alert.alert('Login Failed', error.message || 'Invalid credentials');
+    }
   };
 
   return (
@@ -44,6 +59,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
             onChangeText={setEmail}
             keyboardType="email-address"
             autoCapitalize="none"
+            editable={!loading}
           />
 
           <TextInput
@@ -53,28 +69,29 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
             value={password}
             onChangeText={setPassword}
             secureTextEntry
+            editable={!loading}
           />
 
-          <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
-            <Text style={styles.loginButtonText}>Sign In</Text>
+          <TouchableOpacity
+            style={[styles.loginButton, loading && styles.loginButtonDisabled]}
+            onPress={handleLogin}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.loginButtonText}>Sign In</Text>
+            )}
           </TouchableOpacity>
 
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <TouchableOpacity style={styles.socialButton} onPress={handleLogin}>
-            <Text style={styles.socialButtonText}>🔵 Continue with Google</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.socialButton} onPress={handleLogin}>
-            <Text style={styles.socialButtonText}>🍎 Continue with Apple</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.forgotPassword}>
-            <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+          <TouchableOpacity
+            style={styles.signUpLink}
+            onPress={() => navigation.navigate('SignUp')}
+            disabled={loading}
+          >
+            <Text style={styles.signUpLinkText}>
+              Don't have an account? <Text style={styles.signUpLinkBold}>Sign Up</Text>
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -135,47 +152,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 8,
   },
+  loginButtonDisabled: {
+    opacity: 0.6,
+  },
   loginButtonText: {
     color: '#fff',
     fontSize: 18,
     fontWeight: '600',
   },
-  divider: {
-    flexDirection: 'row',
+  signUpLink: {
     alignItems: 'center',
-    marginVertical: 24,
+    marginTop: 20,
   },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#e0e0e0',
-  },
-  dividerText: {
-    marginHorizontal: 16,
-    color: '#999',
+  signUpLinkText: {
+    color: '#666',
     fontSize: 14,
   },
-  socialButton: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  socialButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  forgotPassword: {
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  forgotPasswordText: {
+  signUpLinkBold: {
     color: '#1a73e8',
-    fontSize: 14,
+    fontWeight: '600',
   },
   footer: {
     marginTop: 40,

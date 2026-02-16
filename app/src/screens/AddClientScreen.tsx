@@ -9,8 +9,10 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useApp } from '../context/AppContext';
+import { handleError } from '../utils/errorHandler';
 
 interface AddClientScreenProps {
   navigation: any;
@@ -27,8 +29,9 @@ export default function AddClientScreen({ navigation, route }: AddClientScreenPr
   const [email, setEmail] = useState(existing?.email ?? '');
   const [address, setAddress] = useState(existing?.address ?? '');
   const [notes, setNotes] = useState(existing?.notes ?? '');
+  const [loading, setLoading] = useState(false);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!name.trim()) {
       Alert.alert('Required', 'Please enter the client name.');
       return;
@@ -38,22 +41,35 @@ export default function AddClientScreen({ navigation, route }: AddClientScreenPr
       return;
     }
 
-    if (editId) {
-      updateClient(editId, { name: name.trim(), phone: phone.trim(), email: email.trim(), address: address.trim(), notes: notes.trim() });
-      Alert.alert('Updated', `${name.trim()} has been updated.`, [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
-    } else {
-      addClient({
-        name: name.trim(),
-        phone: phone.trim(),
-        email: email.trim(),
-        address: address.trim(),
-        notes: notes.trim(),
-      });
-      Alert.alert('Client Added', `${name.trim()} has been added successfully.`, [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
+    setLoading(true);
+    try {
+      if (editId) {
+        await updateClient(editId, {
+          name: name.trim(),
+          phone: phone.trim(),
+          email: email.trim(),
+          address: address.trim(),
+          notes: notes.trim(),
+        });
+        Alert.alert('Updated', `${name.trim()} has been updated.`, [
+          { text: 'OK', onPress: () => navigation.goBack() },
+        ]);
+      } else {
+        await addClient({
+          name: name.trim(),
+          phone: phone.trim(),
+          email: email.trim(),
+          address: address.trim(),
+          notes: notes.trim(),
+        });
+        Alert.alert('Client Added', `${name.trim()} has been added successfully.`, [
+          { text: 'OK', onPress: () => navigation.goBack() },
+        ]);
+      }
+    } catch (error) {
+      Alert.alert('Error', handleError(error));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -123,10 +139,18 @@ export default function AddClientScreen({ navigation, route }: AddClientScreenPr
           textAlignVertical="top"
         />
 
-        <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-          <Text style={styles.saveButtonText}>
-            {editId ? 'Update Client' : 'Add Client'}
-          </Text>
+        <TouchableOpacity
+          style={[styles.saveButton, loading && styles.saveButtonDisabled]}
+          onPress={handleSave}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.saveButtonText}>
+              {editId ? 'Update Client' : 'Add Client'}
+            </Text>
+          )}
         </TouchableOpacity>
 
         <View style={{ height: 100 }} />
@@ -188,6 +212,9 @@ const styles = StyleSheet.create({
     padding: 18,
     alignItems: 'center',
     marginTop: 32,
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
   },
   saveButtonText: {
     color: '#fff',

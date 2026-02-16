@@ -11,8 +11,10 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useApp } from '../context/AppContext';
+import { handleError } from '../utils/errorHandler';
 
 interface NewProjectScreenProps {
   navigation: any;
@@ -20,6 +22,7 @@ interface NewProjectScreenProps {
 
 export default function NewProjectScreen({ navigation }: NewProjectScreenProps) {
   const { clients, addProject } = useApp();
+  const [loading, setLoading] = useState(false);
 
   const [projectName, setProjectName] = useState('');
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
@@ -35,7 +38,7 @@ export default function NewProjectScreen({ navigation }: NewProjectScreenProps) 
 
   const selectedClient = clients.find(c => c.id === selectedClientId);
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (!projectName.trim()) {
       Alert.alert('Required', 'Please enter a project name.');
       return;
@@ -53,24 +56,31 @@ export default function NewProjectScreen({ navigation }: NewProjectScreenProps) 
       return;
     }
 
-    const project = addProject({
-      name: projectName.trim(),
-      clientId: selectedClientId,
-      address: address.trim(),
-      city: city.trim() || 'Miami',
-      zip: zip.trim(),
-      propertyType,
-      accessLevel,
-      floorLevel,
-      hasElevator,
-      parkingType,
-      serviceType: '',
-      serviceDescription: '',
-      squareFeet: '',
-      linearFeet: '',
-    });
+    setLoading(true);
+    try {
+      const project = await addProject({
+        name: projectName.trim(),
+        clientId: selectedClientId,
+        address: address.trim(),
+        city: city.trim() || 'Miami',
+        zip: zip.trim(),
+        propertyType,
+        accessLevel,
+        floorLevel,
+        hasElevator,
+        parkingType,
+        serviceType: '',
+        serviceDescription: '',
+        squareFeet: '',
+        linearFeet: '',
+      });
 
-    navigation.navigate('PhotoUpload', { projectId: project.id });
+      navigation.navigate('PhotoUpload', { projectId: project.id });
+    } catch (error) {
+      Alert.alert('Error', handleError(error));
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

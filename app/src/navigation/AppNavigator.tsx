@@ -3,9 +3,12 @@ import { Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { useAuth } from '../context/AuthContext';
+import { LoadingScreen } from '../components/LoadingScreen';
 
 // Screens
 import LoginScreen from '../screens/LoginScreen';
+import SignUpScreen from '../screens/SignUpScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import NewProjectScreen from '../screens/NewProjectScreen';
 import PhotoUploadScreen from '../screens/PhotoUploadScreen';
@@ -76,6 +79,12 @@ function TabIcon({ emoji }: { emoji: string; color: string }) {
 }
 
 export default function AppNavigator() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
   return (
     <NavigationContainer>
       <Stack.Navigator
@@ -83,15 +92,25 @@ export default function AppNavigator() {
           headerShown: false,
         }}
       >
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="Main" component={MainTabs} />
-        <Stack.Screen name="NewProject" component={NewProjectScreen} />
-        <Stack.Screen name="AddClient" component={AddClientScreen} />
-        <Stack.Screen name="PhotoUpload" component={PhotoUploadScreen} />
-        <Stack.Screen name="EstimatePreview" component={EstimatePreviewScreen} />
-        <Stack.Screen name="EstimateDetail" component={EstimateDetailScreen} />
-        <Stack.Screen name="InvoiceDetail" component={InvoiceDetailScreen} />
-        <Stack.Screen name="CompanyProfile" component={CompanyProfileScreen} />
+        {!user ? (
+          // Auth Stack - Not authenticated
+          <>
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="SignUp" component={SignUpScreen} />
+          </>
+        ) : (
+          // Main Stack - Authenticated
+          <>
+            <Stack.Screen name="Main" component={MainTabs} />
+            <Stack.Screen name="NewProject" component={NewProjectScreen} />
+            <Stack.Screen name="AddClient" component={AddClientScreen} />
+            <Stack.Screen name="PhotoUpload" component={PhotoUploadScreen} />
+            <Stack.Screen name="EstimatePreview" component={EstimatePreviewScreen} />
+            <Stack.Screen name="EstimateDetail" component={EstimateDetailScreen} />
+            <Stack.Screen name="InvoiceDetail" component={InvoiceDetailScreen} />
+            <Stack.Screen name="CompanyProfile" component={CompanyProfileScreen} />
+          </>
+        )}
       </Stack.Navigator>
     </NavigationContainer>
   );
