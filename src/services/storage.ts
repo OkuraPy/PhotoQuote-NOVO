@@ -5,7 +5,7 @@ import { decode } from 'base64-arraybuffer';
 const getMimeType = (ext: string): string => {
   const map: Record<string, string> = {
     jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
-    webp: 'image/webp', gif: 'image/gif', heic: 'image/heic',
+    webp: 'image/webp', gif: 'image/gif', heic: 'image/jpeg',
   };
   return map[ext] || 'image/jpeg';
 };

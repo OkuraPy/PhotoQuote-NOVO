@@ -111,6 +111,7 @@ export default function PhotoUploadScreen({ navigation, route }: PhotoUploadScre
       mediaTypes: ['images'],
       allowsMultipleSelection: true,
       quality: 0.8,
+      exif: false,
     });
 
     if (!result.canceled && result.assets) {
@@ -155,6 +156,7 @@ export default function PhotoUploadScreen({ navigation, route }: PhotoUploadScre
 
     const result = await ImagePicker.launchCameraAsync({
       quality: 0.8,
+      exif: false,
     });
 
     if (!result.canceled && result.assets) {
