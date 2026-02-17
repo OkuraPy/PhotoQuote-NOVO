@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -42,6 +42,23 @@ export default function CompanyProfileScreen({ navigation }: CompanyProfileScree
   const [licenseNumber, setLicenseNumber] = useState(companyProfile.licenseNumber);
   const [logoUri, setLogoUri] = useState(companyProfile.logoUri);
   const [logoScale, setLogoScale] = useState(companyProfile.logoScale || 1);
+
+  // Sync from database when companyProfile loads (handles sign-up race condition)
+  useEffect(() => {
+    if (companyProfile.name && !name) {
+      setName(companyProfile.name);
+      setAddress(companyProfile.address);
+      setCity(companyProfile.city);
+      setState(companyProfile.state);
+      setZip(companyProfile.zip);
+      setPhone(companyProfile.phone);
+      setEmail(companyProfile.email);
+      setWebsite(companyProfile.website);
+      setLicenseNumber(companyProfile.licenseNumber);
+      setLogoUri(companyProfile.logoUri);
+      setLogoScale(companyProfile.logoScale || 1);
+    }
+  }, [companyProfile]);
 
   const pickLogo = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();

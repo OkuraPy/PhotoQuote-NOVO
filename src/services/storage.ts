@@ -20,7 +20,7 @@ export const storageService = {
 
       // Read file as base64
       const base64 = await FileSystem.readAsStringAsync(localUri, {
-        encoding: FileSystem.EncodingType.Base64,
+        encoding: 'base64' as const,
       });
 
       // Upload to Supabase Storage
@@ -62,7 +62,7 @@ export const storageService = {
 
       // Read file as base64
       const base64 = await FileSystem.readAsStringAsync(localUri, {
-        encoding: FileSystem.EncodingType.Base64,
+        encoding: 'base64' as const,
       });
 
       // Upload to Supabase Storage
@@ -98,7 +98,7 @@ export const storageService = {
 
       // Read file as base64
       const base64 = await FileSystem.readAsStringAsync(localUri, {
-        encoding: FileSystem.EncodingType.Base64,
+        encoding: 'base64' as const,
       });
 
       // Upload to Supabase Storage
