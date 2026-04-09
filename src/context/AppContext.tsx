@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { useAuth } from './AuthContext';
-import { clientService, projectService, estimateService, invoiceService, companyProfileService } from '../services/database';
+import { clientService, projectService, estimateService, invoiceService, companyProfileService, teamService, projectMemberService } from '../services/database';
 import { cacheService } from '../services/cache';
 
 // ── Types ──────────────────────────────────────────────
@@ -99,6 +99,31 @@ export interface Invoice {
   createdAt: string;
 }
 
+export type TeamRole = 'admin' | 'estimator' | 'viewer';
+export type TeamMemberStatus = 'pending' | 'active' | 'removed';
+
+export interface TeamMember {
+  id: string;
+  ownerId: string;
+  memberEmail: string;
+  memberUserId: string | null;
+  fullName: string;
+  role: TeamRole;
+  status: TeamMemberStatus;
+  createdAt: string;
+}
+
+export interface ProjectMember {
+  id: string;
+  projectId: string;
+  memberId: string;
+  accessLevel: 'view' | 'edit' | 'full';
+  assignedAt: string;
+  memberName: string;
+  memberEmail: string;
+  memberRole: string;
+}
+
 interface AppState {
   clients: Client[];
   projects: Project[];
@@ -123,6 +148,16 @@ interface AppState {
   companyProfile: CompanyProfile;
   updateCompanyProfile: (data: Partial<CompanyProfile>) => Promise<void>;
   refreshData: () => Promise<void>;
+  // Team
+  teamMembers: TeamMember[];
+  addTeamMember: (data: { email: string; fullName: string; role: TeamRole }) => Promise<TeamMember>;
+  updateTeamMember: (id: string, data: { role?: TeamRole; status?: TeamMemberStatus; fullName?: string }) => Promise<void>;
+  removeTeamMember: (id: string) => Promise<void>;
+  // Project Members
+  getProjectMembers: (projectId: string) => Promise<ProjectMember[]>;
+  assignProjectMember: (projectId: string, memberId: string, accessLevel: ProjectMember['accessLevel']) => Promise<ProjectMember>;
+  updateProjectMemberAccess: (id: string, accessLevel: ProjectMember['accessLevel']) => Promise<void>;
+  removeProjectMember: (id: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -140,6 +175,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [estimates, setEstimates] = useState<Estimate[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(false);
   const [companyProfile, setCompanyProfile] = useState<CompanyProfile>({
     name: '', address: '', city: '', state: 'FL', zip: '',
@@ -154,6 +190,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setProjects([]);
       setEstimates([]);
       setInvoices([]);
+      setTeamMembers([]);
       cacheService.clearAll();
       return;
     }
@@ -182,18 +219,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (cachedProfile) setCompanyProfile(cachedProfile);
 
       // 2. Load from database (accurate)
-      const [freshClients, freshProjects, freshEstimates, freshInvoices, freshProfile] = await Promise.all([
+      const [freshClients, freshProjects, freshEstimates, freshInvoices, freshProfile, freshTeam] = await Promise.all([
         clientService.getAll(user.id),
         projectService.getAll(user.id),
         estimateService.getAll(user.id),
-        invoiceService.getAll(),
+        invoiceService.getAll(user.id),
         companyProfileService.get(user.id),
+        teamService.getAll(user.id),
       ]);
 
       setClients(freshClients);
       setProjects(freshProjects);
       setEstimates(freshEstimates);
       setInvoices(freshInvoices);
+      setTeamMembers(freshTeam);
       if (freshProfile) setCompanyProfile(freshProfile);
 
       // 3. Update cache
@@ -323,27 +362,72 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [estimates]);
 
   const addInvoice = useCallback(async (data: Omit<Invoice, 'id' | 'createdAt'>): Promise<Invoice> => {
-    const invoice = await invoiceService.create(data);
+    if (!user) throw new Error('User not authenticated');
+
+    const invoice = await invoiceService.create(data, user.id);
     setInvoices(prev => {
       const updated = [invoice, ...prev];
       cacheService.saveInvoices(updated);
       return updated;
     });
     return invoice;
-  }, []);
+  }, [user]);
 
   const updateInvoice = useCallback(async (id: string, data: Partial<Invoice>) => {
-    await invoiceService.update(id, data);
+    if (!user) throw new Error('User not authenticated');
+
+    await invoiceService.update(id, data, user.id);
     setInvoices(prev => {
       const updated = prev.map(inv => inv.id === id ? { ...inv, ...data } : inv);
       cacheService.saveInvoices(updated);
       return updated;
     });
-  }, []);
+  }, [user]);
 
   const getEstimateInvoice = useCallback((estimateId: string) => {
     return invoices.find(inv => inv.estimateId === estimateId);
   }, [invoices]);
+
+  // ── Team Members ────────────────────────────
+  const addTeamMember = useCallback(async (data: { email: string; fullName: string; role: TeamRole }): Promise<TeamMember> => {
+    if (!user) throw new Error('User not authenticated');
+
+    const member = await teamService.create(data, user.id);
+    setTeamMembers(prev => [member, ...prev]);
+    return member;
+  }, [user]);
+
+  const updateTeamMember = useCallback(async (id: string, data: { role?: TeamRole; status?: TeamMemberStatus; fullName?: string }) => {
+    if (!user) throw new Error('User not authenticated');
+
+    await teamService.update(id, data, user.id);
+    setTeamMembers(prev => prev.map(m => m.id === id ? { ...m, ...data } : m));
+  }, [user]);
+
+  const removeTeamMember = useCallback(async (id: string) => {
+    if (!user) throw new Error('User not authenticated');
+
+    await teamService.remove(id, user.id);
+    setTeamMembers(prev => prev.filter(m => m.id !== id));
+  }, [user]);
+
+  // ── Project Members ────────────────────────────
+  const getProjectMembers = useCallback(async (projectId: string): Promise<ProjectMember[]> => {
+    return projectMemberService.getByProject(projectId);
+  }, []);
+
+  const assignProjectMember = useCallback(async (projectId: string, memberId: string, accessLevel: ProjectMember['accessLevel']): Promise<ProjectMember> => {
+    if (!user) throw new Error('User not authenticated');
+    return projectMemberService.assign(projectId, memberId, accessLevel, user.id);
+  }, [user]);
+
+  const updateProjectMemberAccess = useCallback(async (id: string, accessLevel: ProjectMember['accessLevel']) => {
+    await projectMemberService.updateAccess(id, accessLevel);
+  }, []);
+
+  const removeProjectMember = useCallback(async (id: string) => {
+    await projectMemberService.remove(id);
+  }, []);
 
   const updateCompanyProfile = useCallback(async (data: Partial<CompanyProfile>) => {
     if (!user) throw new Error('User not authenticated');
@@ -379,6 +463,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       companyProfile,
       updateCompanyProfile,
       refreshData,
+      teamMembers,
+      addTeamMember,
+      updateTeamMember,
+      removeTeamMember,
+      getProjectMembers,
+      assignProjectMember,
+      updateProjectMemberAccess,
+      removeProjectMember,
     }}>
       {children}
     </AppContext.Provider>

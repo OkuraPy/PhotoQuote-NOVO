@@ -115,13 +115,13 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
 
           <TouchableOpacity
             style={styles.actionCard}
-            onPress={() => navigation.navigate('Estimates')}
+            onPress={() => navigation.navigate('Team')}
             activeOpacity={0.7}
           >
-            <View style={[styles.actionIcon, { backgroundColor: colors.statBlue + '15' }]}>
-              <FileText size={20} color={colors.statBlue} />
+            <View style={[styles.actionIcon, { backgroundColor: colors.statPurple + '15' }]}>
+              <Users size={20} color={colors.statPurple} />
             </View>
-            <Text style={styles.actionText}>Estimates</Text>
+            <Text style={styles.actionText}>Team</Text>
           </TouchableOpacity>
         </View>
 

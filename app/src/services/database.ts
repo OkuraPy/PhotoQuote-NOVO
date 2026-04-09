@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { Client, Project, Estimate, LineItem, Invoice, CompanyProfile } from '../context/AppContext';
+import { Client, Project, Estimate, LineItem, Invoice, CompanyProfile, TeamMember, ProjectMember } from '../context/AppContext';
 
 // ============================================
 // TYPE MAPPINGS
@@ -466,33 +466,137 @@ export const estimateService = {
 // INVOICE SERVICE
 // ============================================
 
-// Note: Invoices are not in the DB schema yet, keeping them in memory for now
 export const invoiceService = {
-  invoices: [] as Invoice[],
+  async getAll(userId: string): Promise<Invoice[]> {
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
 
-  async getAll(): Promise<Invoice[]> {
-    return this.invoices;
+    if (error) throw error;
+
+    const invoices = await Promise.all(
+      (data || []).map(async (dbInvoice) => {
+        const { data: lineItemsData } = await supabase
+          .from('invoice_line_items')
+          .select('*')
+          .eq('invoice_id', dbInvoice.id)
+          .order('item_order', { ascending: true });
+
+        const lineItems: LineItem[] = (lineItemsData || []).map((item) => ({
+          id: item.id,
+          category: item.category || '',
+          description: item.description,
+          unit: item.unit || '',
+          quantity: item.quantity,
+          unitPrice: item.unit_price,
+          subtotal: item.total,
+          taxable: item.taxable,
+        }));
+
+        return {
+          id: dbInvoice.id,
+          estimateId: dbInvoice.estimate_id,
+          projectId: dbInvoice.project_id,
+          invoiceNumber: dbInvoice.invoice_number,
+          lineItems,
+          taxRate: dbInvoice.tax_rate,
+          marginRate: dbInvoice.margin_rate,
+          subtotal: dbInvoice.subtotal,
+          tax: dbInvoice.tax_amount,
+          margin: dbInvoice.margin_amount,
+          total: dbInvoice.total,
+          notes: dbInvoice.notes || '',
+          status: dbInvoice.status as any,
+          createdAt: dbInvoice.created_at,
+        };
+      })
+    );
+
+    return invoices;
   },
 
-  async create(invoice: Omit<Invoice, 'id' | 'createdAt'>): Promise<Invoice> {
-    const newInvoice: Invoice = {
-      ...invoice,
-      id: Math.random().toString(36).substr(2, 9),
-      createdAt: new Date().toISOString(),
-    };
-    this.invoices.push(newInvoice);
-    return newInvoice;
-  },
+  async create(invoice: Omit<Invoice, 'id' | 'createdAt'>, userId: string): Promise<Invoice> {
+    const { data: invoiceData, error: invoiceError } = await supabase
+      .from('invoices')
+      .insert({
+        user_id: userId,
+        estimate_id: invoice.estimateId,
+        project_id: invoice.projectId,
+        invoice_number: invoice.invoiceNumber,
+        status: invoice.status,
+        subtotal: invoice.subtotal,
+        tax_rate: invoice.taxRate,
+        tax_amount: invoice.tax,
+        margin_rate: invoice.marginRate,
+        margin_amount: invoice.margin,
+        total: invoice.total,
+        notes: invoice.notes || null,
+      })
+      .select()
+      .single();
 
-  async update(id: string, invoice: Partial<Invoice>): Promise<void> {
-    const index = this.invoices.findIndex((inv) => inv.id === id);
-    if (index !== -1) {
-      this.invoices[index] = { ...this.invoices[index], ...invoice };
+    if (invoiceError) throw invoiceError;
+
+    // Create line items
+    if (invoice.lineItems.length > 0) {
+      const lineItemsData = invoice.lineItems.map((item, index) => ({
+        invoice_id: invoiceData.id,
+        category: item.category || null,
+        description: item.description,
+        unit: item.unit || null,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        total: item.subtotal,
+        item_order: index,
+        taxable: item.taxable,
+      }));
+
+      const { error: lineItemsError } = await supabase.from('invoice_line_items').insert(lineItemsData);
+      if (lineItemsError) throw lineItemsError;
     }
+
+    return {
+      id: invoiceData.id,
+      estimateId: invoiceData.estimate_id,
+      projectId: invoiceData.project_id,
+      invoiceNumber: invoiceData.invoice_number,
+      lineItems: invoice.lineItems,
+      taxRate: invoiceData.tax_rate,
+      marginRate: invoiceData.margin_rate,
+      subtotal: invoiceData.subtotal,
+      tax: invoiceData.tax_amount,
+      margin: invoiceData.margin_amount,
+      total: invoiceData.total,
+      notes: invoiceData.notes || '',
+      status: invoiceData.status as any,
+      createdAt: invoiceData.created_at,
+    };
   },
 
-  async delete(id: string): Promise<void> {
-    this.invoices = this.invoices.filter((inv) => inv.id !== id);
+  async update(id: string, invoice: Partial<Invoice>, userId: string): Promise<void> {
+    const updateData: any = {};
+    if (invoice.status !== undefined) updateData.status = invoice.status;
+    if (invoice.notes !== undefined) updateData.notes = invoice.notes || null;
+
+    const { error } = await supabase
+      .from('invoices')
+      .update(updateData)
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    if (error) throw error;
+  },
+
+  async delete(id: string, userId: string): Promise<void> {
+    const { error } = await supabase
+      .from('invoices')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    if (error) throw error;
   },
 };
 
@@ -529,6 +633,152 @@ export const companyProfileService = {
       .from('users')
       .update(updateData)
       .eq('id', userId);
+
+    if (error) throw error;
+  },
+};
+
+// ============================================
+// TEAM SERVICE
+// ============================================
+
+export const teamService = {
+  async getAll(ownerId: string): Promise<TeamMember[]> {
+    const { data, error } = await supabase
+      .from('team_members')
+      .select('*')
+      .eq('owner_id', ownerId)
+      .neq('status', 'removed')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return (data || []).map((m) => ({
+      id: m.id,
+      ownerId: m.owner_id,
+      memberEmail: m.member_email,
+      memberUserId: m.member_user_id,
+      fullName: m.full_name,
+      role: m.role as TeamMember['role'],
+      status: m.status as TeamMember['status'],
+      createdAt: m.created_at,
+    }));
+  },
+
+  async create(member: { email: string; fullName: string; role: TeamMember['role'] }, ownerId: string): Promise<TeamMember> {
+    const { data, error } = await supabase
+      .from('team_members')
+      .insert({
+        owner_id: ownerId,
+        member_email: member.email.toLowerCase().trim(),
+        full_name: member.fullName,
+        role: member.role,
+        status: 'pending',
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return {
+      id: data.id,
+      ownerId: data.owner_id,
+      memberEmail: data.member_email,
+      memberUserId: data.member_user_id,
+      fullName: data.full_name,
+      role: data.role,
+      status: data.status,
+      createdAt: data.created_at,
+    };
+  },
+
+  async update(id: string, updates: { role?: TeamMember['role']; status?: TeamMember['status']; fullName?: string }, ownerId: string): Promise<void> {
+    const updateData: any = {};
+    if (updates.role !== undefined) updateData.role = updates.role;
+    if (updates.status !== undefined) updateData.status = updates.status;
+    if (updates.fullName !== undefined) updateData.full_name = updates.fullName;
+
+    const { error } = await supabase
+      .from('team_members')
+      .update(updateData)
+      .eq('id', id)
+      .eq('owner_id', ownerId);
+
+    if (error) throw error;
+  },
+
+  async remove(id: string, ownerId: string): Promise<void> {
+    const { error } = await supabase
+      .from('team_members')
+      .update({ status: 'removed' })
+      .eq('id', id)
+      .eq('owner_id', ownerId);
+
+    if (error) throw error;
+  },
+};
+
+// ============================================
+// PROJECT MEMBER SERVICE
+// ============================================
+
+export const projectMemberService = {
+  async getByProject(projectId: string): Promise<ProjectMember[]> {
+    const { data, error } = await supabase
+      .from('project_members')
+      .select('*, team_members(id, full_name, member_email, role, status)')
+      .eq('project_id', projectId);
+
+    if (error) throw error;
+    return (data || []).map((pm) => ({
+      id: pm.id,
+      projectId: pm.project_id,
+      memberId: pm.member_id,
+      accessLevel: pm.access_level as ProjectMember['accessLevel'],
+      assignedAt: pm.assigned_at,
+      memberName: (pm as any).team_members?.full_name || '',
+      memberEmail: (pm as any).team_members?.member_email || '',
+      memberRole: (pm as any).team_members?.role || '',
+    }));
+  },
+
+  async assign(projectId: string, memberId: string, accessLevel: ProjectMember['accessLevel'], assignedBy: string): Promise<ProjectMember> {
+    const { data, error } = await supabase
+      .from('project_members')
+      .insert({
+        project_id: projectId,
+        member_id: memberId,
+        access_level: accessLevel,
+        assigned_by: assignedBy,
+      })
+      .select('*, team_members(id, full_name, member_email, role, status)')
+      .single();
+
+    if (error) throw error;
+    return {
+      id: data.id,
+      projectId: data.project_id,
+      memberId: data.member_id,
+      accessLevel: data.access_level,
+      assignedAt: data.assigned_at,
+      memberName: (data as any).team_members?.full_name || '',
+      memberEmail: (data as any).team_members?.member_email || '',
+      memberRole: (data as any).team_members?.role || '',
+    };
+  },
+
+  async updateAccess(id: string, accessLevel: ProjectMember['accessLevel']): Promise<void> {
+    const { error } = await supabase
+      .from('project_members')
+      .update({ access_level: accessLevel })
+      .eq('id', id);
+
+    if (error) throw error;
+  },
+
+  async remove(id: string): Promise<void> {
+    const { error } = await supabase
+      .from('project_members')
+      .delete()
+      .eq('id', id);
 
     if (error) throw error;
   },

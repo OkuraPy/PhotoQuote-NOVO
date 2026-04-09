@@ -15,6 +15,7 @@ import {
   DollarSign,
   CheckCircle,
   FileText,
+  Users,
 } from 'lucide-react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -269,7 +270,7 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
       return;
     }
     const invNumber = `INV-${Date.now().toString(36).toUpperCase()}`;
-    const newInvoice = addInvoice({
+    const inv = await addInvoice({
       estimateId: estimate.id,
       projectId: estimate.projectId,
       invoiceNumber: invNumber,
@@ -283,8 +284,7 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
       notes: estimate.notes,
       status: 'Unpaid',
     });
-    const inv = await newInvoice;
-    navigation.navigate('InvoiceDetail', { invoiceId: (inv as any).id });
+    navigation.navigate('InvoiceDetail', { invoiceId: inv.id });
   };
 
   return (
@@ -463,6 +463,16 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
             style={{ ...styles.actionButton, backgroundColor: colors.success }}
           />
         </View>
+
+        {/* Manage Team */}
+        <Button
+          title="Manage Project Team"
+          onPress={() => navigation.navigate('ProjectMembers', { projectId: estimate.projectId })}
+          size="lg"
+          variant="outline"
+          icon={<Users size={18} color={colors.primary} />}
+          style={{ marginBottom: spacing.lg }}
+        />
 
         <View style={{ height: 40 }} />
       </ScrollView>

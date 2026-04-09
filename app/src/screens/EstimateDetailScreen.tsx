@@ -258,13 +258,13 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
     ]);
   };
 
-  const handleGenerateInvoice = () => {
+  const handleGenerateInvoice = async () => {
     if (invoice) {
       navigation.navigate('InvoiceDetail', { invoiceId: invoice.id });
       return;
     }
     const invNumber = `INV-${Date.now().toString(36).toUpperCase()}`;
-    const newInvoice = addInvoice({
+    const inv = await addInvoice({
       estimateId: estimate.id,
       projectId: estimate.projectId,
       invoiceNumber: invNumber,
@@ -278,7 +278,7 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
       notes: estimate.notes,
       status: 'Unpaid',
     });
-    navigation.navigate('InvoiceDetail', { invoiceId: newInvoice.id });
+    navigation.navigate('InvoiceDetail', { invoiceId: inv.id });
   };
 
   return (
