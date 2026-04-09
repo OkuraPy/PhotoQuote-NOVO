@@ -234,19 +234,26 @@ PRICING GUIDELINES for ${params.city || 'Florida'}, ${params.state || 'FL'}:
   }
 
   let parsed: any;
+  // Clean common AI response issues before parsing
+  let cleanedContent = messageContent.trim();
+  // Remove markdown code fences if present (```json ... ```)
+  cleanedContent = cleanedContent.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+
   try {
-    parsed = JSON.parse(messageContent);
+    parsed = JSON.parse(cleanedContent);
   } catch {
-    // If AI returned text with JSON embedded, try to extract it
-    const jsonMatch = messageContent.match(/\{[\s\S]*\}/);
+    // If AI returned text with JSON embedded, try to extract the largest JSON object
+    const jsonMatch = cleanedContent.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       try {
         parsed = JSON.parse(jsonMatch[0]);
       } catch {
+        console.error('[OpenAI] Malformed JSON response:', cleanedContent.substring(0, 500));
         throw new Error('AI returned malformed JSON. Please try again.');
       }
     } else {
-      throw new Error('AI returned malformed JSON. Please try again.');
+      console.error('[OpenAI] No JSON found in response:', cleanedContent.substring(0, 500));
+      throw new Error('AI returned an unexpected response. Please try again.');
     }
   }
 
