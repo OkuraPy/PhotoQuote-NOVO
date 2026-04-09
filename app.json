@@ -14,8 +14,7 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.rodrigosagach.photoquoteai"
+      "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
@@ -27,6 +26,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/08ab6d86-7294-4799-82a5-6e71c9c04c8f"
     }
   }
 }
