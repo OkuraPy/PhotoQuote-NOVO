@@ -597,14 +597,19 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
     ]);
   };
 
-  const handleSaveEstimate = () => {
+  const handleSaveEstimate = async () => {
     if (lineItems.some(item => !item.category.trim())) {
       Alert.alert('Required', 'All items must have a title.');
       return;
     }
 
-    if (projectId) {
-      addEstimate({
+    if (!projectId) {
+      Alert.alert('Error', 'No project associated with this estimate.');
+      return;
+    }
+
+    try {
+      await addEstimate({
         projectId,
         version: 1,
         lineItems: lineItems.map(item => ({ ...item, subtotal: item.quantity * item.unitPrice })),
@@ -618,10 +623,12 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
         confidence: aiConfidence || 92,
         status: 'Draft',
       });
+      Alert.alert('Estimate Saved', 'Your estimate has been saved successfully.', [
+        { text: 'OK', onPress: () => navigation.popToTop() },
+      ]);
+    } catch (error: any) {
+      Alert.alert('Save Failed', error?.message || 'Failed to save estimate. Please try again.');
     }
-    Alert.alert('Estimate Saved', 'Your estimate has been saved successfully.', [
-      { text: 'OK', onPress: () => navigation.popToTop() },
-    ]);
   };
 
   // ── Loading State ──

@@ -1,9 +1,13 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import Constants from 'expo-constants';
 
 // API key loaded from .env via app.config.js → expo-constants
 const OPENAI_API_KEY = Constants.expoConfig?.extra?.openaiApiKey || '';
-const MODEL = 'gpt-5.2';
+const MODEL = 'gpt-5.2-pro-2025-12-11';
+
+function isRemoteUrl(uri: string): boolean {
+  return uri.startsWith('http://') || uri.startsWith('https://');
+}
 
 export interface AILineItem {
   category: string;
@@ -18,15 +22,35 @@ export interface AIEstimateResult {
   lineItems: AILineItem[];
   confidence: number;
   notes: string;
+  photoAnalysis: string;
+}
+
+export class PhotoValidationError extends Error {
+  public readonly photoAnalysis: string;
+  constructor(message: string, photoAnalysis: string) {
+    super(message);
+    this.name = 'PhotoValidationError';
+    this.photoAnalysis = photoAnalysis;
+  }
 }
 
 async function imageToBase64(uri: string): Promise<string> {
   try {
+    if (isRemoteUrl(uri)) {
+      const tempPath = `${FileSystem.cacheDirectory}temp_photo_${Date.now()}.jpg`;
+      const download = await FileSystem.downloadAsync(uri, tempPath);
+      const base64 = await FileSystem.readAsStringAsync(download.uri, {
+        encoding: 'base64' as const,
+      });
+      FileSystem.deleteAsync(tempPath, { idempotent: true }).catch(() => {});
+      return base64;
+    }
     const base64 = await FileSystem.readAsStringAsync(uri, {
-      encoding: FileSystem.EncodingType.Base64,
+      encoding: 'base64' as const,
     });
     return base64;
-  } catch {
+  } catch (error) {
+    console.warn(`[imageToBase64] Failed to convert image: ${uri}`, error);
     return '';
   }
 }
@@ -45,11 +69,30 @@ export async function generateAIEstimate(params: {
   city: string;
   state: string;
 }): Promise<AIEstimateResult> {
-  const systemPrompt = `You are a professional construction estimator with 20+ years of experience in the US market. You analyze construction site photos and project details to generate accurate, detailed cost estimates.
+  const systemPrompt = `You are a professional construction estimator with 20+ years of experience in the US market, specializing in residential and commercial renovation/construction projects.
 
-Your estimates should include realistic pricing based on current market rates for the specified location. Each line item should have a clear category, detailed description of the work, appropriate unit of measurement, quantity, and unit price.
+YOUR PRIMARY RESPONSIBILITIES:
+1. ANALYZE the provided photos carefully and determine what they show
+2. VALIDATE that the photos are relevant to construction, renovation, or property maintenance work
+3. GENERATE accurate, detailed cost estimates based on what you SEE in the photos combined with the project details provided
 
-Always respond with a valid JSON object matching the requested schema. Do not include any text outside the JSON.`;
+PHOTO VALIDATION RULES (CRITICAL):
+- You MUST carefully examine each photo and describe what you see
+- The photos MUST show construction-related content: buildings, rooms, walls, floors, roofs, plumbing, electrical, landscaping, fences, concrete, property exteriors/interiors, damage to repair, areas to renovate, etc.
+- If the photos show objects that are NOT related to construction or property work (electronics, food, animals, random objects, selfies, vehicles not at a jobsite, etc.), you MUST reject the request
+- When rejecting: set "rejected" to true and explain in "rejectionReason" exactly what the photos show and why they are not valid for a construction estimate
+
+ESTIMATION RULES (when photos are valid):
+- Base your estimate on what you ACTUALLY SEE in the photos, not just the description
+- If the photos show specific conditions (water damage, mold, cracks, worn flooring, old paint, etc.), include appropriate line items to address them
+- Use realistic pricing for the specified location and current market rates
+- Each line item must have: category, detailed description, unit of measurement, quantity, unit price, and taxable flag
+- Include 4-8 line items per service type covering: preparation, main work, finishing, and cleanup
+- Materials are typically taxable; pure labor services may not be
+- If you see issues in the photos not mentioned in the description (mold, water damage, structural concerns, code violations), ADD extra line items to address them
+- Quantities should reflect measurements provided OR your visual estimate from the photos
+
+Always respond with a valid JSON object. Do not include any text outside the JSON.`;
 
   const conditionsSummary = [
     `Property: ${params.propertyType}`,
@@ -59,7 +102,9 @@ Always respond with a valid JSON object matching the requested schema. Do not in
     `Parking: ${params.parkingType}`,
   ].filter(Boolean).join(', ');
 
-  const userText = `Analyze these construction photos and generate a detailed cost estimate.
+  const userText = `STEP 1: Carefully analyze each photo and describe what you see.
+STEP 2: Determine if the photos are relevant to construction/renovation/property work.
+STEP 3: If valid, generate a detailed cost estimate. If NOT valid, reject with explanation.
 
 Project Details:
 - Services requested: ${params.services.join(', ')}
@@ -69,54 +114,82 @@ Project Details:
 - Area: ${params.sqft > 0 ? params.sqft + ' sqft' : 'Not specified'}${params.linearFeet > 0 ? ', ' + params.linearFeet + ' linear feet' : ''}
 - Conditions: ${conditionsSummary}
 
-Generate a complete estimate with all necessary line items. Return a JSON object with this structure:
+Return a JSON object with this EXACT structure:
+
+If photos are VALID for construction estimate:
 {
+  "rejected": false,
+  "photoAnalysis": "Detailed description of what you see in each photo (conditions, materials, damage, dimensions, etc.)",
   "lineItems": [
     {
-      "category": "Category Name (e.g., Surface Preparation)",
+      "category": "Category Name",
       "description": "Detailed description of the specific work to be performed, including materials and methods",
-      "unit": "sqft" | "lf" | "each" | "job" | "day",
+      "unit": "sqft | lf | each | job | day",
       "quantity": <number>,
       "unitPrice": <number in USD>,
       "taxable": true | false
     }
   ],
-  "confidence": <number 0-100, your confidence in the accuracy of this estimate>,
+  "confidence": <number 0-100>,
   "notes": "Important notes, assumptions, or recommendations based on what you observed in the photos"
 }
 
-Guidelines:
-- Include 4-8 line items per service type (preparation, main work, finishing, cleanup)
-- Use realistic pricing for ${params.city || 'Florida'}, ${params.state || 'FL'} market rates
-- If photos show damage, complexity, or special conditions, adjust pricing accordingly
-- Materials are typically taxable, pure labor services may not be
-- Add extra items if photos reveal issues not mentioned in the description (mold, water damage, structural concerns, etc.)
-- Quantities should reflect the area/measurements provided or estimated from photos
-- Include all necessary preparation, protection, and cleanup work`;
+If photos are NOT VALID (not construction-related):
+{
+  "rejected": true,
+  "rejectionReason": "Clear explanation of what the photos show and why they cannot be used for a construction estimate",
+  "photoAnalysis": "Description of what was detected in the photos"
+}
 
-  // Convert photos to base64 (limit to 5 to manage costs)
+PRICING GUIDELINES for ${params.city || 'Florida'}, ${params.state || 'FL'}:
+- Use current market rates for this specific location
+- Adjust pricing for difficulty factors: ${conditionsSummary}
+- Include all necessary preparation, protection, and cleanup work
+- If photos reveal additional issues, add line items with appropriate pricing
+- Be thorough: a real contractor would include ALL necessary work steps`;
+
+  // Prepare photos (limit to 5 to manage costs)
   const photosToSend = params.photoUris.slice(0, 5);
-  const base64Photos: string[] = [];
+
+  // Build content array with text + images (Responses API format)
+  const userContent: any[] = [{ type: 'input_text', text: userText }];
+  let validPhotoCount = 0;
 
   for (const uri of photosToSend) {
-    const b64 = await imageToBase64(uri);
-    if (b64) base64Photos.push(b64);
+    if (isRemoteUrl(uri)) {
+      // Pass public URL directly to OpenAI (no need to download/re-encode)
+      userContent.push({
+        type: 'input_image',
+        image_url: uri,
+      });
+      validPhotoCount++;
+    } else {
+      // Local file: convert to base64
+      const b64 = await imageToBase64(uri);
+      if (b64) {
+        userContent.push({
+          type: 'input_image',
+          image_url: `data:image/jpeg;base64,${b64}`,
+        });
+        validPhotoCount++;
+      }
+    }
   }
 
-  // Build content array with text + images
-  const content: any[] = [{ type: 'text', text: userText }];
-
-  for (const b64 of base64Photos) {
-    content.push({
-      type: 'image_url',
-      image_url: {
-        url: `data:image/jpeg;base64,${b64}`,
-        detail: 'low',
-      },
-    });
+  if (validPhotoCount === 0) {
+    throw new Error('No valid photos to analyze. Please upload at least one photo.');
   }
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  if (!OPENAI_API_KEY) {
+    throw new Error('OpenAI API key is not configured. Please check your environment settings.');
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 min timeout
+
+  let response: Response;
+  try {
+    response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${OPENAI_API_KEY}`,
@@ -124,15 +197,24 @@ Guidelines:
     },
     body: JSON.stringify({
       model: MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content },
+      instructions: systemPrompt,
+      input: [
+        { role: 'user', content: userContent },
       ],
-      response_format: { type: 'json_object' },
-      max_completion_tokens: 4096,
-      temperature: 0.3,
+      text: { format: { type: 'json_object' } },
+      max_output_tokens: 4096,
     }),
+    signal: controller.signal,
   });
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error?.name === 'AbortError') {
+      throw new Error('AI request timed out. Please try again with fewer photos.');
+    }
+    throw new Error(`Network error: ${error?.message || 'Failed to connect to AI service'}`);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -140,26 +222,63 @@ Guidelines:
   }
 
   const data = await response.json();
-  const messageContent = data.choices?.[0]?.message?.content;
+
+  // Extract text from Responses API output structure
+  const messageContent = data.output
+    ?.filter((o: any) => o.type === 'message')
+    ?.map((o: any) => o.content?.filter((c: any) => c.type === 'output_text')?.map((c: any) => c.text).join(''))
+    ?.join('');
 
   if (!messageContent) {
     throw new Error('Empty response from OpenAI');
   }
 
-  const parsed = JSON.parse(messageContent);
+  let parsed: any;
+  try {
+    parsed = JSON.parse(messageContent);
+  } catch {
+    // If AI returned text with JSON embedded, try to extract it
+    const jsonMatch = messageContent.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        parsed = JSON.parse(jsonMatch[0]);
+      } catch {
+        throw new Error('AI returned malformed JSON. Please try again.');
+      }
+    } else {
+      throw new Error('AI returned malformed JSON. Please try again.');
+    }
+  }
+
+  // Check if photos were rejected
+  if (parsed.rejected === true) {
+    throw new PhotoValidationError(
+      parsed.rejectionReason || 'The photos provided are not related to construction or renovation work.',
+      parsed.photoAnalysis || ''
+    );
+  }
 
   // Validate structure
   if (!Array.isArray(parsed.lineItems) || parsed.lineItems.length === 0) {
     throw new Error('Invalid response: no line items returned');
   }
 
+  // Filter out items with no price (AI sometimes adds empty placeholder items)
+  const validItems = parsed.lineItems.filter(
+    (item: any) => item.category && (Number(item.unitPrice) > 0 || Number(item.quantity) > 0)
+  );
+
+  if (validItems.length === 0) {
+    throw new Error('AI returned line items but none had valid pricing.');
+  }
+
   // Normalize and validate each item
-  const lineItems: AILineItem[] = parsed.lineItems.map((item: any) => ({
+  const lineItems: AILineItem[] = validItems.map((item: any) => ({
     category: String(item.category || 'Unnamed Item'),
     description: String(item.description || ''),
     unit: String(item.unit || 'job'),
-    quantity: Number(item.quantity) || 1,
-    unitPrice: Number(item.unitPrice) || 0,
+    quantity: Math.max(0, Number(item.quantity) || 1),
+    unitPrice: Math.max(0, Number(item.unitPrice) || 0),
     taxable: item.taxable !== false,
   }));
 
@@ -167,5 +286,6 @@ Guidelines:
     lineItems,
     confidence: Math.min(100, Math.max(0, Number(parsed.confidence) || 85)),
     notes: String(parsed.notes || ''),
+    photoAnalysis: String(parsed.photoAnalysis || ''),
   };
 }

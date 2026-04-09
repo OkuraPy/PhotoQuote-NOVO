@@ -37,13 +37,11 @@ export class PhotoValidationError extends Error {
 async function imageToBase64(uri: string): Promise<string> {
   try {
     if (isRemoteUrl(uri)) {
-      // Download remote file to a temp path, then read as base64
       const tempPath = `${FileSystem.cacheDirectory}temp_photo_${Date.now()}.jpg`;
       const download = await FileSystem.downloadAsync(uri, tempPath);
       const base64 = await FileSystem.readAsStringAsync(download.uri, {
         encoding: 'base64' as const,
       });
-      // Clean up temp file
       FileSystem.deleteAsync(tempPath, { idempotent: true }).catch(() => {});
       return base64;
     }
@@ -51,7 +49,8 @@ async function imageToBase64(uri: string): Promise<string> {
       encoding: 'base64' as const,
     });
     return base64;
-  } catch {
+  } catch (error) {
+    console.warn(`[imageToBase64] Failed to convert image: ${uri}`, error);
     return '';
   }
 }
@@ -181,7 +180,16 @@ PRICING GUIDELINES for ${params.city || 'Florida'}, ${params.state || 'FL'}:
     throw new Error('No valid photos to analyze. Please upload at least one photo.');
   }
 
-  const response = await fetch('https://api.openai.com/v1/responses', {
+  if (!OPENAI_API_KEY) {
+    throw new Error('OpenAI API key is not configured. Please check your environment settings.');
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 min timeout
+
+  let response: Response;
+  try {
+    response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${OPENAI_API_KEY}`,
@@ -196,7 +204,17 @@ PRICING GUIDELINES for ${params.city || 'Florida'}, ${params.state || 'FL'}:
       text: { format: { type: 'json_object' } },
       max_output_tokens: 4096,
     }),
+    signal: controller.signal,
   });
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error?.name === 'AbortError') {
+      throw new Error('AI request timed out. Please try again with fewer photos.');
+    }
+    throw new Error(`Network error: ${error?.message || 'Failed to connect to AI service'}`);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const errorText = await response.text();

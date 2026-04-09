@@ -290,7 +290,15 @@ export const projectService = {
     if (project.city !== undefined) updateData.city = project.city || null;
     if (project.zip !== undefined) updateData.zip = project.zip || null;
     if (project.status !== undefined) updateData.status = project.status;
-    // Add other fields as needed
+    if (project.propertyType !== undefined) updateData.property_type = project.propertyType || null;
+    if (project.accessLevel !== undefined) updateData.access_level = project.accessLevel || null;
+    if (project.floorLevel !== undefined) updateData.floor_level = project.floorLevel || null;
+    if (project.hasElevator !== undefined) updateData.has_elevator = project.hasElevator;
+    if (project.parkingType !== undefined) updateData.parking_type = project.parkingType || null;
+    if (project.serviceType !== undefined) updateData.service_type = project.serviceType || null;
+    if (project.serviceDescription !== undefined) updateData.service_description = project.serviceDescription || null;
+    if (project.squareFeet !== undefined) updateData.square_feet = project.squareFeet || null;
+    if (project.linearFeet !== undefined) updateData.linear_feet = project.linearFeet || null;
 
     const { error } = await supabase
       .from('projects')
@@ -350,11 +358,11 @@ export const estimateService = {
           id: item.id,
           category: item.category || '',
           description: item.description,
-          unit: '',
+          unit: item.unit || '',
           quantity: item.quantity,
           unitPrice: item.unit_price,
           subtotal: item.total,
-          taxable: true,
+          taxable: item.taxable ?? true,
         }));
 
         return {
@@ -369,7 +377,7 @@ export const estimateService = {
           margin: 0,
           total: dbEstimate.total,
           notes: dbEstimate.notes || '',
-          confidence: 0,
+          confidence: dbEstimate.confidence || 0,
           status: dbEstimate.status as any,
           createdAt: dbEstimate.created_at,
         };
@@ -389,6 +397,8 @@ export const estimateService = {
         title: 'Estimate',
         status: estimate.status,
         tax_rate: estimate.taxRate,
+        margin_rate: estimate.marginRate || 0,
+        confidence: estimate.confidence || 0,
         notes: estimate.notes || null,
       })
       .select()
@@ -403,8 +413,10 @@ export const estimateService = {
         description: item.description,
         quantity: item.quantity,
         unit_price: item.unitPrice,
+        unit: item.unit || null,
         category: item.category || null,
         item_order: index,
+        taxable: item.taxable ?? true,
       }));
 
       const { error: lineItemsError } = await supabase.from('line_items').insert(lineItemsData);
