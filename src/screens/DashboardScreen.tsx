@@ -17,7 +17,7 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
   const { clients, projects, estimates, getClient, getProjectEstimates } = useApp();
   const insets = useSafeAreaInsets();
 
-  const totalEstimateValue = estimates.reduce((sum, e) => sum + e.total, 0);
+  const totalEstimateValue = estimates.reduce((sum, e) => sum + (e.total || 0), 0);
   const recentProjects = projects.slice(0, 5);
 
   const getProjectStatus = (projectId: string): string => {
@@ -141,7 +141,14 @@ export default function DashboardScreen({ navigation }: DashboardScreenProps) {
               <Card
                 key={project.id}
                 variant="elevated"
-                onPress={() => navigation.navigate('PhotoUpload', { projectId: project.id })}
+                onPress={() => {
+                  const projectEstimates = getProjectEstimates(project.id);
+                  if (projectEstimates.length > 0) {
+                    navigation.navigate('EstimateDetail', { estimateId: projectEstimates[0].id });
+                  } else {
+                    navigation.navigate('PhotoUpload', { projectId: project.id });
+                  }
+                }}
                 style={styles.projectCard}
               >
                 <View style={styles.projectRow}>

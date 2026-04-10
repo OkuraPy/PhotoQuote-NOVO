@@ -54,7 +54,7 @@ export default function InvoicesListScreen({ navigation }: InvoicesListScreenPro
                   <Text style={styles.clientName}>{client?.name ?? 'Unknown Client'}</Text>
                 </View>
                 <View style={styles.cardRight}>
-                  <Text style={styles.totalValue}>${invoice.total.toFixed(2)}</Text>
+                  <Text style={styles.totalValue}>${(invoice.total || 0).toFixed(2)}</Text>
                   <StatusBadge status={statusKey as any} />
                 </View>
               </View>

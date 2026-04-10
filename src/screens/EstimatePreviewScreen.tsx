@@ -609,7 +609,7 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
     }
 
     try {
-      await addEstimate({
+      const savedEstimate = await addEstimate({
         projectId,
         version: 1,
         lineItems: lineItems.map(item => ({ ...item, subtotal: item.quantity * item.unitPrice })),
@@ -624,7 +624,7 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
         status: 'Draft',
       });
       Alert.alert('Estimate Saved', 'Your estimate has been saved successfully.', [
-        { text: 'OK', onPress: () => navigation.popToTop() },
+        { text: 'OK', onPress: () => navigation.replace('EstimateDetail', { estimateId: savedEstimate.id }) },
       ]);
     } catch (error: any) {
       Alert.alert('Save Failed', error?.message || 'Failed to save estimate. Please try again.');

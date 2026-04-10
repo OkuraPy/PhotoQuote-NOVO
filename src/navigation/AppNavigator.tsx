@@ -2,7 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Home, FileText, Receipt, Users } from 'lucide-react-native';
+import { Home, FolderOpen, FileText, Receipt, Users } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { LoadingScreen } from '../components/LoadingScreen';
 import { colors, typography } from '../theme';
@@ -18,6 +18,7 @@ import ClientsScreen from '../screens/ClientsScreen';
 import AddClientScreen from '../screens/AddClientScreen';
 import EstimatesListScreen from '../screens/EstimatesListScreen';
 import EstimateDetailScreen from '../screens/EstimateDetailScreen';
+import ProjectsListScreen from '../screens/ProjectsListScreen';
 import InvoicesListScreen from '../screens/InvoicesListScreen';
 import InvoiceDetailScreen from '../screens/InvoiceDetailScreen';
 import CompanyProfileScreen from '../screens/CompanyProfileScreen';
@@ -52,6 +53,14 @@ function MainTabs() {
         options={{
           tabBarLabel: 'Home',
           tabBarIcon: ({ color }) => <Home size={22} color={color} />,
+        }}
+      />
+      <Tab.Screen
+        name="Projects"
+        component={ProjectsListScreen}
+        options={{
+          tabBarLabel: 'Projects',
+          tabBarIcon: ({ color }) => <FolderOpen size={22} color={color} />,
         }}
       />
       <Tab.Screen

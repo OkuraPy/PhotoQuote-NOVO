@@ -218,8 +218,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setInvoices(cachedInvoices);
       if (cachedProfile) setCompanyProfile(cachedProfile);
 
-      // 2. Load from database (accurate)
-      const [freshClients, freshProjects, freshEstimates, freshInvoices, freshProfile, freshTeam] = await Promise.all([
+      // 2. Load from database (accurate) — each service loads independently
+      const results = await Promise.allSettled([
         clientService.getAll(user.id),
         projectService.getAll(user.id),
         estimateService.getAll(user.id),
@@ -227,6 +227,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         companyProfileService.get(user.id),
         teamService.getAll(user.id),
       ]);
+
+      const freshClients = results[0].status === 'fulfilled' ? results[0].value : cachedClients;
+      const freshProjects = results[1].status === 'fulfilled' ? results[1].value : cachedProjects;
+      const freshEstimates = results[2].status === 'fulfilled' ? results[2].value : cachedEstimates;
+      const freshInvoices = results[3].status === 'fulfilled' ? results[3].value : cachedInvoices;
+      const freshProfile = results[4].status === 'fulfilled' ? results[4].value : cachedProfile;
+      const freshTeam = results[5].status === 'fulfilled' ? results[5].value : [];
+
+      // Log any failures for debugging
+      results.forEach((r, i) => {
+        if (r.status === 'rejected') {
+          const names = ['clients', 'projects', 'estimates', 'invoices', 'profile', 'team'];
+          console.warn(`Failed to load ${names[i]}:`, r.reason);
+        }
+      });
 
       setClients(freshClients);
       setProjects(freshProjects);
@@ -236,7 +251,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (freshProfile) setCompanyProfile(freshProfile);
 
       // 3. Update cache
-      await Promise.all([
+      await Promise.allSettled([
         cacheService.saveClients(freshClients),
         cacheService.saveProjects(freshProjects),
         cacheService.saveEstimates(freshEstimates),

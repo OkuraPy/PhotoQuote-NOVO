@@ -361,7 +361,7 @@ export const estimateService = {
           unit: item.unit || '',
           quantity: item.quantity,
           unitPrice: item.unit_price,
-          subtotal: item.total,
+          subtotal: item.total ?? (item.quantity * item.unit_price),
           taxable: item.taxable ?? true,
         }));
 
@@ -370,12 +370,12 @@ export const estimateService = {
           projectId: dbEstimate.project_id,
           version: 1,
           lineItems,
-          taxRate: dbEstimate.tax_rate,
-          marginRate: 0,
-          subtotal: dbEstimate.subtotal,
-          tax: dbEstimate.tax_amount,
-          margin: 0,
-          total: dbEstimate.total,
+          taxRate: dbEstimate.tax_rate || 0,
+          marginRate: dbEstimate.margin_rate || 0,
+          subtotal: dbEstimate.subtotal || 0,
+          tax: dbEstimate.tax_amount || 0,
+          margin: dbEstimate.margin_amount || 0,
+          total: dbEstimate.total || dbEstimate.grand_total || 0,
           notes: dbEstimate.notes || '',
           confidence: dbEstimate.confidence || 0,
           status: dbEstimate.status as any,
@@ -413,8 +413,10 @@ export const estimateService = {
         description: item.description,
         quantity: item.quantity,
         unit_price: item.unitPrice,
-        unit: item.unit || null,
-        category: item.category || null,
+        total: item.quantity * item.unitPrice,
+        subtotal: item.quantity * item.unitPrice,
+        unit: item.unit || 'job',
+        category: item.category || 'Item',
         item_order: index,
         taxable: item.taxable ?? true,
       }));
@@ -430,21 +432,25 @@ export const estimateService = {
       .eq('id', estimateData.id)
       .single();
 
+    if (!refreshedData) {
+      throw new Error('Failed to fetch created estimate from database');
+    }
+
     return {
-      id: refreshedData!.id,
-      projectId: refreshedData!.project_id,
+      id: refreshedData.id,
+      projectId: refreshedData.project_id,
       version: 1,
       lineItems: estimate.lineItems,
-      taxRate: refreshedData!.tax_rate,
-      marginRate: 0,
-      subtotal: refreshedData!.subtotal,
-      tax: refreshedData!.tax_amount,
-      margin: 0,
-      total: refreshedData!.total,
-      notes: refreshedData!.notes || '',
-      confidence: 0,
-      status: refreshedData!.status as any,
-      createdAt: refreshedData!.created_at,
+      taxRate: refreshedData.tax_rate || 0,
+      marginRate: refreshedData.margin_rate || 0,
+      subtotal: refreshedData.subtotal || 0,
+      tax: refreshedData.tax_amount || 0,
+      margin: refreshedData.margin_amount || 0,
+      total: refreshedData.total || refreshedData.grand_total || 0,
+      notes: refreshedData.notes || '',
+      confidence: refreshedData.confidence || 0,
+      status: refreshedData.status as any,
+      createdAt: refreshedData.created_at,
     };
   },
 
@@ -503,7 +509,7 @@ export const invoiceService = {
           unit: item.unit || '',
           quantity: item.quantity,
           unitPrice: item.unit_price,
-          subtotal: item.total,
+          subtotal: item.total ?? (item.quantity * item.unit_price),
           taxable: item.taxable,
         }));
 
@@ -513,12 +519,12 @@ export const invoiceService = {
           projectId: dbInvoice.project_id,
           invoiceNumber: dbInvoice.invoice_number,
           lineItems,
-          taxRate: dbInvoice.tax_rate,
-          marginRate: dbInvoice.margin_rate,
-          subtotal: dbInvoice.subtotal,
-          tax: dbInvoice.tax_amount,
-          margin: dbInvoice.margin_amount,
-          total: dbInvoice.total,
+          taxRate: dbInvoice.tax_rate || 0,
+          marginRate: dbInvoice.margin_rate || 0,
+          subtotal: dbInvoice.subtotal || 0,
+          tax: dbInvoice.tax_amount || 0,
+          margin: dbInvoice.margin_amount || 0,
+          total: dbInvoice.total || 0,
           notes: dbInvoice.notes || '',
           status: dbInvoice.status as any,
           createdAt: dbInvoice.created_at,

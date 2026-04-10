@@ -44,8 +44,8 @@ function buildPdfHtml(estimate: Estimate, projectName: string, clientName: strin
       <td style="padding:8px;border-bottom:1px solid #eee;color:#1B5E20;font-weight:600;text-transform:uppercase;font-size:11px;">${item.category}</td>
       <td style="padding:8px;border-bottom:1px solid #eee;">${item.description}</td>
       <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">${item.quantity} ${item.unit}</td>
-      <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">$${item.unitPrice.toFixed(2)}</td>
-      <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">$${item.subtotal.toFixed(2)}</td>
+      <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">$${(item.unitPrice || 0).toFixed(2)}</td>
+      <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">$${(item.subtotal || 0).toFixed(2)}</td>
     </tr>
   `).join('');
 
@@ -53,9 +53,9 @@ function buildPdfHtml(estimate: Estimate, projectName: string, clientName: strin
     ? `<div class="info-item"><div class="info-label">Invoice #</div><div class="info-value">${invoiceNumber}</div></div>`
     : '';
 
-  const taxableSubtotal = estimate.lineItems.filter(i => i.taxable).reduce((sum, i) => sum + i.subtotal, 0);
+  const taxableSubtotal = estimate.lineItems.filter(i => i.taxable).reduce((sum, i) => sum + (i.subtotal || 0), 0);
   const marginRow = estimate.marginRate > 0
-    ? `<div class="total-row"><span>Margin (${estimate.marginRate}%)</span><span>$${estimate.margin.toFixed(2)}</span></div>`
+    ? `<div class="total-row"><span>Margin (${estimate.marginRate}%)</span><span>$${(estimate.margin || 0).toFixed(2)}</span></div>`
     : '';
 
   return `
@@ -115,10 +115,10 @@ function buildPdfHtml(estimate: Estimate, projectName: string, clientName: strin
       </table>
 
       <div class="totals">
-        <div class="total-row"><span>Subtotal</span><span>$${estimate.subtotal.toFixed(2)}</span></div>
-        <div class="total-row"><span>Tax (${estimate.taxRate}% on $${taxableSubtotal.toFixed(2)})</span><span>$${estimate.tax.toFixed(2)}</span></div>
+        <div class="total-row"><span>Subtotal</span><span>$${(estimate.subtotal || 0).toFixed(2)}</span></div>
+        <div class="total-row"><span>Tax (${estimate.taxRate || 0}% on $${taxableSubtotal.toFixed(2)})</span><span>$${(estimate.tax || 0).toFixed(2)}</span></div>
         ${marginRow}
-        <div class="total-row grand-total"><span class="label">Total</span><span class="value">$${estimate.total.toFixed(2)}</span></div>
+        <div class="total-row grand-total"><span class="label">Total</span><span class="value">$${(estimate.total || 0).toFixed(2)}</span></div>
       </div>
 
       <div class="notes">
@@ -137,12 +137,12 @@ function buildPdfHtml(estimate: Estimate, projectName: string, clientName: strin
 }
 
 function buildShareText(estimate: Estimate, projectName: string, clientName: string, address: string, serviceType: string, docType: 'Estimate' | 'Invoice', invoiceNumber?: string): string {
-  const items = estimate.lineItems.map(i => `- ${i.category}: $${i.subtotal.toFixed(2)}`).join('\n');
+  const items = estimate.lineItems.map(i => `- ${i.category}: $${(i.subtotal || 0).toFixed(2)}`).join('\n');
   const header = docType === 'Invoice' && invoiceNumber
     ? `*PhotoQuote AI - Invoice #${invoiceNumber}*`
     : '*PhotoQuote AI - Estimate*';
-  const marginLine = estimate.marginRate > 0 ? `\nMargin (${estimate.marginRate}%): $${estimate.margin.toFixed(2)}` : '';
-  return `${header}\n\nClient: ${clientName}\nProject: ${projectName}\nAddress: ${address}\nServices: ${serviceType}\n\n${items}\n\nSubtotal: $${estimate.subtotal.toFixed(2)}\nTax (${estimate.taxRate}%): $${estimate.tax.toFixed(2)}${marginLine}\n*Total: $${estimate.total.toFixed(2)}*\n\n${docType === 'Invoice' ? 'Payment due within 30 days.' : 'Valid for 30 days.'}`;
+  const marginLine = estimate.marginRate > 0 ? `\nMargin (${estimate.marginRate}%): $${(estimate.margin || 0).toFixed(2)}` : '';
+  return `${header}\n\nClient: ${clientName}\nProject: ${projectName}\nAddress: ${address}\nServices: ${serviceType}\n\n${items}\n\nSubtotal: $${(estimate.subtotal || 0).toFixed(2)}\nTax (${estimate.taxRate || 0}%): $${(estimate.tax || 0).toFixed(2)}${marginLine}\n*Total: $${(estimate.total || 0).toFixed(2)}*\n\n${docType === 'Invoice' ? 'Payment due within 30 days.' : 'Valid for 30 days.'}`;
 }
 
 export default function EstimateDetailScreen({ navigation, route }: EstimateDetailScreenProps) {
@@ -405,11 +405,11 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
             <View key={index} style={styles.lineItem}>
               <View style={styles.lineItemHeader}>
                 <Text style={styles.lineItemCategory}>{item.category}</Text>
-                <Text style={styles.lineItemSubtotal}>${item.subtotal.toFixed(2)}</Text>
+                <Text style={styles.lineItemSubtotal}>${(item.subtotal || 0).toFixed(2)}</Text>
               </View>
               <Text style={styles.lineItemDescription}>{item.description}</Text>
               <Text style={styles.lineItemDetails}>
-                {item.quantity} {item.unit} x ${item.unitPrice.toFixed(2)}/{item.unit}
+                {item.quantity} {item.unit} x ${(item.unitPrice || 0).toFixed(2)}/{item.unit}
               </Text>
             </View>
           ))}
@@ -420,22 +420,22 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
           <Text style={styles.cardTitle}>Summary</Text>
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Subtotal</Text>
-            <Text style={styles.totalValue}>${estimate.subtotal.toFixed(2)}</Text>
+            <Text style={styles.totalValue}>${(estimate.subtotal || 0).toFixed(2)}</Text>
           </View>
           <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Tax ({estimate.taxRate}%)</Text>
-            <Text style={styles.totalValue}>${estimate.tax.toFixed(2)}</Text>
+            <Text style={styles.totalLabel}>Tax ({estimate.taxRate || 0}%)</Text>
+            <Text style={styles.totalValue}>${(estimate.tax || 0).toFixed(2)}</Text>
           </View>
           {estimate.marginRate > 0 && (
             <View style={styles.totalRow}>
               <Text style={styles.totalLabel}>Margin ({estimate.marginRate}%)</Text>
-              <Text style={styles.totalValue}>${estimate.margin.toFixed(2)}</Text>
+              <Text style={styles.totalValue}>${(estimate.margin || 0).toFixed(2)}</Text>
             </View>
           )}
           <Divider marginVertical={spacing.md} />
           <View style={styles.totalRow}>
             <Text style={styles.grandTotalLabel}>Total</Text>
-            <Text style={styles.grandTotalValue}>${estimate.total.toFixed(2)}</Text>
+            <Text style={styles.grandTotalValue}>${(estimate.total || 0).toFixed(2)}</Text>
           </View>
         </Card>
 
