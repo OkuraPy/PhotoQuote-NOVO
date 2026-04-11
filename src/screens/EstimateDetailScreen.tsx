@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Alert,
   Platform,
   Linking,
+  TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -16,12 +17,17 @@ import {
   CheckCircle,
   FileText,
   Users,
+  Edit3,
+  Trash2,
+  Plus,
+  Save,
+  X,
 } from 'lucide-react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { colors, typography, spacing, radii, shadows } from '../theme';
 import { ScreenHeader, Card, Button, Divider } from '../components/ui';
-import { useApp, Estimate, EstimateStatus, CompanyProfile } from '../context/AppContext';
+import { useApp, Estimate, EstimateStatus, CompanyProfile, LineItem } from '../context/AppContext';
 
 interface EstimateDetailScreenProps {
   navigation: any;
@@ -146,13 +152,19 @@ function buildShareText(estimate: Estimate, projectName: string, clientName: str
 }
 
 export default function EstimateDetailScreen({ navigation, route }: EstimateDetailScreenProps) {
-  const { estimates, getProject, getClient, updateEstimate, addInvoice, getEstimateInvoice, companyProfile } = useApp();
+  const { estimates, getProject, getClient, updateEstimate, deleteEstimate, addInvoice, getEstimateInvoice, companyProfile } = useApp();
   const insets = useSafeAreaInsets();
   const estimateId = route.params?.estimateId as string;
   const estimate = estimates.find(e => e.id === estimateId);
   const project = estimate ? getProject(estimate.projectId) : undefined;
   const client = project ? getClient(project.clientId) : undefined;
   const invoice = estimate ? getEstimateInvoice(estimate.id) : undefined;
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [editLineItems, setEditLineItems] = useState<LineItem[]>([]);
+  const [editNotes, setEditNotes] = useState('');
+  const [editTaxRate, setEditTaxRate] = useState('');
+  const [saving, setSaving] = useState(false);
 
   if (!estimate) {
     return (
@@ -165,6 +177,100 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
       </View>
     );
   }
+
+  const canEdit = estimate.status === 'Draft';
+
+  const startEditing = () => {
+    setEditLineItems(estimate.lineItems.map(item => ({ ...item })));
+    setEditNotes(estimate.notes);
+    setEditTaxRate(String(estimate.taxRate || 0));
+    setIsEditing(true);
+  };
+
+  const cancelEditing = () => {
+    setIsEditing(false);
+  };
+
+  const updateLineItem = (index: number, field: keyof LineItem, value: any) => {
+    setEditLineItems(prev => prev.map((item, i) =>
+      i === index ? { ...item, [field]: value, subtotal: field === 'quantity' || field === 'unitPrice'
+        ? (field === 'quantity' ? Number(value) : item.quantity) * (field === 'unitPrice' ? Number(value) : item.unitPrice)
+        : item.subtotal
+      } : item
+    ));
+  };
+
+  const addEditLineItem = () => {
+    setEditLineItems(prev => [
+      ...prev,
+      { id: String(Date.now()), category: 'New Item', description: '', unit: 'job', quantity: 1, unitPrice: 0, subtotal: 0, taxable: true },
+    ]);
+  };
+
+  const removeEditLineItem = (index: number) => {
+    if (editLineItems.length <= 1) {
+      Alert.alert('Required', 'You must have at least one line item.');
+      return;
+    }
+    setEditLineItems(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const saveEdits = async () => {
+    if (editLineItems.some(item => !item.category.trim())) {
+      Alert.alert('Required', 'All items must have a title.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const taxRate = Number(editTaxRate) || 0;
+      const subtotal = editLineItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+      const taxableSubtotal = editLineItems.filter(i => i.taxable).reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+      const tax = taxableSubtotal * (taxRate / 100);
+      const total = subtotal + tax;
+
+      const updatedItems = editLineItems.map(item => ({
+        ...item,
+        subtotal: item.quantity * item.unitPrice,
+      }));
+
+      await updateEstimate(estimate.id, {
+        lineItems: updatedItems,
+        notes: editNotes,
+        taxRate,
+        subtotal,
+        tax,
+        total,
+      });
+      setIsEditing(false);
+    } catch (error: any) {
+      Alert.alert('Save Failed', error?.message || 'Failed to save changes.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteEstimate = () => {
+    Alert.alert(
+      'Delete Estimate',
+      'Are you sure you want to delete this estimate? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteEstimate(estimate.id);
+              navigation.goBack();
+            } catch (error: any) {
+              Alert.alert('Error', error?.message || 'Failed to delete estimate.');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const projectName = project?.name ?? 'N/A';
   const clientName = client?.name ?? 'N/A';
@@ -398,81 +504,224 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
           </View>
         </Card>
 
+        {/* Edit / Delete buttons for Draft */}
+        {canEdit && !isEditing && (
+          <View style={styles.actionRow}>
+            <Button
+              title="Edit Estimate"
+              onPress={startEditing}
+              size="lg"
+              icon={<Edit3 size={18} color={colors.textOnPrimary} />}
+              style={styles.actionButton}
+            />
+            <Button
+              title="Delete"
+              onPress={handleDeleteEstimate}
+              size="lg"
+              icon={<Trash2 size={18} color={colors.textOnPrimary} />}
+              style={{ ...styles.actionButton, backgroundColor: colors.error }}
+            />
+          </View>
+        )}
+
+        {/* Edit mode: Save / Cancel */}
+        {isEditing && (
+          <View style={styles.actionRow}>
+            <Button
+              title={saving ? 'Saving...' : 'Save Changes'}
+              onPress={saveEdits}
+              size="lg"
+              icon={<Save size={18} color={colors.textOnPrimary} />}
+              style={styles.actionButton}
+              disabled={saving}
+            />
+            <Button
+              title="Cancel"
+              onPress={cancelEditing}
+              size="lg"
+              variant="outline"
+              icon={<X size={18} color={colors.primary} />}
+              style={styles.actionButton}
+            />
+          </View>
+        )}
+
         {/* Line Items */}
         <Card style={styles.cardSpacing}>
-          <Text style={styles.cardTitle}>Line Items ({estimate.lineItems.length})</Text>
-          {estimate.lineItems.map((item, index) => (
-            <View key={index} style={styles.lineItem}>
-              <View style={styles.lineItemHeader}>
-                <Text style={styles.lineItemCategory}>{item.category}</Text>
-                <Text style={styles.lineItemSubtotal}>${(item.subtotal || 0).toFixed(2)}</Text>
-              </View>
-              <Text style={styles.lineItemDescription}>{item.description}</Text>
-              <Text style={styles.lineItemDetails}>
-                {item.quantity} {item.unit} x ${(item.unitPrice || 0).toFixed(2)}/{item.unit}
-              </Text>
+          <Text style={styles.cardTitle}>Line Items ({isEditing ? editLineItems.length : estimate.lineItems.length})</Text>
+          {(isEditing ? editLineItems : estimate.lineItems).map((item, index) => (
+            <View key={isEditing ? `edit-${index}` : index} style={styles.lineItem}>
+              {isEditing ? (
+                <>
+                  <View style={styles.editRow}>
+                    <TextInput
+                      style={[styles.editInput, { flex: 1 }]}
+                      value={item.category}
+                      onChangeText={(v) => updateLineItem(index, 'category', v)}
+                      placeholder="Category/Title"
+                      placeholderTextColor={colors.textTertiary}
+                    />
+                    <TouchableOpacity onPress={() => removeEditLineItem(index)} style={styles.removeItemBtn}>
+                      <Trash2 size={16} color={colors.error} />
+                    </TouchableOpacity>
+                  </View>
+                  <TextInput
+                    style={[styles.editInput, { marginTop: spacing.xs }]}
+                    value={item.description}
+                    onChangeText={(v) => updateLineItem(index, 'description', v)}
+                    placeholder="Description"
+                    placeholderTextColor={colors.textTertiary}
+                    multiline
+                  />
+                  <View style={[styles.editRow, { marginTop: spacing.xs }]}>
+                    <View style={{ flex: 1, marginRight: spacing.xs }}>
+                      <Text style={styles.editLabel}>Qty</Text>
+                      <TextInput
+                        style={styles.editInput}
+                        value={String(item.quantity)}
+                        onChangeText={(v) => updateLineItem(index, 'quantity', Number(v) || 0)}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                    <View style={{ flex: 1, marginRight: spacing.xs }}>
+                      <Text style={styles.editLabel}>Unit</Text>
+                      <TextInput
+                        style={styles.editInput}
+                        value={item.unit}
+                        onChangeText={(v) => updateLineItem(index, 'unit', v)}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.editLabel}>Price</Text>
+                      <TextInput
+                        style={styles.editInput}
+                        value={String(item.unitPrice)}
+                        onChangeText={(v) => updateLineItem(index, 'unitPrice', Number(v) || 0)}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                  </View>
+                  <Text style={[styles.lineItemDetails, { marginTop: spacing.xs }]}>
+                    Subtotal: ${(item.quantity * item.unitPrice).toFixed(2)}
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <View style={styles.lineItemHeader}>
+                    <Text style={styles.lineItemCategory}>{item.category}</Text>
+                    <Text style={styles.lineItemSubtotal}>${(item.subtotal || 0).toFixed(2)}</Text>
+                  </View>
+                  <Text style={styles.lineItemDescription}>{item.description}</Text>
+                  <Text style={styles.lineItemDetails}>
+                    {item.quantity} {item.unit} x ${(item.unitPrice || 0).toFixed(2)}/{item.unit}
+                  </Text>
+                </>
+              )}
             </View>
           ))}
+          {isEditing && (
+            <TouchableOpacity onPress={addEditLineItem} style={styles.addItemBtn}>
+              <Plus size={16} color={colors.primary} />
+              <Text style={styles.addItemText}>Add Item</Text>
+            </TouchableOpacity>
+          )}
         </Card>
 
         {/* Totals */}
         <Card style={styles.cardSpacing}>
           <Text style={styles.cardTitle}>Summary</Text>
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Subtotal</Text>
-            <Text style={styles.totalValue}>${(estimate.subtotal || 0).toFixed(2)}</Text>
-          </View>
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Tax ({estimate.taxRate || 0}%)</Text>
-            <Text style={styles.totalValue}>${(estimate.tax || 0).toFixed(2)}</Text>
-          </View>
-          {estimate.marginRate > 0 && (
-            <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Margin ({estimate.marginRate}%)</Text>
-              <Text style={styles.totalValue}>${(estimate.margin || 0).toFixed(2)}</Text>
-            </View>
+          {isEditing ? (
+            <>
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Subtotal</Text>
+                <Text style={styles.totalValue}>
+                  ${editLineItems.reduce((sum, i) => sum + (i.quantity * i.unitPrice), 0).toFixed(2)}
+                </Text>
+              </View>
+              <View style={[styles.totalRow, { alignItems: 'center' }]}>
+                <Text style={styles.totalLabel}>Tax Rate (%)</Text>
+                <TextInput
+                  style={[styles.editInput, { width: 70, textAlign: 'right' }]}
+                  value={editTaxRate}
+                  onChangeText={setEditTaxRate}
+                  keyboardType="numeric"
+                />
+              </View>
+            </>
+          ) : (
+            <>
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Subtotal</Text>
+                <Text style={styles.totalValue}>${(estimate.subtotal || 0).toFixed(2)}</Text>
+              </View>
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Tax ({estimate.taxRate || 0}%)</Text>
+                <Text style={styles.totalValue}>${(estimate.tax || 0).toFixed(2)}</Text>
+              </View>
+              {estimate.marginRate > 0 && (
+                <View style={styles.totalRow}>
+                  <Text style={styles.totalLabel}>Margin ({estimate.marginRate}%)</Text>
+                  <Text style={styles.totalValue}>${(estimate.margin || 0).toFixed(2)}</Text>
+                </View>
+              )}
+              <Divider marginVertical={spacing.md} />
+              <View style={styles.totalRow}>
+                <Text style={styles.grandTotalLabel}>Total</Text>
+                <Text style={styles.grandTotalValue}>${(estimate.total || 0).toFixed(2)}</Text>
+              </View>
+            </>
           )}
-          <Divider marginVertical={spacing.md} />
-          <View style={styles.totalRow}>
-            <Text style={styles.grandTotalLabel}>Total</Text>
-            <Text style={styles.grandTotalValue}>${(estimate.total || 0).toFixed(2)}</Text>
-          </View>
         </Card>
 
         {/* Notes */}
         <Card style={styles.cardSpacing}>
           <Text style={styles.cardTitle}>Notes</Text>
-          <Text style={styles.note}>{estimate.notes.split('\n').map(l => `\u2022 ${l}`).join('\n')}</Text>
+          {isEditing ? (
+            <TextInput
+              style={[styles.editInput, { minHeight: 80, textAlignVertical: 'top' }]}
+              value={editNotes}
+              onChangeText={setEditNotes}
+              multiline
+              placeholder="Add notes..."
+              placeholderTextColor={colors.textTertiary}
+            />
+          ) : (
+            <Text style={styles.note}>{estimate.notes ? estimate.notes.split('\n').map(l => `\u2022 ${l}`).join('\n') : 'No notes'}</Text>
+          )}
         </Card>
 
         {/* Action Buttons: Send + Invoice side by side */}
-        <View style={styles.actionRow}>
-          <Button
-            title="Send Estimate"
-            onPress={handleSendEstimate}
-            size="lg"
-            icon={<Send size={18} color={colors.textOnPrimary} />}
-            style={styles.actionButton}
-          />
+        {!isEditing && (
+          <View style={styles.actionRow}>
+            <Button
+              title="Send Estimate"
+              onPress={handleSendEstimate}
+              size="lg"
+              icon={<Send size={18} color={colors.textOnPrimary} />}
+              style={styles.actionButton}
+            />
 
-          <Button
-            title={invoice ? 'View Invoice' : 'Generate Invoice'}
-            onPress={handleGenerateInvoice}
-            size="lg"
-            icon={<DollarSign size={18} color={colors.textOnPrimary} />}
-            style={{ ...styles.actionButton, backgroundColor: colors.success }}
-          />
-        </View>
+            <Button
+              title={invoice ? 'View Invoice' : 'Generate Invoice'}
+              onPress={handleGenerateInvoice}
+              size="lg"
+              icon={<DollarSign size={18} color={colors.textOnPrimary} />}
+              style={{ ...styles.actionButton, backgroundColor: colors.success }}
+            />
+          </View>
+        )}
 
         {/* Manage Team */}
-        <Button
-          title="Manage Project Team"
-          onPress={() => navigation.navigate('ProjectMembers', { projectId: estimate.projectId })}
-          size="lg"
-          variant="outline"
-          icon={<Users size={18} color={colors.primary} />}
-          style={{ marginBottom: spacing.lg }}
-        />
+        {!isEditing && (
+          <Button
+            title="Manage Project Team"
+            onPress={() => navigation.navigate('ProjectMembers', { projectId: estimate.projectId })}
+            size="lg"
+            variant="outline"
+            icon={<Users size={18} color={colors.primary} />}
+            style={{ marginBottom: spacing.lg }}
+          />
+        )}
 
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -652,5 +901,46 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
+  },
+
+  // Edit mode styles
+  editRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  editInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: typography.sizes.sm,
+    color: colors.textPrimary,
+    backgroundColor: colors.bgPrimary,
+  },
+  editLabel: {
+    fontSize: typography.sizes.xs,
+    color: colors.textSecondary,
+    marginBottom: 2,
+  },
+  removeItemBtn: {
+    padding: spacing.sm,
+  },
+  addItemBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    gap: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: radii.md,
+    borderStyle: 'dashed',
+  },
+  addItemText: {
+    fontSize: typography.sizes.sm,
+    color: colors.primary,
+    fontWeight: typography.weights.medium,
   },
 });

@@ -140,10 +140,12 @@ interface AppState {
   getClientProjects: (clientId: string) => Project[];
   addEstimate: (estimate: Omit<Estimate, 'id' | 'createdAt'>) => Promise<Estimate>;
   updateEstimate: (id: string, data: Partial<Estimate>) => Promise<void>;
+  deleteEstimate: (id: string) => Promise<void>;
   getProjectEstimates: (projectId: string) => Estimate[];
   invoices: Invoice[];
   addInvoice: (invoice: Omit<Invoice, 'id' | 'createdAt'>) => Promise<Invoice>;
   updateInvoice: (id: string, data: Partial<Invoice>) => Promise<void>;
+  deleteInvoice: (id: string) => Promise<void>;
   getEstimateInvoice: (estimateId: string) => Invoice | undefined;
   companyProfile: CompanyProfile;
   updateCompanyProfile: (data: Partial<CompanyProfile>) => Promise<void>;
@@ -372,6 +374,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, [user]);
 
+  const deleteEstimate = useCallback(async (id: string) => {
+    if (!user) throw new Error('User not authenticated');
+
+    await estimateService.delete(id, user.id);
+    setEstimates(prev => {
+      const updated = prev.filter(e => e.id !== id);
+      cacheService.saveEstimates(updated);
+      return updated;
+    });
+  }, [user]);
+
   const getProjectEstimates = useCallback((projectId: string) => {
     return estimates.filter(e => e.projectId === projectId);
   }, [estimates]);
@@ -394,6 +407,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await invoiceService.update(id, data, user.id);
     setInvoices(prev => {
       const updated = prev.map(inv => inv.id === id ? { ...inv, ...data } : inv);
+      cacheService.saveInvoices(updated);
+      return updated;
+    });
+  }, [user]);
+
+  const deleteInvoice = useCallback(async (id: string) => {
+    if (!user) throw new Error('User not authenticated');
+
+    await invoiceService.delete(id, user.id);
+    setInvoices(prev => {
+      const updated = prev.filter(inv => inv.id !== id);
       cacheService.saveInvoices(updated);
       return updated;
     });
@@ -470,10 +494,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       getClientProjects,
       addEstimate,
       updateEstimate,
+      deleteEstimate,
       getProjectEstimates,
       invoices,
       addInvoice,
       updateInvoice,
+      deleteInvoice,
       getEstimateInvoice,
       companyProfile,
       updateCompanyProfile,

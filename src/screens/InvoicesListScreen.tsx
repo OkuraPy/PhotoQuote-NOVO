@@ -1,7 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Receipt, ChevronRight } from 'lucide-react-native';
+import { Receipt, ChevronRight, Trash2 } from 'lucide-react-native';
 import { useApp } from '../context/AppContext';
 import { colors, typography, spacing } from '../theme';
 import { Card, StatusBadge, EmptyState, Divider } from '../components/ui';
@@ -15,8 +15,29 @@ interface InvoicesListScreenProps {
 }
 
 export default function InvoicesListScreen({ navigation }: InvoicesListScreenProps) {
-  const { invoices, getProject, getClient } = useApp();
+  const { invoices, getProject, getClient, deleteInvoice } = useApp();
   const insets = useSafeAreaInsets();
+
+  const handleDeleteInvoice = (invoiceId: string, invoiceNumber: string) => {
+    Alert.alert(
+      'Delete Invoice',
+      `Are you sure you want to delete invoice ${invoiceNumber}? This action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteInvoice(invoiceId);
+            } catch (error: any) {
+              Alert.alert('Error', error?.message || 'Failed to delete invoice.');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -63,6 +84,13 @@ export default function InvoicesListScreen({ navigation }: InvoicesListScreenPro
                 <Text style={styles.metaText}>{dateStr}</Text>
                 <Text style={styles.metaText}>{invoice.lineItems.length} items</Text>
                 <View style={{ flex: 1 }} />
+                <TouchableOpacity
+                  onPress={() => handleDeleteInvoice(invoice.id, invoice.invoiceNumber)}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  style={styles.deleteBtn}
+                >
+                  <Trash2 size={16} color={colors.error} />
+                </TouchableOpacity>
                 <ChevronRight size={16} color={colors.textTertiary} />
               </View>
             </Card>
@@ -126,5 +154,9 @@ const styles = StyleSheet.create({
   metaText: {
     fontSize: typography.sizes.xs,
     color: colors.textTertiary,
+  },
+  deleteBtn: {
+    padding: spacing.xs,
+    marginRight: spacing.xs,
   },
 });

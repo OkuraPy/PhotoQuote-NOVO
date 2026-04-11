@@ -458,15 +458,49 @@ export const estimateService = {
     const updateData: any = {};
     if (estimate.status !== undefined) updateData.status = estimate.status;
     if (estimate.taxRate !== undefined) updateData.tax_rate = estimate.taxRate;
+    if (estimate.marginRate !== undefined) updateData.margin_rate = estimate.marginRate;
+    if (estimate.confidence !== undefined) updateData.confidence = estimate.confidence;
     if (estimate.notes !== undefined) updateData.notes = estimate.notes || null;
 
-    const { error } = await supabase
-      .from('estimates')
-      .update(updateData)
-      .eq('id', id)
-      .eq('user_id', userId);
+    if (Object.keys(updateData).length > 0) {
+      const { error } = await supabase
+        .from('estimates')
+        .update(updateData)
+        .eq('id', id)
+        .eq('user_id', userId);
 
-    if (error) throw error;
+      if (error) throw error;
+    }
+
+    // Update line items if provided
+    if (estimate.lineItems) {
+      // Delete existing line items
+      const { error: deleteError } = await supabase
+        .from('line_items')
+        .delete()
+        .eq('estimate_id', id);
+
+      if (deleteError) throw deleteError;
+
+      // Insert new line items
+      if (estimate.lineItems.length > 0) {
+        const lineItemsData = estimate.lineItems.map((item, index) => ({
+          estimate_id: id,
+          description: item.description,
+          quantity: item.quantity,
+          unit_price: item.unitPrice,
+          total: item.subtotal || (item.quantity * item.unitPrice),
+          subtotal: item.subtotal || (item.quantity * item.unitPrice),
+          unit: item.unit || 'job',
+          category: item.category || 'Item',
+          item_order: index,
+          taxable: item.taxable ?? true,
+        }));
+
+        const { error: insertError } = await supabase.from('line_items').insert(lineItemsData);
+        if (insertError) throw insertError;
+      }
+    }
   },
 
   async delete(id: string, userId: string): Promise<void> {
