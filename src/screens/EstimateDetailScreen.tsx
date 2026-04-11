@@ -224,22 +224,25 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
     setSaving(true);
     try {
       const taxRate = Number(editTaxRate) || 0;
-      const subtotal = editLineItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
-      const taxableSubtotal = editLineItems.filter(i => i.taxable).reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+      const subtotal = editLineItems.reduce((sum, item) => sum + ((item.quantity || 0) * (item.unitPrice || 0)), 0);
+      const taxableSubtotal = editLineItems.filter(i => i.taxable).reduce((sum, item) => sum + ((item.quantity || 0) * (item.unitPrice || 0)), 0);
       const tax = taxableSubtotal * (taxRate / 100);
-      const total = subtotal + tax;
+      const margin = subtotal * ((estimate.marginRate || 0) / 100);
+      const total = subtotal + tax + margin;
 
       const updatedItems = editLineItems.map(item => ({
         ...item,
-        subtotal: item.quantity * item.unitPrice,
+        subtotal: (item.quantity || 0) * (item.unitPrice || 0),
       }));
 
       await updateEstimate(estimate.id, {
         lineItems: updatedItems,
         notes: editNotes,
         taxRate,
+        marginRate: estimate.marginRate,
         subtotal,
         tax,
+        margin,
         total,
       });
       setIsEditing(false);
@@ -602,7 +605,7 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
                     </View>
                   </View>
                   <Text style={[styles.lineItemDetails, { marginTop: spacing.xs }]}>
-                    Subtotal: ${(item.quantity * item.unitPrice).toFixed(2)}
+                    Subtotal: ${((item.quantity || 0) * (item.unitPrice || 0)).toFixed(2)}
                   </Text>
                 </>
               ) : (
@@ -635,7 +638,7 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
               <View style={styles.totalRow}>
                 <Text style={styles.totalLabel}>Subtotal</Text>
                 <Text style={styles.totalValue}>
-                  ${editLineItems.reduce((sum, i) => sum + (i.quantity * i.unitPrice), 0).toFixed(2)}
+                  ${editLineItems.reduce((sum, i) => sum + ((i.quantity || 0) * (i.unitPrice || 0)), 0).toFixed(2)}
                 </Text>
               </View>
               <View style={[styles.totalRow, { alignItems: 'center' }]}>
