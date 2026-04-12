@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { Client, Project, Estimate, LineItem, Invoice, CompanyProfile, TeamMember, ProjectMember } from '../context/AppContext';
+import { Client, Project, Estimate, LineItem, Invoice, CompanyProfile, TeamMember, ProjectMember, ProjectPhase, PhasePhoto, PhaseComment, ShareToken, PhaseStatus } from '../context/AppContext';
 
 // ============================================
 // TYPE MAPPINGS
@@ -830,6 +830,238 @@ export const projectMemberService = {
     const { error } = await supabase
       .from('project_members')
       .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+  },
+};
+
+// ============================================
+// PROJECT PHASE SERVICE
+// ============================================
+
+export const phaseService = {
+  async getAll(projectId: string): Promise<ProjectPhase[]> {
+    const { data, error } = await supabase
+      .from('project_phases')
+      .select('*')
+      .eq('project_id', projectId)
+      .order('phase_order', { ascending: true });
+
+    if (error) throw error;
+
+    const phases = await Promise.all(
+      (data || []).map(async (phase) => {
+        const { data: photos } = await supabase
+          .from('phase_photos')
+          .select('*')
+          .eq('phase_id', phase.id)
+          .order('display_order', { ascending: true });
+
+        const { data: comments } = await supabase
+          .from('phase_comments')
+          .select('*')
+          .eq('phase_id', phase.id)
+          .order('created_at', { ascending: true });
+
+        return {
+          id: phase.id,
+          projectId: phase.project_id,
+          name: phase.name,
+          phaseOrder: phase.phase_order,
+          status: phase.status as PhaseStatus,
+          notes: phase.notes || '',
+          expectedCompletionDate: phase.expected_completion_date,
+          actualCompletionDate: phase.actual_completion_date,
+          isVisibleToClient: phase.is_visible_to_client ?? true,
+          photos: (photos || []).map((p: any) => ({
+            id: p.id,
+            fileUrl: p.file_url,
+            caption: p.caption || '',
+            createdAt: p.created_at,
+          })),
+          comments: (comments || []).map((c: any) => ({
+            id: c.id,
+            authorType: c.author_type as 'contractor' | 'client',
+            authorName: c.author_name || '',
+            content: c.content,
+            createdAt: c.created_at,
+          })),
+          createdAt: phase.created_at,
+        };
+      })
+    );
+
+    return phases;
+  },
+
+  async create(projectId: string, estimateId: string, name: string, phaseOrder: number, userId: string): Promise<ProjectPhase> {
+    const { data, error } = await supabase
+      .from('project_phases')
+      .insert({
+        project_id: projectId,
+        estimate_id: estimateId,
+        user_id: userId,
+        name,
+        phase_order: phaseOrder,
+        status: 'not_started',
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return {
+      id: data.id,
+      projectId: data.project_id,
+      name: data.name,
+      phaseOrder: data.phase_order,
+      status: data.status as PhaseStatus,
+      notes: data.notes || '',
+      expectedCompletionDate: data.expected_completion_date,
+      actualCompletionDate: data.actual_completion_date,
+      isVisibleToClient: data.is_visible_to_client ?? true,
+      photos: [],
+      comments: [],
+      createdAt: data.created_at,
+    };
+  },
+
+  async update(id: string, data: { name?: string; status?: PhaseStatus; notes?: string; isVisibleToClient?: boolean }): Promise<void> {
+    const updateData: any = {};
+    if (data.name !== undefined) updateData.name = data.name;
+    if (data.status !== undefined) updateData.status = data.status;
+    if (data.notes !== undefined) updateData.notes = data.notes;
+    if (data.isVisibleToClient !== undefined) updateData.is_visible_to_client = data.isVisibleToClient;
+    if (data.status === 'completed') updateData.actual_completion_date = new Date().toISOString();
+
+    const { error } = await supabase
+      .from('project_phases')
+      .update(updateData)
+      .eq('id', id);
+
+    if (error) throw error;
+  },
+
+  async delete(id: string): Promise<void> {
+    const { error } = await supabase
+      .from('project_phases')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+  },
+
+  async addPhoto(phaseId: string, projectId: string, userId: string, fileUrl: string, caption: string): Promise<PhasePhoto> {
+    const { data, error } = await supabase
+      .from('phase_photos')
+      .insert({
+        phase_id: phaseId,
+        project_id: projectId,
+        user_id: userId,
+        file_url: fileUrl,
+        caption,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return {
+      id: data.id,
+      fileUrl: data.file_url,
+      caption: data.caption || '',
+      createdAt: data.created_at,
+    };
+  },
+
+  async addComment(phaseId: string, projectId: string, authorName: string, content: string): Promise<PhaseComment> {
+    const { data, error } = await supabase
+      .from('phase_comments')
+      .insert({
+        phase_id: phaseId,
+        project_id: projectId,
+        author_type: 'contractor',
+        author_name: authorName,
+        content,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return {
+      id: data.id,
+      authorType: data.author_type as 'contractor' | 'client',
+      authorName: data.author_name || '',
+      content: data.content,
+      createdAt: data.created_at,
+    };
+  },
+};
+
+// ============================================
+// SHARE TOKEN SERVICE
+// ============================================
+
+export const shareTokenService = {
+  async getByProject(projectId: string): Promise<ShareToken | null> {
+    const { data, error } = await supabase
+      .from('project_share_tokens')
+      .select('*')
+      .eq('project_id', projectId)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return null;
+
+    return {
+      id: data.id,
+      projectId: data.project_id,
+      token: data.token,
+      isActive: data.is_active,
+      showValues: data.show_values,
+      expiresAt: data.expires_at,
+      createdAt: data.created_at,
+    };
+  },
+
+  async create(projectId: string, userId: string): Promise<ShareToken> {
+    // Generate a random token
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let token = '';
+    for (let i = 0; i < 32; i++) {
+      token += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+
+    const { data, error } = await supabase
+      .from('project_share_tokens')
+      .insert({
+        project_id: projectId,
+        user_id: userId,
+        token,
+        is_active: true,
+        show_values: false,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return {
+      id: data.id,
+      projectId: data.project_id,
+      token: data.token,
+      isActive: data.is_active,
+      showValues: data.show_values,
+      expiresAt: data.expires_at,
+      createdAt: data.created_at,
+    };
+  },
+
+  async deactivate(id: string): Promise<void> {
+    const { error } = await supabase
+      .from('project_share_tokens')
+      .update({ is_active: false })
       .eq('id', id);
 
     if (error) throw error;

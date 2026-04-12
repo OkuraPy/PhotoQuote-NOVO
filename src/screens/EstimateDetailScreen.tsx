@@ -714,6 +714,17 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
           </View>
         )}
 
+        {/* Project Progress */}
+        {!isEditing && (
+          <Button
+            title="Project Progress"
+            onPress={() => navigation.navigate('ProjectProgress', { projectId: estimate.projectId })}
+            size="lg"
+            icon={<CheckCircle size={18} color={colors.textOnPrimary} />}
+            style={{ marginBottom: spacing.sm, backgroundColor: colors.accent }}
+          />
+        )}
+
         {/* Manage Team */}
         {!isEditing && (
           <Button

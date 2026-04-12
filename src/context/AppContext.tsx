@@ -124,6 +124,48 @@ export interface ProjectMember {
   memberRole: string;
 }
 
+export type PhaseStatus = 'not_started' | 'in_progress' | 'completed';
+
+export interface PhasePhoto {
+  id: string;
+  fileUrl: string;
+  caption: string;
+  createdAt: string;
+}
+
+export interface PhaseComment {
+  id: string;
+  authorType: 'contractor' | 'client';
+  authorName: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface ProjectPhase {
+  id: string;
+  projectId: string;
+  name: string;
+  phaseOrder: number;
+  status: PhaseStatus;
+  notes: string;
+  expectedCompletionDate: string | null;
+  actualCompletionDate: string | null;
+  isVisibleToClient: boolean;
+  photos: PhasePhoto[];
+  comments: PhaseComment[];
+  createdAt: string;
+}
+
+export interface ShareToken {
+  id: string;
+  projectId: string;
+  token: string;
+  isActive: boolean;
+  showValues: boolean;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
 interface AppState {
   clients: Client[];
   projects: Project[];

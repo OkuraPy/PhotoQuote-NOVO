@@ -24,6 +24,7 @@ import InvoiceDetailScreen from '../screens/InvoiceDetailScreen';
 import CompanyProfileScreen from '../screens/CompanyProfileScreen';
 import TeamScreen from '../screens/TeamScreen';
 import ProjectMembersScreen from '../screens/ProjectMembersScreen';
+import ProjectProgressScreen from '../screens/ProjectProgressScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -118,6 +119,7 @@ export default function AppNavigator() {
             <Stack.Screen name="CompanyProfile" component={CompanyProfileScreen} />
             <Stack.Screen name="Team" component={TeamScreen} />
             <Stack.Screen name="ProjectMembers" component={ProjectMembersScreen} />
+            <Stack.Screen name="ProjectProgress" component={ProjectProgressScreen} />
           </>
         )}
       </Stack.Navigator>
