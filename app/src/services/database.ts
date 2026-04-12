@@ -943,6 +943,10 @@ export const phaseService = {
   },
 
   async delete(id: string): Promise<void> {
+    // Delete photos and comments first (no cascade FK)
+    await supabase.from('phase_photos').delete().eq('phase_id', id);
+    await supabase.from('phase_comments').delete().eq('phase_id', id);
+
     const { error } = await supabase
       .from('project_phases')
       .delete()
@@ -1027,11 +1031,13 @@ export const shareTokenService = {
   },
 
   async create(projectId: string, userId: string): Promise<ShareToken> {
-    // Generate a random token
+    // Generate a cryptographically random token using crypto.getRandomValues
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const randomValues = new Uint8Array(32);
+    crypto.getRandomValues(randomValues);
     let token = '';
     for (let i = 0; i < 32; i++) {
-      token += chars.charAt(Math.floor(Math.random() * chars.length));
+      token += chars.charAt(randomValues[i] % chars.length);
     }
 
     const { data, error } = await supabase

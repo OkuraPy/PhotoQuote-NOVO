@@ -15,7 +15,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Plus,
   Camera,
-  MessageSquare,
   ChevronDown,
   ChevronUp,
   Trash2,
@@ -120,7 +119,7 @@ export default function ProjectProgressScreen({ navigation, route }: ProjectProg
     try {
       await phaseService.update(phaseId, { status: newStatus });
       setPhases(prev => prev.map(p =>
-        p.id === phaseId ? { ...p, status: newStatus, actualCompletionDate: newStatus === 'completed' ? new Date().toISOString() : p.actualCompletionDate } : p
+        p.id === phaseId ? { ...p, status: newStatus } : p
       ));
     } catch (error: any) {
       Alert.alert('Error', error?.message || 'Failed to update status.');
