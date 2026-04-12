@@ -1078,10 +1078,17 @@ export const shareTokenService = {
 // AGREEMENT SERVICE
 // ============================================
 
+function escapeHtml(text: string): string {
+  const map: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+  return (text || '').replace(/[&<>"']/g, c => map[c]);
+}
+
 function fillTemplate(template: string, vars: Record<string, string>): string {
   let result = template;
   for (const [key, value] of Object.entries(vars)) {
-    result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value || '');
+    // Escape $ in value to prevent regex backreference issues
+    const escapedValue = (value || '').replace(/\$/g, '$$$$');
+    result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), escapedValue);
   }
   return result;
 }
@@ -1089,9 +1096,9 @@ function fillTemplate(template: string, vars: Record<string, string>): string {
 function buildLineItemsTable(lineItems: LineItem[]): string {
   const rows = lineItems.map(item => `
     <tr>
-      <td style="padding:8px;border-bottom:1px solid #eee;">${item.category}</td>
-      <td style="padding:8px;border-bottom:1px solid #eee;">${item.description}</td>
-      <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">${item.quantity} ${item.unit}</td>
+      <td style="padding:8px;border-bottom:1px solid #eee;">${escapeHtml(item.category || '')}</td>
+      <td style="padding:8px;border-bottom:1px solid #eee;">${escapeHtml(item.description || '')}</td>
+      <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">${item.quantity || 0} ${escapeHtml(item.unit || 'job')}</td>
       <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">$${(item.unitPrice || 0).toFixed(2)}</td>
       <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">$${(item.subtotal || 0).toFixed(2)}</td>
     </tr>
@@ -1165,7 +1172,7 @@ export const agreementService = {
     let termsBlocksHtml = '';
     if (templateData.terms_blocks && Array.isArray(templateData.terms_blocks)) {
       termsBlocksHtml = templateData.terms_blocks.map((block: any) =>
-        `<h3>${block.title}</h3>${block.content}`
+        `<h3>${escapeHtml(block.title || '')}</h3>${block.content || ''}`
       ).join('');
     }
 
@@ -1176,18 +1183,18 @@ export const agreementService = {
     const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
     const contractHtml = fillTemplate(templateData.content, {
-      client_name: client.name,
-      client_address: client.address || 'N/A',
-      client_phone: client.phone || 'N/A',
-      client_email: client.email || 'N/A',
-      company_name: company.name || 'N/A',
-      company_address: `${company.address || ''}, ${company.city || ''}, ${company.state || 'FL'} ${company.zip || ''}`,
-      company_phone: company.phone || 'N/A',
-      company_email: company.email || 'N/A',
-      license_number: company.licenseNumber || 'N/A',
-      project_name: project.name,
-      service_address: `${project.address}, ${project.city}, FL ${project.zip}`,
-      service_type: project.serviceType || 'Construction',
+      client_name: escapeHtml(client.name),
+      client_address: escapeHtml(client.address || 'N/A'),
+      client_phone: escapeHtml(client.phone || 'N/A'),
+      client_email: escapeHtml(client.email || 'N/A'),
+      company_name: escapeHtml(company.name || 'N/A'),
+      company_address: escapeHtml(`${company.address || ''}, ${company.city || ''}, ${company.state || 'FL'} ${company.zip || ''}`),
+      company_phone: escapeHtml(company.phone || 'N/A'),
+      company_email: escapeHtml(company.email || 'N/A'),
+      license_number: escapeHtml(company.licenseNumber || 'N/A'),
+      project_name: escapeHtml(project.name),
+      service_address: escapeHtml(`${project.address || 'N/A'}, ${project.city || 'N/A'}, FL ${project.zip || 'N/A'}`),
+      service_type: escapeHtml(project.serviceType || 'Construction'),
       invoice_number: invoice.invoiceNumber,
       total_amount: totalAmount,
       subtotal: (invoice.subtotal || 0).toFixed(2),

@@ -19,7 +19,6 @@ import {
   FileSignature,
   Clock,
   XCircle,
-  Link2,
 } from 'lucide-react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -195,30 +194,44 @@ export default function InvoiceDetailScreen({ navigation, route }: InvoiceDetail
     const signUrl = `https://photoquote-client-portal.vercel.app/agreement/sign/${agreement.token}`;
     const message = `Hi ${client.name},\n\nPlease review and sign the construction agreement for your project.\n\nSign here: ${signUrl}\n\nThank you,\n${companyProfile.name || 'PhotoQuote AI'}`;
 
+    const markAsSent = async () => {
+      try {
+        if (user) await agreementService.updateStatus(agreement.id, 'sent', user.id);
+        setAgreement(prev => prev ? { ...prev, status: 'sent' } : null);
+      } catch (error: any) {
+        Alert.alert('Error', 'Failed to update contract status.');
+      }
+    };
+
     Alert.alert('Send Contract', 'Choose how to send:', [
       {
         text: 'Email', onPress: async () => {
+          if (!client.email) {
+            Alert.alert('Error', 'Client email is not available. Please update the client information.');
+            return;
+          }
           const subject = encodeURIComponent('Construction Agreement - Signature Required');
           const body = encodeURIComponent(message);
           await Linking.openURL(`mailto:${client.email}?subject=${subject}&body=${body}`);
-          if (user) await agreementService.updateStatus(agreement.id, 'sent', user.id);
-          setAgreement(prev => prev ? { ...prev, status: 'sent' } : null);
+          await markAsSent();
         }
       },
       {
         text: 'WhatsApp', onPress: async () => {
           const phone = (client.phone || '').replace(/[^0-9]/g, '');
+          if (!phone || phone.length < 10) {
+            Alert.alert('Error', 'Client phone number is not available. Please update the client information.');
+            return;
+          }
           const encoded = encodeURIComponent(message);
           await Linking.openURL(`https://wa.me/${phone}?text=${encoded}`);
-          if (user) await agreementService.updateStatus(agreement.id, 'sent', user.id);
-          setAgreement(prev => prev ? { ...prev, status: 'sent' } : null);
+          await markAsSent();
         }
       },
       {
         text: 'Share', onPress: async () => {
           await Share.share({ message, url: signUrl });
-          if (user) await agreementService.updateStatus(agreement.id, 'sent', user.id);
-          setAgreement(prev => prev ? { ...prev, status: 'sent' } : null);
+          await markAsSent();
         }
       },
       { text: 'Cancel', style: 'cancel' },
