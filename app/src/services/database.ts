@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { Client, Project, Estimate, LineItem, Invoice, CompanyProfile, TeamMember, ProjectMember, ProjectPhase, PhasePhoto, PhaseComment, ShareToken, PhaseStatus } from '../context/AppContext';
+import { Client, Project, Estimate, LineItem, Invoice, CompanyProfile, TeamMember, ProjectMember, ProjectPhase, PhasePhoto, PhaseComment, ShareToken, PhaseStatus, Agreement, AgreementStatus } from '../context/AppContext';
 
 // ============================================
 // TYPE MAPPINGS
@@ -1073,3 +1073,182 @@ export const shareTokenService = {
     if (error) throw error;
   },
 };
+
+// ============================================
+// AGREEMENT SERVICE
+// ============================================
+
+function fillTemplate(template: string, vars: Record<string, string>): string {
+  let result = template;
+  for (const [key, value] of Object.entries(vars)) {
+    result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value || '');
+  }
+  return result;
+}
+
+function buildLineItemsTable(lineItems: LineItem[]): string {
+  const rows = lineItems.map(item => `
+    <tr>
+      <td style="padding:8px;border-bottom:1px solid #eee;">${item.category}</td>
+      <td style="padding:8px;border-bottom:1px solid #eee;">${item.description}</td>
+      <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">${item.quantity} ${item.unit}</td>
+      <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">$${(item.unitPrice || 0).toFixed(2)}</td>
+      <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">$${(item.subtotal || 0).toFixed(2)}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+      <thead>
+        <tr style="background:#f9fafb;">
+          <th style="padding:10px 8px;text-align:left;font-size:12px;color:#6B7280;border-bottom:2px solid #e5e7eb;">Category</th>
+          <th style="padding:10px 8px;text-align:left;font-size:12px;color:#6B7280;border-bottom:2px solid #e5e7eb;">Description</th>
+          <th style="padding:10px 8px;text-align:center;font-size:12px;color:#6B7280;border-bottom:2px solid #e5e7eb;">Qty</th>
+          <th style="padding:10px 8px;text-align:right;font-size:12px;color:#6B7280;border-bottom:2px solid #e5e7eb;">Unit Price</th>
+          <th style="padding:10px 8px;text-align:right;font-size:12px;color:#6B7280;border-bottom:2px solid #e5e7eb;">Subtotal</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+export const agreementService = {
+  async getByInvoice(invoiceId: string, userId: string): Promise<Agreement | null> {
+    const { data, error } = await supabase
+      .from('agreements')
+      .select('*')
+      .eq('invoice_id', invoiceId)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return null;
+
+    return mapAgreement(data);
+  },
+
+  async create(
+    invoice: Invoice,
+    project: { name: string; address: string; city: string; zip: string; serviceType: string },
+    client: { id: string; name: string; email: string; phone: string; address: string },
+    company: CompanyProfile,
+    userId: string,
+    state: string = 'FL'
+  ): Promise<Agreement> {
+    // 1. Load template
+    const { data: templateData } = await supabase
+      .from('contract_templates')
+      .select('*')
+      .eq('state', state)
+      .eq('is_default', true)
+      .limit(1)
+      .maybeSingle();
+
+    if (!templateData) throw new Error(`No contract template found for state: ${state}`);
+
+    // 2. Generate secure token
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const randomValues = new Uint8Array(32);
+    crypto.getRandomValues(randomValues);
+    let token = '';
+    for (let i = 0; i < 32; i++) {
+      token += chars.charAt(randomValues[i] % chars.length);
+    }
+
+    // 3. Build line items table
+    const lineItemsTable = buildLineItemsTable(invoice.lineItems);
+
+    // 4. Build terms blocks HTML
+    let termsBlocksHtml = '';
+    if (templateData.terms_blocks && Array.isArray(templateData.terms_blocks)) {
+      termsBlocksHtml = templateData.terms_blocks.map((block: any) =>
+        `<h3>${block.title}</h3>${block.content}`
+      ).join('');
+    }
+
+    // 5. Fill template variables
+    const totalAmount = (invoice.total || 0).toFixed(2);
+    const depositAmount = ((invoice.total || 0) / 2).toFixed(2);
+    const balanceAmount = depositAmount;
+    const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    const contractHtml = fillTemplate(templateData.content, {
+      client_name: client.name,
+      client_address: client.address || 'N/A',
+      client_phone: client.phone || 'N/A',
+      client_email: client.email || 'N/A',
+      company_name: company.name || 'N/A',
+      company_address: `${company.address || ''}, ${company.city || ''}, ${company.state || 'FL'} ${company.zip || ''}`,
+      company_phone: company.phone || 'N/A',
+      company_email: company.email || 'N/A',
+      license_number: company.licenseNumber || 'N/A',
+      project_name: project.name,
+      service_address: `${project.address}, ${project.city}, FL ${project.zip}`,
+      service_type: project.serviceType || 'Construction',
+      invoice_number: invoice.invoiceNumber,
+      total_amount: totalAmount,
+      subtotal: (invoice.subtotal || 0).toFixed(2),
+      tax_rate: String(invoice.taxRate || 0),
+      tax_amount: (invoice.tax || 0).toFixed(2),
+      deposit_amount: depositAmount,
+      balance_amount: balanceAmount,
+      date: today,
+      line_items_table: lineItemsTable,
+      terms_blocks: termsBlocksHtml,
+    });
+
+    // 6. Insert agreement
+    const { data, error } = await supabase
+      .from('agreements')
+      .insert({
+        invoice_id: invoice.id,
+        project_id: invoice.projectId,
+        client_id: client.id,
+        user_id: userId,
+        state,
+        template_id: templateData.id,
+        contract_html: contractHtml,
+        token,
+        status: 'draft',
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return mapAgreement(data);
+  },
+
+  async updateStatus(id: string, status: AgreementStatus, userId: string): Promise<void> {
+    const updateData: any = { status, updated_at: new Date().toISOString() };
+    if (status === 'sent') updateData.sent_at = new Date().toISOString();
+
+    const { error } = await supabase
+      .from('agreements')
+      .update(updateData)
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    if (error) throw error;
+  },
+};
+
+function mapAgreement(data: any): Agreement {
+  return {
+    id: data.id,
+    invoiceId: data.invoice_id,
+    projectId: data.project_id,
+    clientId: data.client_id,
+    state: data.state,
+    contractHtml: data.contract_html,
+    token: data.token,
+    status: data.status as AgreementStatus,
+    signatureImageUrl: data.signature_image_url,
+    signedName: data.signed_name,
+    signedDate: data.signed_date,
+    pdfUrl: data.pdf_url,
+    createdAt: data.created_at,
+  };
+}

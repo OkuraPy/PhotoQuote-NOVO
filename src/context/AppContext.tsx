@@ -156,6 +156,24 @@ export interface ProjectPhase {
   createdAt: string;
 }
 
+export type AgreementStatus = 'draft' | 'sent' | 'pending_signature' | 'signed';
+
+export interface Agreement {
+  id: string;
+  invoiceId: string;
+  projectId: string;
+  clientId: string;
+  state: string;
+  contractHtml: string;
+  token: string;
+  status: AgreementStatus;
+  signatureImageUrl: string | null;
+  signedName: string | null;
+  signedDate: string | null;
+  pdfUrl: string | null;
+  createdAt: string;
+}
+
 export interface ShareToken {
   id: string;
   projectId: string;

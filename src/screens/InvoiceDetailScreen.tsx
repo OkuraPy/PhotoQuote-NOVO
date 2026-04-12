@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,18 +8,26 @@ import {
   Alert,
   Platform,
   Linking,
+  ActivityIndicator,
+  Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Send,
   CheckCircle,
   FileText,
+  FileSignature,
+  Clock,
+  XCircle,
+  Link2,
 } from 'lucide-react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { colors, typography, spacing, radii, shadows } from '../theme';
 import { ScreenHeader, Card, Button, Divider } from '../components/ui';
-import { useApp, Invoice, InvoiceStatus, CompanyProfile } from '../context/AppContext';
+import { useApp, Invoice, InvoiceStatus, CompanyProfile, Agreement } from '../context/AppContext';
+import { agreementService } from '../services/database';
+import { useAuth } from '../context/AuthContext';
 
 interface InvoiceDetailScreenProps {
   navigation: any;
@@ -140,11 +148,97 @@ function buildInvoiceShareText(invoice: Invoice, projectName: string, clientName
 
 export default function InvoiceDetailScreen({ navigation, route }: InvoiceDetailScreenProps) {
   const { invoices, getProject, getClient, updateInvoice, companyProfile } = useApp();
+  const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const invoiceId = route.params?.invoiceId as string;
   const invoice = invoices.find(inv => inv.id === invoiceId);
   const project = invoice ? getProject(invoice.projectId) : undefined;
   const client = project ? getClient(project.clientId) : undefined;
+
+  const [agreement, setAgreement] = useState<Agreement | null>(null);
+  const [loadingAgreement, setLoadingAgreement] = useState(false);
+  const [generatingContract, setGeneratingContract] = useState(false);
+
+  useEffect(() => {
+    if (invoice && user) {
+      setLoadingAgreement(true);
+      agreementService.getByInvoice(invoice.id, user.id)
+        .then(setAgreement)
+        .catch(console.error)
+        .finally(() => setLoadingAgreement(false));
+    }
+  }, [invoice?.id, user?.id]);
+
+  const handleGenerateContract = async () => {
+    if (!invoice || !project || !client || !user) return;
+    setGeneratingContract(true);
+    try {
+      const ag = await agreementService.create(
+        invoice,
+        { name: project.name, address: project.address, city: project.city, zip: project.zip, serviceType: project.serviceType },
+        { id: client.id, name: client.name, email: client.email, phone: client.phone, address: client.address },
+        companyProfile,
+        user.id,
+        'FL'
+      );
+      setAgreement(ag);
+      Alert.alert('Contract Generated', 'The contract has been created. You can now send it to the client for signing.');
+    } catch (error: any) {
+      Alert.alert('Error', error?.message || 'Failed to generate contract.');
+    } finally {
+      setGeneratingContract(false);
+    }
+  };
+
+  const handleSendContract = async () => {
+    if (!agreement || !client) return;
+    const signUrl = `https://photoquote-client-portal.vercel.app/agreement/sign/${agreement.token}`;
+    const message = `Hi ${client.name},\n\nPlease review and sign the construction agreement for your project.\n\nSign here: ${signUrl}\n\nThank you,\n${companyProfile.name || 'PhotoQuote AI'}`;
+
+    Alert.alert('Send Contract', 'Choose how to send:', [
+      {
+        text: 'Email', onPress: async () => {
+          const subject = encodeURIComponent('Construction Agreement - Signature Required');
+          const body = encodeURIComponent(message);
+          await Linking.openURL(`mailto:${client.email}?subject=${subject}&body=${body}`);
+          if (user) await agreementService.updateStatus(agreement.id, 'sent', user.id);
+          setAgreement(prev => prev ? { ...prev, status: 'sent' } : null);
+        }
+      },
+      {
+        text: 'WhatsApp', onPress: async () => {
+          const phone = (client.phone || '').replace(/[^0-9]/g, '');
+          const encoded = encodeURIComponent(message);
+          await Linking.openURL(`https://wa.me/${phone}?text=${encoded}`);
+          if (user) await agreementService.updateStatus(agreement.id, 'sent', user.id);
+          setAgreement(prev => prev ? { ...prev, status: 'sent' } : null);
+        }
+      },
+      {
+        text: 'Share', onPress: async () => {
+          await Share.share({ message, url: signUrl });
+          if (user) await agreementService.updateStatus(agreement.id, 'sent', user.id);
+          setAgreement(prev => prev ? { ...prev, status: 'sent' } : null);
+        }
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const handleViewContract = async () => {
+    if (!agreement) return;
+    try {
+      const html = `<html><head><meta charset="utf-8"><style>body{font-family:Helvetica,Arial,sans-serif;padding:40px;color:#1F2937;max-width:800px;margin:0 auto;}</style></head><body>${agreement.contractHtml}</body></html>`;
+      const { uri } = await Print.printToFileAsync({ html });
+      if (Platform.OS === 'web') {
+        await Print.printAsync({ html });
+      } else {
+        await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Contract PDF' });
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to generate contract PDF.');
+    }
+  };
 
   if (!invoice) {
     return (
@@ -375,23 +469,84 @@ export default function InvoiceDetailScreen({ navigation, route }: InvoiceDetail
           <Text style={styles.cardTitle}>Total Due</Text>
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Subtotal</Text>
-            <Text style={styles.totalValue}>${invoice.subtotal.toFixed(2)}</Text>
+            <Text style={styles.totalValue}>${(invoice.subtotal || 0).toFixed(2)}</Text>
           </View>
           <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Tax ({invoice.taxRate}%)</Text>
-            <Text style={styles.totalValue}>${invoice.tax.toFixed(2)}</Text>
+            <Text style={styles.totalLabel}>Tax ({invoice.taxRate || 0}%)</Text>
+            <Text style={styles.totalValue}>${(invoice.tax || 0).toFixed(2)}</Text>
           </View>
-          {invoice.marginRate > 0 && (
+          {(invoice.marginRate || 0) > 0 && (
             <View style={styles.totalRow}>
               <Text style={styles.totalLabel}>Margin ({invoice.marginRate}%)</Text>
-              <Text style={styles.totalValue}>${invoice.margin.toFixed(2)}</Text>
+              <Text style={styles.totalValue}>${(invoice.margin || 0).toFixed(2)}</Text>
             </View>
           )}
           <Divider marginVertical={spacing.md} />
           <View style={styles.totalRow}>
             <Text style={styles.grandTotalLabel}>Total Due</Text>
-            <Text style={styles.grandTotalValue}>${invoice.total.toFixed(2)}</Text>
+            <Text style={styles.grandTotalValue}>${(invoice.total || 0).toFixed(2)}</Text>
           </View>
+        </Card>
+
+        {/* Contract / Agreement Section */}
+        <Card style={styles.cardSpacing}>
+          <Text style={styles.cardTitle}>Contract</Text>
+          {loadingAgreement ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : agreement ? (
+            <View>
+              <View style={styles.contractStatusRow}>
+                {agreement.status === 'signed' ? (
+                  <CheckCircle size={20} color={colors.success} />
+                ) : agreement.status === 'sent' || agreement.status === 'pending_signature' ? (
+                  <Clock size={20} color={colors.warning} />
+                ) : (
+                  <XCircle size={20} color={colors.textTertiary} />
+                )}
+                <Text style={[styles.contractStatusText, {
+                  color: agreement.status === 'signed' ? colors.success
+                    : agreement.status === 'sent' ? colors.warning
+                    : colors.textTertiary
+                }]}>
+                  {agreement.status === 'signed' ? `Signed by ${agreement.signedName}`
+                    : agreement.status === 'sent' ? 'Pending Signature'
+                    : agreement.status === 'pending_signature' ? 'Pending Signature'
+                    : 'Draft — Not Sent'}
+                </Text>
+              </View>
+              {agreement.signedDate && (
+                <Text style={styles.contractMeta}>
+                  Signed on {new Date(agreement.signedDate).toLocaleDateString()}
+                </Text>
+              )}
+              <View style={styles.contractActions}>
+                <Button
+                  title="View PDF"
+                  onPress={handleViewContract}
+                  size="md"
+                  variant="outline"
+                  style={{ flex: 1 }}
+                />
+                {agreement.status !== 'signed' && (
+                  <Button
+                    title={agreement.status === 'draft' ? 'Send for Signing' : 'Resend'}
+                    onPress={handleSendContract}
+                    size="md"
+                    style={{ flex: 1 }}
+                  />
+                )}
+              </View>
+            </View>
+          ) : (
+            <Button
+              title={generatingContract ? 'Generating...' : 'Generate Contract'}
+              onPress={handleGenerateContract}
+              size="lg"
+              fullWidth
+              icon={<FileSignature size={18} color={colors.textOnPrimary} />}
+              disabled={generatingContract}
+            />
+          )}
         </Card>
 
         {/* Send Invoice Button */}
@@ -589,5 +744,27 @@ const styles = StyleSheet.create({
   // Send invoice
   sendButton: {
     marginBottom: spacing.lg,
+  },
+
+  // Contract section
+  contractStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  contractStatusText: {
+    fontSize: typography.sizes.base,
+    fontWeight: typography.weights.semibold,
+  },
+  contractMeta: {
+    fontSize: typography.sizes.xs,
+    color: colors.textTertiary,
+    marginBottom: spacing.md,
+  },
+  contractActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
   },
 });
