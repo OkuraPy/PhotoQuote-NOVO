@@ -156,15 +156,8 @@ PRICING GUIDELINES for ${params.city || 'Florida'}, ${params.state || 'FL'}:
   let validPhotoCount = 0;
 
   for (const uri of photosToSend) {
-    if (isRemoteUrl(uri)) {
-      // Pass public URL directly to OpenAI (no need to download/re-encode)
-      userContent.push({
-        type: 'input_image',
-        image_url: uri,
-      });
-      validPhotoCount++;
-    } else {
-      // Local file: convert to base64
+    try {
+      // Always convert to base64 for reliability (avoids CDN issues, HEIC format issues)
       const b64 = await imageToBase64(uri);
       if (b64) {
         userContent.push({
@@ -173,6 +166,8 @@ PRICING GUIDELINES for ${params.city || 'Florida'}, ${params.state || 'FL'}:
         });
         validPhotoCount++;
       }
+    } catch (error) {
+      console.warn(`[generateAIEstimate] Skipping photo ${uri}:`, error);
     }
   }
 

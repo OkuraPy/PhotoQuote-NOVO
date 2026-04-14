@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import * as FileSystem from 'expo-file-system/legacy';
 import { decode } from 'base64-arraybuffer';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 
 const getMimeType = (ext: string): string => {
   const map: Record<string, string> = {
@@ -9,6 +10,22 @@ const getMimeType = (ext: string): string => {
   };
   return map[ext] || 'image/jpeg';
 };
+
+/**
+ * Convert any image (including HEIC) to JPEG using expo-image-manipulator
+ */
+async function ensureJpeg(uri: string): Promise<string> {
+  try {
+    const result = await manipulateAsync(uri, [], {
+      compress: 0.8,
+      format: SaveFormat.JPEG,
+    });
+    return result.uri;
+  } catch (error) {
+    console.warn('Failed to convert image to JPEG, using original:', error);
+    return uri;
+  }
+}
 
 export const storageService = {
   /**
@@ -60,11 +77,12 @@ export const storageService = {
     photoId: string
   ): Promise<string> {
     try {
-      const fileExtension = localUri.split('.').pop()?.toLowerCase() || 'jpg';
-      const fileName = `${userId}/${projectId}/${photoId}.${fileExtension}`;
+      // Always convert to JPEG (handles HEIC, PNG, etc.)
+      const jpegUri = await ensureJpeg(localUri);
+      const fileName = `${userId}/${projectId}/${photoId}.jpg`;
 
       // Read file as base64
-      const base64 = await FileSystem.readAsStringAsync(localUri, {
+      const base64 = await FileSystem.readAsStringAsync(jpegUri, {
         encoding: 'base64' as const,
       });
 
@@ -72,7 +90,7 @@ export const storageService = {
       const { data, error } = await supabase.storage
         .from('project-photos')
         .upload(fileName, decode(base64), {
-          contentType: getMimeType(fileExtension),
+          contentType: 'image/jpeg',
           upsert: false,
         });
 
