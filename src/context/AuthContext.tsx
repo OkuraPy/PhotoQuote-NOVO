@@ -47,12 +47,25 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
+// ═══ MAINTENANCE MODE — set to true to disable all access ═══
+const MAINTENANCE_MODE = true;
+const MAINTENANCE_MESSAGE = 'The server is temporarily disabled for maintenance. Please try again later.';
+
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (MAINTENANCE_MODE) {
+      // Force sign out everyone and block access
+      supabase.auth.signOut().catch(() => {});
+      setUser(null);
+      setSession(null);
+      setLoading(false);
+      return;
+    }
+
     // Check active session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -79,6 +92,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, []);
 
   const signIn = async (email: string, password: string) => {
+    if (MAINTENANCE_MODE) {
+      return { error: { message: MAINTENANCE_MESSAGE, status: 503 } as AuthError };
+    }
     logLoginAttempt(email);
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -103,6 +119,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     password: string,
     companyData: CompanyProfile
   ) => {
+    if (MAINTENANCE_MODE) {
+      return { error: { message: MAINTENANCE_MESSAGE, status: 503 } as AuthError, requiresEmailConfirmation: false };
+    }
     logSignUpAttempt(email, companyData.name);
     try {
       // Create auth user
