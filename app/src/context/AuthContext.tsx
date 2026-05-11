@@ -48,7 +48,7 @@ interface AuthProviderProps {
 }
 
 // ═══ MAINTENANCE MODE — set to true to disable all access ═══
-const MAINTENANCE_MODE = true;
+const MAINTENANCE_MODE = false;
 const MAINTENANCE_MESSAGE = 'The server is temporarily disabled for maintenance. Please try again later.';
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
