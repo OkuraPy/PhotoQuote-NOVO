@@ -23,7 +23,7 @@ import {
   Check,
 } from 'lucide-react-native';
 import { colors, typography, spacing, radii, shadows } from '../theme';
-import { ScreenHeader, Card, Button, Input, Divider } from '../components/ui';
+import { ScreenHeader, Card, Button, Input, Divider, DecimalInput } from '../components/ui';
 import { useApp } from '../context/AppContext';
 import { generateAIEstimate, PhotoValidationError } from '../services/openaiService';
 
@@ -834,13 +834,11 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
               <View style={styles.lineItemValuesRow}>
                 <View style={styles.valueCol}>
                   <Text style={styles.fieldLabel}>Qty</Text>
-                  <TextInput
+                  <DecimalInput
                     style={styles.editInputSmall}
-                    value={String(item.quantity)}
-                    onChangeText={(v) => updateLineItem(item.id, 'quantity', parseFloat(v) || 0)}
-                    keyboardType="numeric"
+                    value={item.quantity}
+                    onChangeValue={(n) => updateLineItem(item.id, 'quantity', n)}
                     placeholder="0"
-                    placeholderTextColor={colors.textTertiary}
                   />
                 </View>
                 <View style={styles.valueCol}>
@@ -855,13 +853,11 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
                 </View>
                 <View style={styles.valueCol}>
                   <Text style={styles.fieldLabel}>$/Unit</Text>
-                  <TextInput
+                  <DecimalInput
                     style={styles.editInputSmall}
-                    value={String(item.unitPrice)}
-                    onChangeText={(v) => updateLineItem(item.id, 'unitPrice', parseFloat(v) || 0)}
-                    keyboardType="numeric"
+                    value={item.unitPrice}
+                    onChangeValue={(n) => updateLineItem(item.id, 'unitPrice', n)}
                     placeholder="0.00"
-                    placeholderTextColor={colors.textTertiary}
                   />
                 </View>
               </View>

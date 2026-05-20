@@ -27,6 +27,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { colors, typography, spacing, radii, shadows } from '../theme';
 import { ScreenHeader, Card, Button, Divider } from '../components/ui';
+import { DecimalInput } from '../components/ui';
 import { useApp, Estimate, EstimateStatus, CompanyProfile, LineItem } from '../context/AppContext';
 
 interface EstimateDetailScreenProps {
@@ -579,11 +580,10 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
                   <View style={[styles.editRow, { marginTop: spacing.xs }]}>
                     <View style={{ flex: 1, marginRight: spacing.xs }}>
                       <Text style={styles.editLabel}>Qty</Text>
-                      <TextInput
+                      <DecimalInput
                         style={styles.editInput}
-                        value={String(item.quantity)}
-                        onChangeText={(v) => updateLineItem(index, 'quantity', Number(v) || 0)}
-                        keyboardType="numeric"
+                        value={item.quantity}
+                        onChangeValue={(n) => updateLineItem(index, 'quantity', n)}
                       />
                     </View>
                     <View style={{ flex: 1, marginRight: spacing.xs }}>
@@ -596,11 +596,10 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.editLabel}>Price</Text>
-                      <TextInput
+                      <DecimalInput
                         style={styles.editInput}
-                        value={String(item.unitPrice)}
-                        onChangeText={(v) => updateLineItem(index, 'unitPrice', Number(v) || 0)}
-                        keyboardType="numeric"
+                        value={item.unitPrice}
+                        onChangeValue={(n) => updateLineItem(index, 'unitPrice', n)}
                       />
                     </View>
                   </View>

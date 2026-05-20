@@ -4,6 +4,11 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-05-20 12:15] — fix: permitir digitar decimais nos itens (Fase 3)
+- **O que mudou**: novo componente `DecimalInput` (buffer de texto próprio) usado nos campos Qty e preço dos editores de itens (Preview e Detail). Agora é possível digitar "6.50".
+- **Arquivos**: `src/components/ui/DecimalInput.tsx` (novo), `src/components/ui/index.ts`, `src/screens/EstimatePreviewScreen.tsx`, `src/screens/EstimateDetailScreen.tsx`, `docs/changelog.md`
+- **Bug corrigido**: `value={String(n)}` + `parseFloat` imediato apagava o ponto decimal enquanto se digitava — era impossível inserir centavos.
+
 ### [2026-05-20 12:05] — chore: remover código morto app/ + tipos do DB (Fase 2)
 - **O que mudou**: deletado o diretório `app/` (cópia duplicada e desatualizada do projeto, não usada pela build — 37 arquivos). Interfaces `DBEstimate`/`DBLineItem` atualizadas para refletir as colunas reais (margin_rate, margin_amount, grand_total, confidence, subtotal, unit, taxable).
 - **Arquivos**: `app/**` (removido), `src/services/database.ts`, `docs/changelog.md`

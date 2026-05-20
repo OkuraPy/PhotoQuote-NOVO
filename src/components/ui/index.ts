@@ -10,3 +10,4 @@ export { default as StatCard } from './StatCard';
 export { default as StatusBadge } from './StatusBadge';
 export { default as Divider } from './Divider';
 export { default as EmptyState } from './EmptyState';
+export { default as DecimalInput } from './DecimalInput';
