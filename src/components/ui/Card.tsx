@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, TouchableOpacity, StyleSheet, ViewStyle } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, ViewStyle, StyleProp } from 'react-native';
 import { colors, spacing, radii, shadows } from '../../theme';
 
 type CardVariant = 'default' | 'elevated' | 'outlined';
@@ -8,7 +8,7 @@ interface CardProps {
   children: React.ReactNode;
   variant?: CardVariant;
   onPress?: () => void;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   noPadding?: boolean;
 }
 
