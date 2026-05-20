@@ -227,7 +227,7 @@ export default function EstimateDetailScreen({ navigation, route }: EstimateDeta
       const subtotal = editLineItems.reduce((sum, item) => sum + ((item.quantity || 0) * (item.unitPrice || 0)), 0);
       const taxableSubtotal = editLineItems.filter(i => i.taxable).reduce((sum, item) => sum + ((item.quantity || 0) * (item.unitPrice || 0)), 0);
       const tax = taxableSubtotal * (taxRate / 100);
-      const margin = subtotal * ((estimate.marginRate || 0) / 100);
+      const margin = (subtotal + tax) * ((estimate.marginRate || 0) / 100);
       const total = subtotal + tax + margin;
 
       const updatedItems = editLineItems.map(item => ({
