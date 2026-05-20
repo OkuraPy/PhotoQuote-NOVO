@@ -48,6 +48,10 @@ interface DBEstimate {
   subtotal: number;
   tax_rate: number;
   tax_amount: number;
+  margin_rate: number | null;
+  margin_amount: number | null;
+  grand_total: number | null;
+  confidence: number | null;
   total: number;
   notes: string | null;
   valid_until: string | null;
@@ -61,6 +65,9 @@ interface DBLineItem {
   quantity: number;
   unit_price: number;
   total: number;
+  subtotal: number | null;
+  unit: string | null;
+  taxable: boolean | null;
   item_order: number;
   category: string | null;
   created_at: string;
