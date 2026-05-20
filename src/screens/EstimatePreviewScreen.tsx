@@ -507,6 +507,7 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
   const [photoAnalysis, setPhotoAnalysis] = useState('');
   const [photoRejected, setPhotoRejected] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [aiError, setAiError] = useState<string | null>(null);
   const aiCalled = useRef(false);
 
   useEffect(() => {
@@ -556,7 +557,8 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
         } else {
           const errorMsg = err instanceof Error ? err.message : 'Unknown error';
           console.error('AI estimate failed:', errorMsg);
-          Alert.alert('AI Estimate Failed', errorMsg);
+          // Non-blocking: keep the base estimate already on screen, show an inline notice.
+          setAiError(errorMsg);
         }
       } finally {
         setIsLoadingAI(false);
@@ -631,22 +633,6 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
     }
   };
 
-  // ── Loading State ──
-  if (isLoadingAI) {
-    return (
-      <View style={styles.container}>
-        <ScreenHeader title="Edit Estimate" onBack={() => navigation.goBack()} />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingTitle}>AI analyzing your project...</Text>
-          <Text style={styles.loadingText}>
-            Reviewing {project?.photos.length ?? 0} photo(s) and project details to generate an accurate estimate.
-          </Text>
-        </View>
-      </View>
-    );
-  }
-
   // ── Photo Rejected State ──
   if (photoRejected) {
     return (
@@ -718,18 +704,40 @@ export default function EstimatePreviewScreen({ navigation, route }: EstimatePre
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Success Banner */}
-        <View style={styles.successBanner}>
-          <CheckCircle size={28} color={colors.success} style={styles.successIconSpacing} />
-          <View style={styles.successContent}>
-            <Text style={styles.successTitle}>Estimate Generated!</Text>
-            <Text style={styles.successText}>
-              {aiSource === 'ai'
-                ? `AI analyzed ${project?.photos.length ?? 0} photo(s) for ${services.join(', ')} with ${aiConfidence}% confidence. Review and edit all items below before saving.`
-                : `Estimate generated for ${services.join(', ')} based on project data. Review and edit all items below before saving.`}
-            </Text>
+        {/* Status Banner: loading / error / success */}
+        {isLoadingAI ? (
+          <View style={styles.aiLoadingBanner}>
+            <ActivityIndicator size="small" color={colors.info} style={styles.successIconSpacing} />
+            <View style={styles.successContent}>
+              <Text style={styles.aiLoadingTitle}>AI is analyzing {project?.photos.length ?? 0} photo(s)…</Text>
+              <Text style={styles.successText}>
+                We pre-filled a base estimate below — you can start editing right away. The AI will refine it in a moment.
+              </Text>
+            </View>
           </View>
-        </View>
+        ) : aiError ? (
+          <View style={styles.aiErrorBanner}>
+            <AlertTriangle size={28} color={colors.warning} style={styles.successIconSpacing} />
+            <View style={styles.successContent}>
+              <Text style={styles.aiErrorTitle}>Using base estimate</Text>
+              <Text style={styles.successText}>
+                Couldn't reach the AI ({aiError}). We generated a base estimate for {services.join(', ')} from your project data — review and edit all items below before saving.
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.successBanner}>
+            <CheckCircle size={28} color={colors.success} style={styles.successIconSpacing} />
+            <View style={styles.successContent}>
+              <Text style={styles.successTitle}>Estimate Generated!</Text>
+              <Text style={styles.successText}>
+                {aiSource === 'ai'
+                  ? `AI analyzed ${project?.photos.length ?? 0} photo(s) for ${services.join(', ')} with ${aiConfidence}% confidence. Review and edit all items below before saving.`
+                  : `Estimate generated for ${services.join(', ')} based on project data. Review and edit all items below before saving.`}
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Service Description reminder */}
         {description.trim().length > 0 && (
@@ -1081,6 +1089,39 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.sm,
     color: colors.textSecondary,
     lineHeight: typography.lineHeights.base,
+  },
+
+  // AI loading banner
+  aiLoadingBanner: {
+    backgroundColor: colors.infoBg,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    flexDirection: 'row',
+    marginBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.info,
+  },
+  aiLoadingTitle: {
+    fontSize: typography.sizes.lg,
+    fontWeight: typography.weights.semibold,
+    color: colors.info,
+    marginBottom: spacing.xs,
+  },
+  // AI error banner
+  aiErrorBanner: {
+    backgroundColor: colors.warningBg,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    flexDirection: 'row',
+    marginBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.warning,
+  },
+  aiErrorTitle: {
+    fontSize: typography.sizes.lg,
+    fontWeight: typography.weights.semibold,
+    color: colors.warning,
+    marginBottom: spacing.xs,
   },
 
   // Description banner

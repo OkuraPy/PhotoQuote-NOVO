@@ -180,7 +180,7 @@ PRICING GUIDELINES for ${params.city || 'Florida'}, ${params.state || 'FL'}:
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 min timeout
+  const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 min timeout (pro reasoning model is slow with multiple photos)
 
   let response: Response;
   try {
@@ -197,7 +197,7 @@ PRICING GUIDELINES for ${params.city || 'Florida'}, ${params.state || 'FL'}:
         { role: 'user', content: userContent },
       ],
       text: { format: { type: 'json_object' } },
-      max_output_tokens: 4096,
+      max_output_tokens: 16000,
     }),
     signal: controller.signal,
   });
