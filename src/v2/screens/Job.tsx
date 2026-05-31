@@ -3,7 +3,7 @@ import React from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
-import { calcTotals, CLIENTS, COMPANY, ESTIMATE_ITEMS, fmt, JOBS, LineItem, split, STAGES } from '../data';
+import { calcTotals, CLIENTS, COMPANY, ESTIMATE_ITEMS, fmt, LineItem, split, STAGES } from '../data';
 import { Between, Btn, Card, CatChip, Divider, Nav, NavBtn, PhotoTile, Row, SectionTitle, SendSheet, StageChip, useStore } from '../ui';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
@@ -44,19 +44,19 @@ function Timeline({ stage }: { stage: Stage }) {
 
 export function JobScreen({ go, back, params }: NavProp) {
   const { store, up } = useStore();
-  const job = params && params.id && params.id !== 'new' ? JOBS.find((j) => j.id === params.id) : null;
-  const client = job ? CLIENTS.find((c) => c.name === job.client) : CLIENTS[0];
-  const id = (params && params.id) || 'new';
+  const job = params?.job || null;
+  const client = job ? CLIENTS.find((c) => c.name === job.client) || null : CLIENTS[0];
+  const id = job?.id || (params && params.id) || 'new';
   const baseStage: Stage = job ? job.stage : 'Quoted';
   const stage = store.stageOverride[id] || baseStage;
   const tab = store.jobTab || 'quote';
   const setStage = (s: Stage) => up((st) => ({ stageOverride: { ...st.stageOverride, [id]: s } }));
   const setTab = (k: string) => up({ jobTab: k });
-  const items = ESTIMATE_ITEMS;
+  const items = ESTIMATE_ITEMS; // line items wired to the real estimate in the next increment
   const t = calcTotals(items, 8.25, 0);
-  const [vd, vc] = split(t.total);
+  const [vd, vc] = split(job ? job.value : t.total);
   const name = job ? job.title : 'Exterior repaint';
-  const cName = job ? job.client : client?.name || 'Maria Alvarez';
+  const cName = job ? job.client || 'No client' : client?.name || 'Maria Alvarez';
   const addr = job ? job.addr : client?.addr || '14 Linden Ave';
   const next = NEXT[stage];
 

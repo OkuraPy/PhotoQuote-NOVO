@@ -5,10 +5,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useQuery } from '@tanstack/react-query';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
-import { COMPANY, fmt0, initials, Job, JOBS, split, STAGES } from '../data';
+import { COMPANY, fmt0, initials, Job, split, STAGES } from '../data';
 import { Avatar, Between, Btn, Card, Empty, NavBtn, Row, SearchBar, SectionTitle, StageChip, Switch, useStore } from '../ui';
 import { useAuth } from '../lib/auth';
-import { fetchClients } from '../lib/api';
+import { fetchClients, fetchCompanyProfile, fetchJobs } from '../lib/api';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
@@ -52,22 +52,27 @@ export function JobCard({ j, i, onPress }: { j: Job; i: number; onPress: () => v
 
 /* ---------------- HOME ---------------- */
 export function HomeScreen({ go }: NavProp) {
-  const pipeline = JOBS.filter((j) => ['Draft', 'Quoted', 'Sent', 'Approved'].includes(j.stage)).reduce((s, j) => s + j.value, 0);
-  const invoiced = JOBS.filter((j) => j.stage === 'Invoiced').reduce((s, j) => s + j.value, 0);
-  const collected = JOBS.filter((j) => j.stage === 'Paid').reduce((s, j) => s + j.value, 0);
-  const active = JOBS.filter((j) => j.stage !== 'Paid').length;
+  const { user } = useAuth();
+  const { data: jobs = [], isLoading } = useQuery({ queryKey: ['jobs', user?.id], queryFn: () => fetchJobs(user!.id), enabled: !!user?.id });
+  const { data: profile } = useQuery({ queryKey: ['company', user?.id], queryFn: () => fetchCompanyProfile(user!.id), enabled: !!user?.id });
+  const pipeline = jobs.filter((j) => ['Draft', 'Quoted', 'Sent', 'Approved'].includes(j.stage)).reduce((s, j) => s + j.value, 0);
+  const invoiced = jobs.filter((j) => j.stage === 'Invoiced').reduce((s, j) => s + j.value, 0);
+  const collected = jobs.filter((j) => j.stage === 'Paid').reduce((s, j) => s + j.value, 0);
+  const active = jobs.filter((j) => j.stage !== 'Paid').length;
+  const openQuotes = jobs.filter((j) => ['Quoted', 'Sent'].includes(j.stage)).length;
   const [pd, pc] = split(pipeline);
-  const recent = JOBS.slice(0, 4);
+  const recent = jobs.slice(0, 4);
+  const companyName = (profile as any)?.company_name || 'Your company';
   return (
     <>
       <Between style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4, alignItems: 'flex-start' }}>
-        <View>
-          <Text style={{ fontFamily: fonts.bold, fontSize: 12, letterSpacing: 1.5, color: colors.muted }}>TUE · MAY 31</Text>
-          <Text style={{ fontFamily: fonts.extrabold, fontSize: 30, color: colors.ink, letterSpacing: -0.7, marginTop: 4 }}>{COMPANY.name}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontFamily: fonts.bold, fontSize: 12, letterSpacing: 1.5, color: colors.muted }}>WELCOME BACK</Text>
+          <Text numberOfLines={1} style={{ fontFamily: fonts.extrabold, fontSize: 28, color: colors.ink, letterSpacing: -0.7, marginTop: 4 }}>{companyName}</Text>
         </View>
         <Row style={{ gap: 8 }}>
           <NavBtn icon="bell" />
-          <Avatar text="AR" size={40} radius={13} />
+          <Avatar text={initials(companyName)} size={40} radius={13} />
         </Row>
       </Between>
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false}>
@@ -80,11 +85,11 @@ export function HomeScreen({ go }: NavProp) {
             <Text style={{ fontFamily: fonts.num, fontSize: 40, color: '#fff', marginTop: 8, letterSpacing: -0.8 }}>
               {pd}<Text style={{ fontSize: 24, color: 'rgba(255,255,255,0.7)' }}>{pc}</Text>
             </Text>
-            <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 5 }}>{active} active jobs · 4 open quotes</Text>
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 5 }}>{active} active jobs · {openQuotes} open quotes</Text>
           </LinearGradient>
           <Row style={{ gap: 12, alignItems: 'stretch' }}>
             <Metric icon="receipt" label="Invoiced" value={fmt0(invoiced)} meta="awaiting payment" />
-            <Metric icon="wallet" label="Collected" value={fmt0(collected)} meta="this month" valueColor={colors.success} />
+            <Metric icon="wallet" label="Collected" value={fmt0(collected)} meta="received" valueColor={colors.success} />
           </Row>
         </View>
 
@@ -95,11 +100,19 @@ export function HomeScreen({ go }: NavProp) {
         </Row>
 
         <SectionTitle title="Recent jobs" link="See all" onLink={() => go('jobs', {}, 'tab')} />
-        <View style={{ gap: 10 }}>
-          {recent.map((j, i) => (
-            <JobCard key={j.id} j={j} i={i} onPress={() => go('job', { id: j.id })} />
-          ))}
-        </View>
+        {isLoading ? (
+          <View style={{ paddingVertical: 30, alignItems: 'center' }}><ActivityIndicator color={colors.primary} /></View>
+        ) : recent.length === 0 ? (
+          <Card pad style={{ alignItems: 'center', paddingVertical: 28 }}>
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.muted, textAlign: 'center' }}>No jobs yet. Tap "New Quote" to create your first.</Text>
+          </Card>
+        ) : (
+          <View style={{ gap: 10 }}>
+            {recent.map((j, i) => (
+              <JobCard key={j.id} j={j} i={i} onPress={() => go('job', { job: j })} />
+            ))}
+          </View>
+        )}
       </ScrollView>
     </>
   );
@@ -121,11 +134,13 @@ function Metric({ icon, label, value, meta, valueColor }: { icon: string; label:
 /* ---------------- JOBS LIST ---------------- */
 export function JobsScreen({ go }: NavProp) {
   const { store, up } = useStore();
+  const { user } = useAuth();
+  const { data: jobs = [], isLoading } = useQuery({ queryKey: ['jobs', user?.id], queryFn: () => fetchJobs(user!.id), enabled: !!user?.id });
   const filter = store.jobFilter || 'All';
   const q = store.jobQ || '';
   const filters = ['All', ...STAGES];
-  let list = JOBS.filter((j) => filter === 'All' || j.stage === filter);
-  if (q) list = list.filter((j) => (j.client || 'no client').toLowerCase().includes(q.toLowerCase()) || j.addr.toLowerCase().includes(q.toLowerCase()));
+  let list = jobs.filter((j) => filter === 'All' || j.stage === filter);
+  if (q) list = list.filter((j) => (j.client || 'no client').toLowerCase().includes(q.toLowerCase()) || j.addr.toLowerCase().includes(q.toLowerCase()) || j.title.toLowerCase().includes(q.toLowerCase()));
   return (
     <>
       <Between style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>
@@ -147,12 +162,14 @@ export function JobsScreen({ go }: NavProp) {
         </ScrollView>
       </View>
       <ScrollView contentContainerStyle={[scroll, { paddingTop: 14 }]} showsVerticalScrollIndicator={false}>
-        {list.length === 0 ? (
-          <Empty icon="search" title="No matches" body="Try a different filter or search term." />
+        {isLoading ? (
+          <View style={{ paddingTop: 40, alignItems: 'center' }}><ActivityIndicator color={colors.primary} /></View>
+        ) : list.length === 0 ? (
+          <Empty icon="layers" title={jobs.length === 0 ? 'No jobs yet' : 'No matches'} body={jobs.length === 0 ? 'Tap "New Quote" to create your first job.' : 'Try a different filter or search.'} />
         ) : (
           <View style={{ gap: 10 }}>
             {list.map((j, i) => (
-              <JobCard key={j.id} j={j} i={i} onPress={() => go('job', { id: j.id })} />
+              <JobCard key={j.id} j={j} i={i} onPress={() => go('job', { job: j })} />
             ))}
           </View>
         )}
