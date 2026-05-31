@@ -7,6 +7,7 @@ import { calcTotals, CLIENTS, COMPANY, ESTIMATE_ITEMS, fmt, LineItem, split, STA
 import { useQuery } from '@tanstack/react-query';
 import { fetchCompanyProfile, fetchJobDetail, JobDetail } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { sendDoc } from '../lib/send';
 import { Between, Btn, Card, CatChip, Divider, Nav, NavBtn, PhotoTile, Row, SectionTitle, SendSheet, StageChip, useStore } from '../ui';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
@@ -140,7 +141,22 @@ export function JobScreen({ go, back, params }: NavProp) {
         open={store.sheet}
         onClose={() => up({ sheet: false })}
         what={tab === 'invoice' ? 'invoice' : tab === 'contract' ? 'contract' : 'quote'}
-        onSent={() => { up({ sheet: false }); setStage('Sent'); }}
+        onSent={(option: string) => {
+          up({ sheet: false });
+          const kind = tab === 'invoice' ? 'invoice' : tab === 'contract' ? 'contract' : 'quote';
+          const tt = kind === 'invoice' ? invoiceTotals : quoteTotals;
+          const co = (company as any) || {};
+          sendDoc(option, {
+            kind,
+            docLabel: kind === 'invoice' ? 'Invoice' : kind === 'contract' ? 'Agreement' : 'Quote',
+            number: kind === 'invoice' ? inv?.number : undefined,
+            company: { name: co.company_name || 'Your company', license: co.company_license, address: co.company_address, phone: co.company_phone, email: co.company_email },
+            client: realClient,
+            items,
+            totals: tt,
+          });
+          if (kind === 'quote') setStage('Sent');
+        }}
       />
     </>
   );
@@ -276,7 +292,7 @@ function InvoiceTab({ stage, items, totals, client, company, invoice, onGen, set
         <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, flex: 1, lineHeight: 18 }}>Pay by card, ACH or check. Terms: Net 15 from issue date.</Text>
       </Row>
       <Row style={{ gap: 10, marginTop: 16 }}>
-        <Btn variant="ghost" icon="pdf" title="PDF" style={{ flex: 0.4 }} />
+        <Btn variant="ghost" icon="pdf" title="PDF" onPress={() => setSheet(true)} style={{ flex: 0.4 }} />
         <Btn title="Send invoice" icon="send" onPress={() => setSheet(true)} style={{ flex: 1 }} />
       </Row>
     </View>
@@ -319,7 +335,7 @@ function ContractTab({ setSheet }: { setSheet: (b: boolean) => void }) {
         </Text>
       </Card>
       <Row style={{ gap: 10, marginTop: 16 }}>
-        <Btn variant="ghost" icon="fileText" title="PDF" style={{ flex: 0.4 }} />
+        <Btn variant="ghost" icon="fileText" title="PDF" onPress={() => setSheet(true)} style={{ flex: 0.4 }} />
         <Btn title="Send for signature" icon="send" onPress={() => setSheet(true)} style={{ flex: 1 }} />
       </Row>
     </View>
