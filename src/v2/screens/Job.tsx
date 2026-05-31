@@ -5,11 +5,13 @@ import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
 import { calcTotals, CLIENTS, COMPANY, ESTIMATE_ITEMS, fmt, LineItem, split, STAGES } from '../data';
 import { useQuery } from '@tanstack/react-query';
-import { fetchJobDetail, JobDetail } from '../lib/api';
+import { fetchCompanyProfile, fetchJobDetail, JobDetail } from '../lib/api';
+import { useAuth } from '../lib/auth';
 import { Between, Btn, Card, CatChip, Divider, Nav, NavBtn, PhotoTile, Row, SectionTitle, SendSheet, StageChip, useStore } from '../ui';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
+type Totals = { subtotal: number; taxableSubtotal: number; tax: number; total: number; taxRate: number };
 
 const NEXT: Record<Stage, { label: string; ico: string; act: string }> = {
   Draft: { label: 'Send quote', ico: 'send', act: 'send' },
@@ -54,12 +56,24 @@ export function JobScreen({ go, back, params }: NavProp) {
   const tab = store.jobTab || 'quote';
   const setStage = (s: Stage) => up((st) => ({ stageOverride: { ...st.stageOverride, [id]: s } }));
   const setTab = (k: string) => up({ jobTab: k });
+  const { user } = useAuth();
+  const { data: company } = useQuery({ queryKey: ['company', user?.id], queryFn: () => fetchCompanyProfile(user!.id), enabled: !!user?.id });
   const projectId: string | null = job?.projectId || job?.id || null;
   const { data: detail } = useQuery({ queryKey: ['jobDetail', projectId], queryFn: () => fetchJobDetail(projectId!), enabled: !!projectId });
+  const est = detail?.estimate;
+  const inv = detail?.invoice;
+  const realClient = detail?.client || null;
   const items = detail?.items?.length ? detail.items : job ? [] : ESTIMATE_ITEMS;
-  const taxRate = detail?.estimate?.taxRate ?? 8.25;
-  const t = calcTotals(items, taxRate, detail?.estimate?.marginRate ?? 0);
-  const [vd, vc] = split(job ? job.value : t.total);
+  const taxRate = est?.taxRate ?? 8.25;
+  const computed = calcTotals(items, taxRate, est?.marginRate ?? 0);
+  // stored DB totals are the source of truth (trigger); fall back to computed for mock/no-estimate
+  const quoteTotals: Totals = est
+    ? { subtotal: est.subtotal, taxableSubtotal: computed.taxableSubtotal, tax: est.tax, total: est.total, taxRate }
+    : { ...computed, taxRate };
+  const invoiceTotals: Totals = inv
+    ? { subtotal: inv.subtotal, taxableSubtotal: computed.taxableSubtotal, tax: inv.tax, total: inv.total, taxRate: inv.taxRate }
+    : quoteTotals;
+  const [vd, vc] = split(job ? job.value : quoteTotals.total);
   const name = job ? job.title : 'Exterior repaint';
   const cName = job ? job.client || 'No client' : client?.name || 'Maria Alvarez';
   const addr = job ? job.addr : client?.addr || '14 Linden Ave';
@@ -116,8 +130,8 @@ export function JobScreen({ go, back, params }: NavProp) {
           ))}
         </View>
 
-        {tab === 'quote' && <QuoteTab items={items} t={t} go={go} />}
-        {tab === 'invoice' && <InvoiceTab stage={stage} items={items} t={t} client={client} invoice={detail?.invoice} onGen={() => { setStage('Invoiced'); }} setSheet={(b: boolean) => up({ sheet: b })} />}
+        {tab === 'quote' && <QuoteTab items={items} totals={quoteTotals} go={go} />}
+        {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} company={company} invoice={inv} onGen={() => { setStage('Invoiced'); }} setSheet={(b: boolean) => up({ sheet: b })} />}
         {tab === 'contract' && <ContractTab setSheet={(b: boolean) => up({ sheet: b })} />}
         {tab === 'progress' && <ProgressTab />}
       </ScrollView>
@@ -141,7 +155,7 @@ function TotRow({ label, value, bold, color }: { label: string; value: string; b
   );
 }
 
-function QuoteTab({ items, t, go }: { items: LineItem[]; t: ReturnType<typeof calcTotals>; go: NavProp['go'] }) {
+function QuoteTab({ items, totals, go }: { items: LineItem[]; totals: Totals; go: NavProp['go'] }) {
   return (
     <View style={{ marginTop: 16 }}>
       <SectionTitle title="Line items" link="Edit" onLink={() => go('estimate', {})} />
@@ -163,20 +177,22 @@ function QuoteTab({ items, t, go }: { items: LineItem[]; t: ReturnType<typeof ca
         ))}
       </View>
       <Card style={{ padding: 16, marginTop: 16 }}>
-        <TotRow label="Subtotal" value={fmt(t.subtotal)} />
-        <TotRow label={`Tax (8.25% on ${fmt(t.taxableSubtotal)})`} value={fmt(t.tax)} />
+        <TotRow label="Subtotal" value={fmt(totals.subtotal)} />
+        <TotRow label={`Tax (${totals.taxRate}% on ${fmt(totals.taxableSubtotal)})`} value={fmt(totals.tax)} />
         <Between style={{ paddingTop: 11, marginTop: 7, borderTopWidth: 1.5, borderTopColor: colors.borderStrong }}>
           <Text style={{ fontFamily: fonts.extrabold, fontSize: 13, color: colors.ink }}>Total</Text>
-          <Text style={{ fontFamily: fonts.num, fontSize: 24, color: colors.ink, letterSpacing: -0.5 }}>{fmt(t.total)}</Text>
+          <Text style={{ fontFamily: fonts.num, fontSize: 24, color: colors.ink, letterSpacing: -0.5 }}>{fmt(totals.total)}</Text>
         </Between>
       </Card>
     </View>
   );
 }
 
-function InvoiceTab({ stage, items, t, client, invoice, onGen, setSheet }: { stage: Stage; items: LineItem[]; t: ReturnType<typeof calcTotals>; client: any; invoice?: JobDetail['invoice']; onGen: () => void; setSheet: (b: boolean) => void }) {
+function InvoiceTab({ stage, items, totals, client, company, invoice, onGen, setSheet }: { stage: Stage; items: LineItem[]; totals: Totals; client: JobDetail['client']; company?: any; invoice?: JobDetail['invoice']; onGen: () => void; setSheet: (b: boolean) => void }) {
   const has = !!invoice || ['Invoiced', 'Paid'].includes(stage);
   const deposit = 25;
+  const co = company || {};
+  const coName = co.company_name || 'Your company';
   if (!has) {
     return (
       <View style={{ marginTop: 16, alignItems: 'center', paddingVertical: 40, paddingHorizontal: 24 }}>
@@ -189,8 +205,8 @@ function InvoiceTab({ stage, items, t, client, invoice, onGen, setSheet }: { sta
       </View>
     );
   }
-  const depAmt = t.total * (deposit / 100);
-  const balance = t.total - depAmt;
+  const depAmt = totals.total * (deposit / 100);
+  const balance = totals.total - depAmt;
   const paid = invoice?.status === 'Paid' || stage === 'Paid';
   return (
     <View style={{ marginTop: 16 }}>
@@ -200,11 +216,11 @@ function InvoiceTab({ stage, items, t, client, invoice, onGen, setSheet }: { sta
           <Between>
             <Row style={{ gap: 11, flex: 1 }}>
               <View style={{ width: 40, height: 40, borderRadius: 11, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ fontFamily: fonts.extrabold, fontSize: 18, color: '#fff' }}>A</Text>
+                <Text style={{ fontFamily: fonts.extrabold, fontSize: 18, color: '#fff' }}>{(coName[0] || 'P').toUpperCase()}</Text>
               </View>
               <View>
-                <Text style={{ fontFamily: fonts.extrabold, fontSize: 15, color: colors.ink }}>{COMPANY.name}</Text>
-                <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted }}>{COMPANY.license}</Text>
+                <Text style={{ fontFamily: fonts.extrabold, fontSize: 15, color: colors.ink }}>{coName}</Text>
+                <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted }}>{co.company_license || ''}</Text>
               </View>
             </Row>
             <View style={{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: radii.pill, backgroundColor: paid ? colors.successTint : colors.warningTint }}>
@@ -220,13 +236,13 @@ function InvoiceTab({ stage, items, t, client, invoice, onGen, setSheet }: { sta
         <View style={{ flexDirection: 'row', gap: 14, padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border }}>
           <View style={{ flex: 1 }}>
             <DpLab text="From" />
-            <Text style={{ fontFamily: fonts.extrabold, fontSize: 13.5, color: colors.ink, marginTop: 5 }}>{COMPANY.name}</Text>
-            <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 2, lineHeight: 17 }}>{COMPANY.addr}{'\n'}{COMPANY.city}{'\n'}{COMPANY.phone}</Text>
+            <Text style={{ fontFamily: fonts.extrabold, fontSize: 13.5, color: colors.ink, marginTop: 5 }}>{coName}</Text>
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 2, lineHeight: 17 }}>{[co.company_address, [co.default_city, co.default_state].filter(Boolean).join(', '), co.company_phone].filter(Boolean).join('\n')}</Text>
           </View>
           <View style={{ flex: 1 }}>
             <DpLab text="Bill to" />
-            <Text style={{ fontFamily: fonts.extrabold, fontSize: 13.5, color: colors.ink, marginTop: 5 }}>{client ? client.name : 'Maria Alvarez'}</Text>
-            <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 2, lineHeight: 17 }}>{client ? client.addr : '14 Linden Ave'}{'\n'}{client ? client.city : 'Austin, TX'}{'\n'}{client ? client.email : ''}</Text>
+            <Text style={{ fontFamily: fonts.extrabold, fontSize: 13.5, color: colors.ink, marginTop: 5 }}>{client?.name || 'No client'}</Text>
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 2, lineHeight: 17 }}>{[client?.addr, client?.city, client?.email].filter(Boolean).join('\n')}</Text>
           </View>
         </View>
         {/* rows */}
@@ -243,15 +259,15 @@ function InvoiceTab({ stage, items, t, client, invoice, onGen, setSheet }: { sta
         </View>
         {/* totals */}
         <View style={{ padding: 20, backgroundColor: colors.card2, borderTopWidth: 1, borderTopColor: colors.border }}>
-          <TotRow label="Subtotal" value={fmt(t.subtotal)} />
-          <TotRow label={`Tax (8.25% on ${fmt(t.taxableSubtotal)})`} value={fmt(t.tax)} />
+          <TotRow label="Subtotal" value={fmt(totals.subtotal)} />
+          <TotRow label={`Tax (${totals.taxRate}% on ${fmt(totals.taxableSubtotal)})`} value={fmt(totals.tax)} />
           <Between style={{ paddingTop: 11, marginTop: 7, borderTopWidth: 1.5, borderTopColor: colors.borderStrong }}>
             <Text style={{ fontFamily: fonts.extrabold, fontSize: 13, color: colors.ink }}>Total due</Text>
-            <Text style={{ fontFamily: fonts.num, fontSize: 24, color: colors.ink, letterSpacing: -0.5 }}>{fmt(t.total)}</Text>
+            <Text style={{ fontFamily: fonts.num, fontSize: 24, color: colors.ink, letterSpacing: -0.5 }}>{fmt(totals.total)}</Text>
           </Between>
           <View style={{ marginTop: 10 }}>
             <TotRow label={`Deposit (${deposit}%)`} value={fmt(depAmt)} />
-            <TotRow label={paid ? 'Paid' : 'Balance due'} value={paid ? fmt(t.total) : fmt(balance)} color={paid ? colors.success : colors.ink} />
+            <TotRow label={paid ? 'Paid' : 'Balance due'} value={paid ? fmt(totals.total) : fmt(balance)} color={paid ? colors.success : colors.ink} />
           </View>
         </View>
       </Card>

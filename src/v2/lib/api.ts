@@ -130,25 +130,29 @@ export type JobDetail = {
   estimate: { id: string; total: number; subtotal: number; taxRate: number; tax: number; marginRate: number; status: string; notes: string | null } | null;
   items: LineItem[];
   invoice: { id: string; number: string; status: string; subtotal: number; taxRate: number; tax: number; total: number } | null;
+  client: { name: string; addr: string; city: string; email: string; phone: string } | null;
 };
 
 export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
-  const { data: est } = await supabase
+  const estRes = await supabase
     .from('estimates')
     .select('id, total, grand_total, subtotal, tax_rate, tax_amount, margin_rate, status, notes, estimate_notes')
     .eq('project_id', projectId)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (estRes.error) throw estRes.error;
+  const est = estRes.data;
 
   let items: LineItem[] = [];
   if (est?.id) {
-    const { data: li } = await supabase
+    const liRes = await supabase
       .from('line_items')
       .select('category, description, quantity, unit_price, unit, taxable, item_order')
       .eq('estimate_id', est.id)
       .order('item_order', { ascending: true });
-    items = (li || []).map((it: any, i: number) => ({
+    if (liRes.error) throw liRes.error;
+    items = (liRes.data || []).map((it: any, i: number) => ({
       id: i,
       cat: it.category || 'Item',
       desc: it.description || '',
@@ -159,13 +163,27 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
     }));
   }
 
-  const { data: inv } = await supabase
+  const invRes = await supabase
     .from('invoices')
     .select('id, invoice_number, status, subtotal, tax_rate, tax_amount, total')
     .eq('project_id', projectId)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (invRes.error) throw invRes.error;
+  const inv = invRes.data;
+
+  // real client for the invoice "Bill to"
+  let client: JobDetail['client'] = null;
+  const projRes = await supabase.from('projects').select('client_id').eq('id', projectId).maybeSingle();
+  if (projRes.data?.client_id) {
+    const { data: c } = await supabase
+      .from('clients')
+      .select('full_name, address, address_city, address_state, email, phone')
+      .eq('id', projRes.data.client_id)
+      .maybeSingle();
+    if (c) client = { name: c.full_name || '', addr: c.address || '', city: [c.address_city, c.address_state].filter(Boolean).join(', '), email: c.email || '', phone: c.phone || '' };
+  }
 
   return {
     estimate: est
@@ -175,5 +193,6 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
     invoice: inv
       ? { id: inv.id, number: inv.invoice_number, status: inv.status, subtotal: Number(inv.subtotal ?? 0), taxRate: Number(inv.tax_rate ?? 0), tax: Number(inv.tax_amount ?? 0), total: Number(inv.total ?? 0) }
       : null,
+    client,
   };
 }

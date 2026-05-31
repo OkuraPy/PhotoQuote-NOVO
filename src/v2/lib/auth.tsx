@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { AuthError, Session, User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
+import { queryClient } from './query';
 
 type AuthCtx = {
   user: User | null;
@@ -65,6 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     setLoading(true);
     await supabase.auth.signOut().catch(() => {});
+    queryClient.clear();
     setLoading(false);
   };
 

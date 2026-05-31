@@ -2,7 +2,7 @@
 import React from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import {
   useFonts,
   Manrope_400Regular,
@@ -15,10 +15,7 @@ import { SpaceGrotesk_500Medium, SpaceGrotesk_600SemiBold } from '@expo-google-f
 import { colors } from './theme';
 import { Navigator } from './Navigator';
 import { AuthProvider } from './lib/auth';
-
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, staleTime: 30_000, refetchOnWindowFocus: false } },
-});
+import { queryClient } from './lib/query';
 
 function Splash() {
   return (

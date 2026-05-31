@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
 import { calcTotals, CLIENTS, fmt, LineItem, split } from '../data';
-import { Avatar, Between, Btn, Card, Chip, CatChip, Divider, Field, Input, Nav, NavBtn, Row, SearchBar, SectionTitle, Sheet, Switch, useStore } from '../ui';
+import { Avatar, Between, Btn, Card, Chip, CatChip, DecimalInput, Divider, Field, Input, Nav, NavBtn, Row, SearchBar, SectionTitle, Sheet, Switch, useStore } from '../ui';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
@@ -36,7 +36,7 @@ export function CameraScreen({ go, back }: NavProp) {
       {/* photo strip */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 20, paddingVertical: 14 }}>
         {photos.map((p, i) => (
-          <View key={i}>
+          <View key={p}>
             <LinearGradient colors={['#CBD5D0', '#E9EEEB']} style={{ width: 56, height: 56, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.18)' }}>
               <Icon name="image" size={18} color="rgba(255,255,255,0.7)" />
             </LinearGradient>
@@ -329,9 +329,9 @@ function ItemEditor({ it, onChange, onRemove, onDone }: { it: LineItem; onChange
         </ScrollView>
       </Field>
       <Row style={{ gap: 10, alignItems: 'flex-start' }}>
-        <View style={{ flex: 1 }}><Field label="Qty"><Input keyboardType="decimal-pad" value={String(it.qty)} onChangeText={(v) => onChange({ qty: parseFloat(v) || 0 })} /></Field></View>
+        <View style={{ flex: 1 }}><Field label="Qty"><DecimalInput value={it.qty} onChangeValue={(v) => onChange({ qty: v })} /></Field></View>
         <View style={{ flex: 1 }}><Field label="Unit"><Input value={it.unit} onChangeText={(v) => onChange({ unit: v })} /></Field></View>
-        <View style={{ flex: 1 }}><Field label="Unit price"><Input keyboardType="decimal-pad" value={String(it.price)} onChangeText={(v) => onChange({ price: parseFloat(v) || 0 })} /></Field></View>
+        <View style={{ flex: 1 }}><Field label="Unit price"><DecimalInput value={it.price} onChangeValue={(v) => onChange({ price: v })} /></Field></View>
       </Row>
       <Between style={{ backgroundColor: colors.bg, borderRadius: radii.lg, padding: 16 }}>
         <View>

@@ -1,5 +1,5 @@
 // PhotoQuote v2 — shared UI primitives (ported from handoff app/ui.jsx + styles/app.css) for React Native.
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -246,6 +246,39 @@ export function Input({ style, ...props }: TextInputProps & { style?: StyleProp<
         style,
       ]}
       {...props}
+    />
+  );
+}
+
+// Numeric input with its own text buffer so the user can type "6." / "6.50"
+// without an eager parseFloat/String round-trip stripping it (ported from the v1 DecimalInput fix).
+export function DecimalInput({ value, onChangeValue, style, placeholder }: { value: number; onChangeValue: (n: number) => void; style?: StyleProp<TextStyle>; placeholder?: string }) {
+  const [text, setText] = useState(() => (!value ? '' : String(value)));
+  const [focus, setFocus] = useState(false);
+  useEffect(() => {
+    const parsed = parseFloat(text);
+    const current = isNaN(parsed) ? 0 : parsed;
+    if (current !== value) setText(!value ? '' : String(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  return (
+    <TextInput
+      value={text}
+      keyboardType="decimal-pad"
+      placeholder={placeholder}
+      placeholderTextColor={colors.faint}
+      onFocus={() => setFocus(true)}
+      onBlur={() => setFocus(false)}
+      onChangeText={(t) => {
+        const clean = t.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+        setText(clean);
+        const n = parseFloat(clean);
+        onChangeValue(isNaN(n) ? 0 : n);
+      }}
+      style={[
+        { height: 50, borderRadius: 13, borderWidth: 1, borderColor: focus ? colors.primary : colors.border, backgroundColor: colors.card, paddingHorizontal: 15, fontSize: 15, fontFamily: fonts.semibold, color: colors.ink, ...shadow.sm },
+        style,
+      ]}
     />
   );
 }
