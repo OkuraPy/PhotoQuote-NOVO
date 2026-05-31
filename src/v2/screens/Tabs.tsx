@@ -1,11 +1,14 @@
 // PhotoQuote v2 — tab roots: Home, Jobs, Clients, Profile
 import React from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useQuery } from '@tanstack/react-query';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
-import { CLIENTS, COMPANY, fmt0, initials, Job, JOBS, split, STAGES } from '../data';
+import { COMPANY, fmt0, initials, Job, JOBS, split, STAGES } from '../data';
 import { Avatar, Between, Btn, Card, Empty, NavBtn, Row, SearchBar, SectionTitle, StageChip, Switch, useStore } from '../ui';
+import { useAuth } from '../lib/auth';
+import { fetchClients } from '../lib/api';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
@@ -171,8 +174,14 @@ export function Fab({ onPress }: { onPress: () => void }) {
 /* ---------------- CLIENTS ---------------- */
 export function ClientsScreen({ go }: NavProp) {
   const { store, up } = useStore();
+  const { user } = useAuth();
   const q = store.clientQ || '';
-  const list = CLIENTS.filter((c) => c.name.toLowerCase().includes(q.toLowerCase()));
+  const { data: clients = [], isLoading } = useQuery({
+    queryKey: ['clients', user?.id],
+    queryFn: () => fetchClients(user!.id),
+    enabled: !!user?.id,
+  });
+  const list = clients.filter((c) => c.name.toLowerCase().includes(q.toLowerCase()));
   return (
     <>
       <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>
@@ -182,25 +191,28 @@ export function ClientsScreen({ go }: NavProp) {
         <SearchBar placeholder="Search clients" value={q} onChangeText={(t) => up({ clientQ: t })} />
       </View>
       <ScrollView contentContainerStyle={[scroll, { paddingTop: 8 }]} showsVerticalScrollIndicator={false}>
-        <Card style={{ paddingHorizontal: 16, marginTop: 8 }}>
-          {list.map((c, idx) => (
-            <Pressable
-              key={c.id}
-              onPress={() => go('client', { id: c.id })}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 13, paddingVertical: 14, borderBottomWidth: idx === list.length - 1 ? 0 : 1, borderBottomColor: colors.border }}
-            >
-              <Avatar text={initials(c.name)} />
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text numberOfLines={1} style={{ fontFamily: fonts.extrabold, fontSize: 15, color: colors.ink }}>{c.name}</Text>
-                <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 2 }}>{c.city}</Text>
-              </View>
-              <Row style={{ gap: 6 }}>
-                <Text style={{ fontFamily: fonts.bold, fontSize: 12, color: colors.faint }}>{c.jobs} job{c.jobs > 1 ? 's' : ''}</Text>
+        {isLoading ? (
+          <View style={{ paddingTop: 60, alignItems: 'center' }}><ActivityIndicator color={colors.primary} /></View>
+        ) : list.length === 0 ? (
+          <Empty icon="users" title={q ? 'No matches' : 'No clients yet'} body={q ? 'Try another search.' : 'Add your first client with the button below.'} />
+        ) : (
+          <Card style={{ paddingHorizontal: 16, marginTop: 8 }}>
+            {list.map((c, idx) => (
+              <Pressable
+                key={c.id}
+                onPress={() => go('client', { client: c })}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 13, paddingVertical: 14, borderBottomWidth: idx === list.length - 1 ? 0 : 1, borderBottomColor: colors.border }}
+              >
+                <Avatar text={initials(c.name)} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} style={{ fontFamily: fonts.extrabold, fontSize: 15, color: colors.ink }}>{c.name}</Text>
+                  <Text numberOfLines={1} style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 2 }}>{c.city || c.phone || c.email}</Text>
+                </View>
                 <Icon name="chevR" size={15} color="#C2C9D2" />
-              </Row>
-            </Pressable>
-          ))}
-        </Card>
+              </Pressable>
+            ))}
+          </Card>
+        )}
       </ScrollView>
       <Fab onPress={() => go('clientEdit', {})} />
     </>
@@ -209,6 +221,7 @@ export function ClientsScreen({ go }: NavProp) {
 
 /* ---------------- PROFILE ---------------- */
 export function ProfileScreen({ go }: NavProp) {
+  const { signOut } = useAuth();
   return (
     <>
       <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>
@@ -245,7 +258,7 @@ export function ProfileScreen({ go }: NavProp) {
         <SetGroup rows={[
           { ico: 'bell', name: 'Notifications', toggle: true },
           { ico: 'lock', name: 'Change password' },
-          { ico: 'logout', name: 'Log out', danger: true, onPress: () => go('login', {}, 'reset') },
+          { ico: 'logout', name: 'Log out', danger: true, onPress: () => signOut() },
         ]} />
         <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, textAlign: 'center', marginTop: 20 }}>PhotoQuote v2.0 · Made for the trades</Text>
       </ScrollView>

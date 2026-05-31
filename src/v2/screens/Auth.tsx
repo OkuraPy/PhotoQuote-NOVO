@@ -1,16 +1,31 @@
-// PhotoQuote v2 — Auth & Onboarding screens (Login, Forgot, Signup, Onboard)
+// PhotoQuote v2 — Auth & Onboarding screens, wired to real Supabase auth.
 import React, { useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { Icon } from '../Icon';
 import { colors, fonts } from '../theme';
 import { Btn, Field, Input, Nav, Row } from '../ui';
+import { useAuth } from '../lib/auth';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
-
 const pad = { paddingHorizontal: 20 };
 
 export function LoginScreen({ go }: NavProp) {
+  const { signIn } = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const submit = async () => {
+    if (!email.trim() || !password) { setErr('Enter your email and password.'); return; }
+    setBusy(true); setErr('');
+    const { error } = await signIn(email, password);
+    setBusy(false);
+    if (error) setErr(error.message || 'Login failed.');
+    // success: the auth listener swaps to the app automatically.
+  };
+
   return (
     <View style={{ flex: 1, paddingHorizontal: 20, paddingBottom: 30 }}>
       <View style={{ marginTop: 48, marginBottom: 36 }}>
@@ -21,11 +36,11 @@ export function LoginScreen({ go }: NavProp) {
         <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.muted, marginTop: 8 }}>Photo to quote in seconds.</Text>
       </View>
       <Field label="Email">
-        <Input defaultValue="you@apexreno.com" keyboardType="email-address" autoCapitalize="none" />
+        <Input value={email} onChangeText={setEmail} placeholder="you@email.com" keyboardType="email-address" autoCapitalize="none" autoCorrect={false} />
       </Field>
       <Field label="Password">
         <View>
-          <Input defaultValue="password" secureTextEntry={!show} style={{ paddingRight: 48 }} />
+          <Input value={password} onChangeText={setPassword} placeholder="Your password" secureTextEntry={!show} style={{ paddingRight: 48 }} />
           <Pressable onPress={() => setShow(!show)} style={{ position: 'absolute', right: 14, top: 13 }}>
             <Icon name="eye" size={20} color={colors.faint} />
           </Pressable>
@@ -34,7 +49,8 @@ export function LoginScreen({ go }: NavProp) {
       <Pressable onPress={() => go('forgot')} style={{ alignSelf: 'flex-end' }}>
         <Text style={{ fontFamily: fonts.bold, fontSize: 13.5, color: colors.primary }}>Forgot password?</Text>
       </Pressable>
-      <Btn title="Sign in" onPress={() => go('home', {}, 'tab')} style={{ marginTop: 22 }} />
+      {err ? <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.error, marginTop: 14 }}>{err}</Text> : null}
+      <Btn title={busy ? 'Signing in…' : 'Sign in'} onPress={submit} disabled={busy} style={{ marginTop: 18 }} />
       <Row style={{ justifyContent: 'center', marginTop: 'auto', paddingTop: 24 }}>
         <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.muted }}>New here?</Text>
         <Pressable onPress={() => go('signup')}>
@@ -46,6 +62,17 @@ export function LoginScreen({ go }: NavProp) {
 }
 
 export function ForgotScreen({ back }: NavProp) {
+  const { resetPassword } = useAuth();
+  const [email, setEmail] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (!email.trim()) return;
+    setBusy(true);
+    const { error } = await resetPassword(email);
+    setBusy(false);
+    if (error) Alert.alert('Error', error.message);
+    else { Alert.alert('Check your email', 'We sent you a secure link to reset your password.'); back(); }
+  };
   return (
     <>
       <Nav title="Reset password" onBack={back} />
@@ -55,15 +82,31 @@ export function ForgotScreen({ back }: NavProp) {
         </Text>
         <View style={{ height: 24 }} />
         <Field label="Email">
-          <Input placeholder="you@email.com" keyboardType="email-address" autoCapitalize="none" />
+          <Input value={email} onChangeText={setEmail} placeholder="you@email.com" keyboardType="email-address" autoCapitalize="none" autoCorrect={false} />
         </Field>
-        <Btn title="Send reset link" onPress={back} style={{ marginTop: 12 }} />
+        <Btn title={busy ? 'Sending…' : 'Send reset link'} onPress={submit} disabled={busy} style={{ marginTop: 12 }} />
       </View>
     </>
   );
 }
 
-export function SignupScreen({ go, back }: NavProp) {
+export function SignupScreen({ back }: NavProp) {
+  const { signUp } = useAuth();
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const submit = async () => {
+    if (!name.trim() || !email.trim() || !password) { setErr('Fill in name, email and password.'); return; }
+    if (password.length < 6) { setErr('Password must be at least 6 characters.'); return; }
+    setBusy(true); setErr('');
+    const { error, needsConfirm } = await signUp(email, password, name.trim());
+    setBusy(false);
+    if (error) { setErr(error.message || 'Sign up failed.'); return; }
+    if (needsConfirm) { Alert.alert('Almost there', 'Check your email to confirm your account, then sign in.'); back(); }
+    // else: session created → app swaps automatically.
+  };
   return (
     <>
       <Nav title="Create account" onBack={back} />
@@ -72,10 +115,11 @@ export function SignupScreen({ go, back }: NavProp) {
           Start quoting in under a minute. You can add company details later.
         </Text>
         <View style={{ height: 20 }} />
-        <Field label="Full name"><Input placeholder="Jordan Reyes" /></Field>
-        <Field label="Email"><Input placeholder="you@email.com" keyboardType="email-address" autoCapitalize="none" /></Field>
-        <Field label="Password"><Input placeholder="Create a password" secureTextEntry /></Field>
-        <Btn title="Create account" onPress={() => go('onboard')} style={{ marginTop: 12 }} />
+        <Field label="Full name"><Input value={name} onChangeText={setName} placeholder="Jordan Reyes" /></Field>
+        <Field label="Email"><Input value={email} onChangeText={setEmail} placeholder="you@email.com" keyboardType="email-address" autoCapitalize="none" autoCorrect={false} /></Field>
+        <Field label="Password"><Input value={password} onChangeText={setPassword} placeholder="Create a password (min 6)" secureTextEntry /></Field>
+        {err ? <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.error, marginBottom: 8 }}>{err}</Text> : null}
+        <Btn title={busy ? 'Creating…' : 'Create account'} onPress={submit} disabled={busy} style={{ marginTop: 4 }} />
         <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, textAlign: 'center', marginTop: 16, lineHeight: 19 }}>
           By continuing you agree to our Terms & Privacy Policy.
         </Text>
@@ -84,6 +128,7 @@ export function SignupScreen({ go, back }: NavProp) {
   );
 }
 
+/* ---------------- ONBOARDING (kept for a later first-run gate; not in the critical path yet) ---------------- */
 export function OnboardScreen({ go }: NavProp) {
   const [step, setStep] = useState(0);
   const steps = [
@@ -111,20 +156,7 @@ export function OnboardScreen({ go }: NavProp) {
         <Text style={{ fontFamily: fonts.extrabold, fontSize: 27, color: colors.ink, letterSpacing: -0.7, marginTop: 24, lineHeight: 31 }}>{s.title}</Text>
         <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.muted, marginTop: 10 }}>{s.sub}</Text>
         <View style={{ height: 24 }} />
-        {!s.defaults ? (
-          <Field label={s.field}><Input placeholder={s.ph} autoFocus /></Field>
-        ) : (
-          <>
-            <Field label="Currency">
-              <View style={fakeInput}><Text style={fakeInputTxt}>United States Dollar ($)</Text><Icon name="chevR" size={18} color="#C2C9D2" /></View>
-            </Field>
-            <Row style={{ gap: 10, alignItems: 'flex-start' }}>
-              <View style={{ flex: 1 }}><Field label="Tax rate"><View style={fakeInput}><Text style={fakeInputTxt}>8.25%</Text></View></Field></View>
-              <View style={{ flex: 1 }}><Field label="Payment terms"><View style={fakeInput}><Text style={fakeInputTxt}>Net 15</Text></View></Field></View>
-            </Row>
-            <Field label="Default deposit"><View style={fakeInput}><Text style={fakeInputTxt}>25%</Text></View></Field>
-          </>
-        )}
+        {!s.defaults ? <Field label={s.field}><Input placeholder={s.ph} autoFocus /></Field> : null}
       </View>
       <View style={{ paddingHorizontal: 20, paddingBottom: 30, paddingTop: 12 }}>
         <Btn title={step < 2 ? 'Continue' : 'Finish setup'} onPress={() => (step < 2 ? setStep(step + 1) : go('home', {}, 'tab'))} />
@@ -132,16 +164,3 @@ export function OnboardScreen({ go }: NavProp) {
     </>
   );
 }
-
-const fakeInput = {
-  height: 50,
-  borderRadius: 13,
-  borderWidth: 1,
-  borderColor: colors.border,
-  backgroundColor: colors.card,
-  paddingHorizontal: 15,
-  flexDirection: 'row' as const,
-  alignItems: 'center' as const,
-  justifyContent: 'space-between' as const,
-};
-const fakeInputTxt = { fontFamily: fonts.semibold, fontSize: 15, color: colors.ink };

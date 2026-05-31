@@ -1,19 +1,22 @@
 // PhotoQuote v2 — Client detail, Client edit, Company edit
 import React, { useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { useQueryClient } from '@tanstack/react-query';
 import { Icon } from '../Icon';
 import { colors, fonts } from '../theme';
-import { CLIENTS, COMPANY, initials, JOBS } from '../data';
+import { Client, CLIENTS, COMPANY, initials, JOBS } from '../data';
 import { Avatar, Between, Btn, Card, Divider, Field, Input, Nav, NavBtn, Row, SectionTitle } from '../ui';
 import { JobCard } from './Tabs';
+import { useAuth } from '../lib/auth';
+import { createClient } from '../lib/api';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
 const actionbar = { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28 };
 
 export function ClientScreen({ go, back, params }: NavProp) {
-  const c = CLIENTS.find((x) => x.id === params?.id) || CLIENTS[0];
-  const jobs = JOBS.filter((j) => j.client === c.name);
+  const c: Client = params?.client || CLIENTS[0];
+  const jobs = JOBS.filter((j) => j.client === c.name); // job history wired in Fase 2
   const acts: [string, string, string][] = [
     ['phone', 'Call', colors.primary],
     ['msg', 'Text', colors.info],
@@ -68,31 +71,55 @@ export function ClientScreen({ go, back, params }: NavProp) {
 }
 
 export function ClientEditScreen({ back, params }: NavProp) {
-  const editing = params?.id;
-  const c = editing ? CLIENTS.find((x) => x.id === params.id) : null;
-  const [zip, setZip] = useState(c ? '78704' : '');
-  const [city, setCity] = useState(c ? c.city : '');
+  const existing: Client | undefined = params?.client;
+  const editing = !!existing;
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  const [name, setName] = useState(existing?.name || '');
+  const [phone, setPhone] = useState(existing?.phone || '');
+  const [email, setEmail] = useState(existing?.email || '');
+  const [zip, setZip] = useState('');
+  const [city, setCity] = useState(existing?.city || '');
+  const [address, setAddress] = useState(existing?.addr || '');
+  const [notes, setNotes] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const create = async () => {
+    if (!name.trim()) { Alert.alert('Required', 'Client name is required.'); return; }
+    if (!user) return;
+    setBusy(true);
+    try {
+      await createClient(user.id, { name, phone, email, address: address || city, notes });
+      qc.invalidateQueries({ queryKey: ['clients'] });
+      back();
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Could not save client.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <>
       <Nav title={editing ? 'Edit client' : 'New client'} center onBack={back} />
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <Field label="Name"><Input defaultValue={c?.name} placeholder="Client or company name" autoFocus={!editing} /></Field>
-        <Field label="Phone" opt><Input defaultValue={c?.phone} placeholder="(555) 000-0000" keyboardType="phone-pad" /></Field>
-        <Field label="Email" opt><Input defaultValue={c?.email} placeholder="name@email.com" keyboardType="email-address" autoCapitalize="none" /></Field>
+        <Field label="Name"><Input value={name} onChangeText={setName} placeholder="Client or company name" autoFocus={!editing} /></Field>
+        <Field label="Phone" opt><Input value={phone} onChangeText={setPhone} placeholder="(555) 000-0000" keyboardType="phone-pad" /></Field>
+        <Field label="Email" opt><Input value={email} onChangeText={setEmail} placeholder="name@email.com" keyboardType="email-address" autoCapitalize="none" /></Field>
         <Row style={{ gap: 10, alignItems: 'flex-start' }}>
           <View style={{ flex: 0.4 }}>
-            <Field label="ZIP"><Input value={zip} onChangeText={(v) => { setZip(v); if (v.length >= 5) setCity('Austin, TX'); }} placeholder="ZIP" keyboardType="number-pad" /></Field>
+            <Field label="ZIP"><Input value={zip} onChangeText={(v) => { setZip(v); if (v.length >= 5 && !city) setCity('Austin, TX'); }} placeholder="ZIP" keyboardType="number-pad" /></Field>
           </View>
           <View style={{ flex: 1 }}>
             <Field label="City / State"><Input value={city} onChangeText={setCity} placeholder="auto-fills from ZIP" /></Field>
           </View>
         </Row>
-        <Field label="Street address" opt><Input defaultValue={c?.addr} placeholder="123 Main St" /></Field>
-        <Field label="Notes" opt><Input multiline placeholder="Gate code, preferred times, etc." style={{ height: 80, paddingTop: 13 }} /></Field>
+        <Field label="Street address" opt><Input value={address} onChangeText={setAddress} placeholder="123 Main St" /></Field>
+        <Field label="Notes" opt><Input value={notes} onChangeText={setNotes} multiline placeholder="Gate code, preferred times, etc." style={{ height: 80, paddingTop: 13 }} /></Field>
         {editing ? <Btn variant="danger" icon="trash" title="Delete client" style={{ marginTop: 8 }} /> : null}
       </ScrollView>
       <View style={actionbar}>
-        <Btn title={editing ? 'Save changes' : 'Create client'} onPress={back} />
+        <Btn title={busy ? 'Saving…' : editing ? 'Save changes' : 'Create client'} onPress={editing ? back : create} disabled={busy} />
       </View>
     </>
   );

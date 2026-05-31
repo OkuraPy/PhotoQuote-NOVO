@@ -1,7 +1,8 @@
-// PhotoQuote v2 — app root: loads fonts, then renders the navigator.
+// PhotoQuote v2 — app root: fonts → providers (React Query + Auth) → navigator.
 import React from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   useFonts,
   Manrope_400Regular,
@@ -13,6 +14,19 @@ import {
 import { SpaceGrotesk_500Medium, SpaceGrotesk_600SemiBold } from '@expo-google-fonts/space-grotesk';
 import { colors } from './theme';
 import { Navigator } from './Navigator';
+import { AuthProvider } from './lib/auth';
+
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: 1, staleTime: 30_000, refetchOnWindowFocus: false } },
+});
+
+function Splash() {
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
+      <ActivityIndicator color={colors.primary} />
+    </View>
+  );
+}
 
 export default function V2App() {
   const [loaded] = useFonts({
@@ -24,18 +38,14 @@ export default function V2App() {
     SpaceGrotesk_500Medium,
     SpaceGrotesk_600SemiBold,
   });
-
-  if (!loaded) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color={colors.primary} />
-      </View>
-    );
-  }
-
+  if (!loaded) return <Splash />;
   return (
-    <SafeAreaProvider>
-      <Navigator />
-    </SafeAreaProvider>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <SafeAreaProvider>
+          <Navigator />
+        </SafeAreaProvider>
+      </AuthProvider>
+    </QueryClientProvider>
   );
 }
