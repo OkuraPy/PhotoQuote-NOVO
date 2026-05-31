@@ -1,14 +1,14 @@
 // PhotoQuote v2 — Client detail, Client edit, Company edit
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Icon } from '../Icon';
 import { colors, fonts } from '../theme';
-import { Client, CLIENTS, COMPANY, initials, JOBS } from '../data';
+import { Client, CLIENTS, initials, JOBS } from '../data';
 import { Avatar, Between, Btn, Card, Divider, Field, Input, Nav, NavBtn, Row, SectionTitle } from '../ui';
 import { JobCard } from './Tabs';
 import { useAuth } from '../lib/auth';
-import { createClient } from '../lib/api';
+import { createClient, deleteClient, fetchCompanyProfile, updateClient, updateCompanyProfile } from '../lib/api';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
@@ -24,7 +24,7 @@ export function ClientScreen({ go, back, params }: NavProp) {
   ];
   return (
     <>
-      <Nav title="Client" center onBack={back} right={<NavBtn icon="edit" size={17} onPress={() => go('clientEdit', { id: c.id })} />} />
+      <Nav title="Client" center onBack={back} right={<NavBtn icon="edit" size={17} onPress={() => go('clientEdit', { client: c })} />} />
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false}>
         <View style={{ alignItems: 'center', paddingVertical: 8 }}>
           <Avatar text={initials(c.name)} size={72} radius={22} fontSize={26} />
@@ -84,12 +84,14 @@ export function ClientEditScreen({ back, params }: NavProp) {
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const create = async () => {
+  const save = async () => {
     if (!name.trim()) { Alert.alert('Required', 'Client name is required.'); return; }
     if (!user) return;
     setBusy(true);
     try {
-      await createClient(user.id, { name, phone, email, address: address || city, notes });
+      const payload = { name, phone, email, address: address || city, notes };
+      if (editing && existing) await updateClient(existing.id, payload);
+      else await createClient(user.id, payload);
       qc.invalidateQueries({ queryKey: ['clients'] });
       back();
     } catch (e: any) {
@@ -97,6 +99,26 @@ export function ClientEditScreen({ back, params }: NavProp) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const remove = () => {
+    if (!existing) return;
+    Alert.alert('Delete client?', `Remove ${existing.name}? This can't be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteClient(existing.id);
+            qc.invalidateQueries({ queryKey: ['clients'] });
+            back();
+          } catch (e: any) {
+            Alert.alert('Error', e.message || 'Could not delete.');
+          }
+        },
+      },
+    ]);
   };
 
   return (
@@ -116,29 +138,60 @@ export function ClientEditScreen({ back, params }: NavProp) {
         </Row>
         <Field label="Street address" opt><Input value={address} onChangeText={setAddress} placeholder="123 Main St" /></Field>
         <Field label="Notes" opt><Input value={notes} onChangeText={setNotes} multiline placeholder="Gate code, preferred times, etc." style={{ height: 80, paddingTop: 13 }} /></Field>
-        {editing ? <Btn variant="danger" icon="trash" title="Delete client" style={{ marginTop: 8 }} /> : null}
+        {editing ? <Btn variant="danger" icon="trash" title="Delete client" onPress={remove} style={{ marginTop: 8 }} /> : null}
       </ScrollView>
       <View style={actionbar}>
-        <Btn title={busy ? 'Saving…' : editing ? 'Save changes' : 'Create client'} onPress={editing ? back : create} disabled={busy} />
+        <Btn title={busy ? 'Saving…' : editing ? 'Save changes' : 'Create client'} onPress={save} disabled={busy} />
       </View>
     </>
   );
 }
 
 export function CompanyScreen({ back }: NavProp) {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  const { data: profile } = useQuery({ queryKey: ['company', user?.id], queryFn: () => fetchCompanyProfile(user!.id), enabled: !!user?.id });
+  const [name, setName] = useState('');
+  const [license, setLicense] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [address, setAddress] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const p = profile as any;
+    if (p) {
+      setName(p.company_name || '');
+      setLicense(p.company_license || '');
+      setPhone(p.company_phone || '');
+      setEmail(p.company_email || '');
+      setAddress(p.company_address || '');
+    }
+  }, [profile]);
+  const save = async () => {
+    if (!user) return;
+    setBusy(true);
+    try {
+      await updateCompanyProfile(user.id, { company_name: name, company_license: license, company_phone: phone, company_email: email, company_address: address });
+      qc.invalidateQueries({ queryKey: ['company'] });
+      back();
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Could not save.');
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <>
       <Nav title="Business details" center onBack={back} />
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <Field label="Company name"><Input defaultValue={COMPANY.name} /></Field>
-        <Field label="License #" opt><Input defaultValue="GC-204881" /></Field>
-        <Field label="Phone"><Input defaultValue={COMPANY.phone} keyboardType="phone-pad" /></Field>
-        <Field label="Email"><Input defaultValue={COMPANY.email} keyboardType="email-address" autoCapitalize="none" /></Field>
-        <Field label="Address"><Input defaultValue={COMPANY.addr} /></Field>
-        <Field label="City / State / ZIP"><Input defaultValue={COMPANY.city} /></Field>
+        <Field label="Company name"><Input value={name} onChangeText={setName} placeholder="Your company" /></Field>
+        <Field label="License #" opt><Input value={license} onChangeText={setLicense} placeholder="GC-000000" /></Field>
+        <Field label="Phone"><Input value={phone} onChangeText={setPhone} keyboardType="phone-pad" /></Field>
+        <Field label="Email"><Input value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" /></Field>
+        <Field label="Address"><Input value={address} onChangeText={setAddress} placeholder="Street, city, state" /></Field>
       </ScrollView>
       <View style={actionbar}>
-        <Btn title="Save" onPress={back} />
+        <Btn title={busy ? 'Saving…' : 'Save'} onPress={save} disabled={busy} />
       </View>
     </>
   );

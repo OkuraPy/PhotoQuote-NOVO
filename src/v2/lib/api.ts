@@ -1,6 +1,6 @@
 // PhotoQuote v2 — data access (Supabase). Maps real tables to the v2 UI shapes.
 import { supabase } from './supabase';
-import { Client, Job } from '../data';
+import { Client, Job, LineItem } from '../data';
 import { Stage } from '../theme';
 
 /* ---------------- Clients ---------------- */
@@ -118,4 +118,62 @@ export async function fetchCompanyProfile(userId: string) {
     .eq('id', userId)
     .maybeSingle();
   return data;
+}
+
+export async function updateCompanyProfile(userId: string, p: { company_name?: string; company_license?: string; company_phone?: string; company_email?: string; company_address?: string }) {
+  const { error } = await supabase.from('users').update(p).eq('id', userId);
+  if (error) throw error;
+}
+
+/* ---------------- Job detail (real estimate + line items + invoice) ---------------- */
+export type JobDetail = {
+  estimate: { id: string; total: number; subtotal: number; taxRate: number; tax: number; marginRate: number; status: string; notes: string | null } | null;
+  items: LineItem[];
+  invoice: { id: string; number: string; status: string; subtotal: number; taxRate: number; tax: number; total: number } | null;
+};
+
+export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
+  const { data: est } = await supabase
+    .from('estimates')
+    .select('id, total, grand_total, subtotal, tax_rate, tax_amount, margin_rate, status, notes, estimate_notes')
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let items: LineItem[] = [];
+  if (est?.id) {
+    const { data: li } = await supabase
+      .from('line_items')
+      .select('category, description, quantity, unit_price, unit, taxable, item_order')
+      .eq('estimate_id', est.id)
+      .order('item_order', { ascending: true });
+    items = (li || []).map((it: any, i: number) => ({
+      id: i,
+      cat: it.category || 'Item',
+      desc: it.description || '',
+      qty: Number(it.quantity) || 0,
+      unit: it.unit || 'job',
+      price: Number(it.unit_price) || 0,
+      taxable: it.taxable !== false,
+    }));
+  }
+
+  const { data: inv } = await supabase
+    .from('invoices')
+    .select('id, invoice_number, status, subtotal, tax_rate, tax_amount, total')
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return {
+    estimate: est
+      ? { id: est.id, total: Number(est.total ?? est.grand_total ?? 0), subtotal: Number(est.subtotal ?? 0), taxRate: Number(est.tax_rate ?? 0), tax: Number(est.tax_amount ?? 0), marginRate: Number(est.margin_rate ?? 0), status: est.status, notes: est.notes ?? est.estimate_notes ?? null }
+      : null,
+    items,
+    invoice: inv
+      ? { id: inv.id, number: inv.invoice_number, status: inv.status, subtotal: Number(inv.subtotal ?? 0), taxRate: Number(inv.tax_rate ?? 0), tax: Number(inv.tax_amount ?? 0), total: Number(inv.total ?? 0) }
+      : null,
+  };
 }

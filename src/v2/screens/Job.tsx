@@ -4,6 +4,8 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
 import { calcTotals, CLIENTS, COMPANY, ESTIMATE_ITEMS, fmt, LineItem, split, STAGES } from '../data';
+import { useQuery } from '@tanstack/react-query';
+import { fetchJobDetail, JobDetail } from '../lib/api';
 import { Between, Btn, Card, CatChip, Divider, Nav, NavBtn, PhotoTile, Row, SectionTitle, SendSheet, StageChip, useStore } from '../ui';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
@@ -52,8 +54,11 @@ export function JobScreen({ go, back, params }: NavProp) {
   const tab = store.jobTab || 'quote';
   const setStage = (s: Stage) => up((st) => ({ stageOverride: { ...st.stageOverride, [id]: s } }));
   const setTab = (k: string) => up({ jobTab: k });
-  const items = ESTIMATE_ITEMS; // line items wired to the real estimate in the next increment
-  const t = calcTotals(items, 8.25, 0);
+  const projectId: string | null = job?.projectId || job?.id || null;
+  const { data: detail } = useQuery({ queryKey: ['jobDetail', projectId], queryFn: () => fetchJobDetail(projectId!), enabled: !!projectId });
+  const items = detail?.items?.length ? detail.items : job ? [] : ESTIMATE_ITEMS;
+  const taxRate = detail?.estimate?.taxRate ?? 8.25;
+  const t = calcTotals(items, taxRate, detail?.estimate?.marginRate ?? 0);
   const [vd, vc] = split(job ? job.value : t.total);
   const name = job ? job.title : 'Exterior repaint';
   const cName = job ? job.client || 'No client' : client?.name || 'Maria Alvarez';
@@ -112,7 +117,7 @@ export function JobScreen({ go, back, params }: NavProp) {
         </View>
 
         {tab === 'quote' && <QuoteTab items={items} t={t} go={go} />}
-        {tab === 'invoice' && <InvoiceTab stage={stage} items={items} t={t} client={client} onGen={() => { setStage('Invoiced'); }} setSheet={(b: boolean) => up({ sheet: b })} />}
+        {tab === 'invoice' && <InvoiceTab stage={stage} items={items} t={t} client={client} invoice={detail?.invoice} onGen={() => { setStage('Invoiced'); }} setSheet={(b: boolean) => up({ sheet: b })} />}
         {tab === 'contract' && <ContractTab setSheet={(b: boolean) => up({ sheet: b })} />}
         {tab === 'progress' && <ProgressTab />}
       </ScrollView>
@@ -169,8 +174,8 @@ function QuoteTab({ items, t, go }: { items: LineItem[]; t: ReturnType<typeof ca
   );
 }
 
-function InvoiceTab({ stage, items, t, client, onGen, setSheet }: { stage: Stage; items: LineItem[]; t: ReturnType<typeof calcTotals>; client: any; onGen: () => void; setSheet: (b: boolean) => void }) {
-  const has = ['Invoiced', 'Paid'].includes(stage);
+function InvoiceTab({ stage, items, t, client, invoice, onGen, setSheet }: { stage: Stage; items: LineItem[]; t: ReturnType<typeof calcTotals>; client: any; invoice?: JobDetail['invoice']; onGen: () => void; setSheet: (b: boolean) => void }) {
+  const has = !!invoice || ['Invoiced', 'Paid'].includes(stage);
   const deposit = 25;
   if (!has) {
     return (
@@ -186,7 +191,7 @@ function InvoiceTab({ stage, items, t, client, onGen, setSheet }: { stage: Stage
   }
   const depAmt = t.total * (deposit / 100);
   const balance = t.total - depAmt;
-  const paid = stage === 'Paid';
+  const paid = invoice?.status === 'Paid' || stage === 'Paid';
   return (
     <View style={{ marginTop: 16 }}>
       <Card style={{ overflow: 'hidden', ...shadow.card }}>
@@ -207,7 +212,7 @@ function InvoiceTab({ stage, items, t, client, onGen, setSheet }: { stage: Stage
             </View>
           </Between>
           <Between style={{ marginTop: 16, alignItems: 'flex-start' }}>
-            <View><DpLab text="Invoice" /><Text style={{ fontFamily: fonts.num, fontSize: 14, color: colors.muted, marginTop: 3 }}>INV-2026-0001</Text></View>
+            <View><DpLab text="Invoice" /><Text style={{ fontFamily: fonts.num, fontSize: 14, color: colors.muted, marginTop: 3 }}>{invoice?.number || 'INV-2026-0001'}</Text></View>
             <View style={{ alignItems: 'flex-end' }}><DpLab text="Issued · Due" /><Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.ink, marginTop: 3 }}>May 31 · Jun 15</Text></View>
           </Between>
         </View>

@@ -238,7 +238,10 @@ export function ClientsScreen({ go }: NavProp) {
 
 /* ---------------- PROFILE ---------------- */
 export function ProfileScreen({ go }: NavProp) {
-  const { signOut } = useAuth();
+  const { user, signOut } = useAuth();
+  const { data: profile } = useQuery({ queryKey: ['company', user?.id], queryFn: () => fetchCompanyProfile(user!.id), enabled: !!user?.id });
+  const company = (profile as any) || {};
+  const companyName = company.company_name || 'Your company';
   return (
     <>
       <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>
@@ -247,11 +250,11 @@ export function ProfileScreen({ go }: NavProp) {
       <ScrollView contentContainerStyle={[scroll, { paddingTop: 8 }]} showsVerticalScrollIndicator={false}>
         <Card pad style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
           <View style={{ width: 54, height: 54, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ fontFamily: fonts.extrabold, fontSize: 22, color: '#fff' }}>A</Text>
+            <Text style={{ fontFamily: fonts.extrabold, fontSize: 22, color: '#fff' }}>{(companyName[0] || 'P').toUpperCase()}</Text>
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ fontFamily: fonts.extrabold, fontSize: 17, color: colors.ink }}>{COMPANY.name}</Text>
-            <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{COMPANY.license} · {COMPANY.city}</Text>
+            <Text numberOfLines={1} style={{ fontFamily: fonts.extrabold, fontSize: 17, color: colors.ink }}>{companyName}</Text>
+            <Text numberOfLines={1} style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{[company.company_license, company.default_city].filter(Boolean).join(' · ') || company.company_email || 'Tap to add details'}</Text>
           </View>
           <NavBtn icon="edit" size={17} onPress={() => go('profileCompany')} />
         </Card>
