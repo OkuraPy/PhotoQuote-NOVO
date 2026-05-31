@@ -1,18 +1,7 @@
-import { StatusBar } from 'expo-status-bar';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { AuthProvider } from './src/context/AuthContext';
-import { AppProvider } from './src/context/AppContext';
-import AppNavigator from './src/navigation/AppNavigator';
+// PhotoQuote — active entry. Renders the v2 redesign (src/v2).
+// The legacy v1 app is preserved in App.legacy.tsx for reference.
+import V2App from './src/v2/App';
 
 export default function App() {
-  return (
-    <AuthProvider>
-      <AppProvider>
-        <SafeAreaProvider>
-          <AppNavigator />
-          <StatusBar style="auto" />
-        </SafeAreaProvider>
-      </AppProvider>
-    </AuthProvider>
-  );
+  return <V2App />;
 }
