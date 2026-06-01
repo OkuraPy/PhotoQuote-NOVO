@@ -2,6 +2,7 @@
 // Compresses the captured photos and calls the `ai-estimate` Edge Function (which holds the
 // OpenAI key server-side). Returns a normalized result the EstimateScreen can render directly.
 import * as ImageManipulator from 'expo-image-manipulator';
+import { File } from 'expo-file-system';
 import { supabase } from './supabase';
 import { LineItem, Photo } from '../data';
 
@@ -11,7 +12,8 @@ export type EstimateResult =
   | { ok: false; error: string };
 
 // OpenAI only needs a few photos and they must be small enough to ship in the request body.
-const MAX_PHOTOS = 5;
+// Exported so the UI can honestly say how many were actually analyzed.
+export const MAX_AI_PHOTOS = 5;
 
 // Resize + compress one photo and return it as a base64 data URL (what the function forwards to OpenAI).
 async function toDataUrl(uri: string): Promise<string | null> {
@@ -28,7 +30,7 @@ async function toDataUrl(uri: string): Promise<string | null> {
 }
 
 async function toDataUrls(photos: Photo[]): Promise<string[]> {
-  const slice = photos.slice(0, MAX_PHOTOS);
+  const slice = photos.slice(0, MAX_AI_PHOTOS);
   const urls = await Promise.all(slice.map((p) => toDataUrl(p.uri)));
   return urls.filter((u): u is string => !!u);
 }
@@ -80,4 +82,30 @@ export async function requestEstimate(input: {
     confidence: Math.max(0, Math.min(100, Number(data.confidence) || 0)),
     notes: String(data.notes || ''),
   };
+}
+
+/* ---------------- Voice → text (OpenAI transcription via Edge Function) ---------------- */
+const MIME_BY_EXT: Record<string, string> = { m4a: 'audio/m4a', wav: 'audio/wav', caf: 'audio/x-caf', mp3: 'audio/mpeg', mp4: 'audio/mp4' };
+
+export async function transcribeAudio(uri: string): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  let base64: string;
+  try {
+    base64 = await new File(uri).base64();
+  } catch (e: any) {
+    return { ok: false, error: e?.message || 'Could not read the recording.' };
+  }
+  const ext = (uri.split('.').pop() || 'm4a').toLowerCase().split('?')[0];
+  const mime = MIME_BY_EXT[ext] || 'audio/m4a';
+
+  const { data, error } = await supabase.functions.invoke('transcribe-audio', {
+    body: { audio: base64, mime, filename: `audio.${ext}` },
+  });
+  if (error) {
+    const detail = await readErrorBody(error);
+    return { ok: false, error: detail || error.message || 'Could not transcribe the audio.' };
+  }
+  if (data?.error) return { ok: false, error: data.error };
+  const text = String(data?.text || '').trim();
+  if (!text) return { ok: false, error: 'No speech detected in the recording.' };
+  return { ok: true, text };
 }

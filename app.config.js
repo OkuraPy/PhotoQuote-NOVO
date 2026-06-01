@@ -13,7 +13,9 @@ export default ({ config }) => {
 
   const extra = {
     ...config.extra,
-    openaiApiKey: process.env.OPENAI_API_KEY || '',
+    // NOTE: openaiApiKey is intentionally NOT exposed to the app. v2 calls OpenAI only through the
+    // ai-estimate / transcribe-audio Edge Functions (key stays server-side). Closes audit finding #1
+    // (key was shipping in the bundle/manifest). The legacy v1 service is dormant.
     supabaseUrl: process.env.SUPABASE_URL || '',
     supabaseAnonKey: process.env.SUPABASE_ANON_KEY || '',
   };
@@ -26,6 +28,8 @@ export default ({ config }) => {
     plugins: [
       ...(base.plugins || []),
       'expo-font',
+      ['expo-audio', { microphonePermission: 'Allow PhotoQuote to record voice notes describing the job.' }],
+      ['expo-image-picker', { photosPermission: 'Allow PhotoQuote to attach job photos to an estimate.', cameraPermission: 'Allow PhotoQuote to take job photos for an estimate.' }],
     ],
     extra,
   };

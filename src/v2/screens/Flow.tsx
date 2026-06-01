@@ -3,11 +3,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
+import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { calcTotals, fmt, LineItem, split } from '../data';
-import { requestEstimate } from '../lib/ai';
+import { MAX_AI_PHOTOS, requestEstimate, transcribeAudio } from '../lib/ai';
 import { createClient, createJob, fetchClients } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Avatar, Between, Btn, Card, Chip, CatChip, DecimalInput, Divider, Field, Input, Nav, NavBtn, Row, SearchBar, SectionTitle, Sheet, Switch, useStore } from '../ui';
@@ -120,48 +121,80 @@ function CamSide({ icon, onPress, big }: { icon: string; onPress?: () => void; b
 /* ---------------- DESCRIPTION (type OR record voice) ---------------- */
 export function DescriptionInput() {
   const { store, up } = useStore();
-  const [rec, setRec] = useState<'idle' | 'recording'>('idle');
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const [mode, setMode] = useState<'idle' | 'recording' | 'transcribing'>('idle');
   const [secs, setSecs] = useState(0);
+  const [err, setErr] = useState('');
   useEffect(() => {
-    if (rec === 'recording') {
+    if (mode === 'recording') {
       const t = setInterval(() => setSecs((s) => s + 1), 1000);
       return () => clearInterval(t);
     }
-  }, [rec]);
+  }, [mode]);
   const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   const bars = [...Array(28)].map((_, i) => 7 + ((i * 11 + 9) % 21));
 
-  if (store.voice) {
-    return (
-      <View style={{ marginTop: 16 }}>
-        <View style={voicebar}>
-          <Pressable style={[mic, { width: 42, height: 42 }]}><Icon name="play" size={17} color={colors.primary} /></Pressable>
-          <Wave bars={bars} color={colors.primary} />
-          <Text style={{ fontFamily: fonts.num, fontSize: 12.5, color: colors.ink }}>{store.voice.dur}</Text>
-          <NavBtn icon="trash" size={15} onPress={() => up({ voice: null })} />
-        </View>
-        <Row style={{ gap: 6, marginTop: 9 }}>
-          <Icon name="sparkles" size={13} color={colors.accentInk} />
-          <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted }}>Voice note — AI will transcribe it into the description.</Text>
-        </Row>
-      </View>
-    );
-  }
-  if (rec === 'recording') {
+  const startRec = async () => {
+    try {
+      const perm = await AudioModule.requestRecordingPermissionsAsync();
+      if (!perm.granted) { Alert.alert('Microphone access needed', 'Allow microphone access to dictate a voice note.'); return; }
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      setErr(''); setSecs(0); setMode('recording');
+    } catch (e: any) {
+      Alert.alert('Could not start recording', e?.message || 'Try again.');
+    }
+  };
+
+  // stop → transcribe (OpenAI via Edge Function) → append the text into the description
+  const stopRec = async () => {
+    setMode('transcribing');
+    try {
+      await recorder.stop();
+      const uri = recorder.uri;
+      if (!uri) throw new Error('No recording captured.');
+      const r = await transcribeAudio(uri);
+      if (r.ok) {
+        const prev = (store.descText || '').trim();
+        up({ descText: prev ? `${prev} ${r.text}` : r.text });
+      } else {
+        setErr(r.error);
+      }
+    } catch (e: any) {
+      setErr(e?.message || 'Could not transcribe the recording.');
+    } finally {
+      setMode('idle');
+    }
+  };
+
+  if (mode === 'recording') {
     return (
       <View style={{ marginTop: 16 }}>
         <View style={[voicebar, { backgroundColor: colors.errorTint, borderColor: 'transparent' }]}>
           <View style={{ width: 11, height: 11, borderRadius: 6, backgroundColor: colors.error }} />
           <Wave bars={bars} color={colors.error} />
           <Text style={{ fontFamily: fonts.num, fontSize: 12.5, color: colors.error }}>{mmss(secs)}</Text>
-          <Pressable onPress={() => { up({ voice: { dur: mmss(Math.max(secs, 1)) } }); setRec('idle'); }} style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: colors.error, alignItems: 'center', justifyContent: 'center' }}>
+          <Pressable onPress={stopRec} style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: colors.error, alignItems: 'center', justifyContent: 'center' }}>
             <View style={{ width: 15, height: 15, borderRadius: 4, backgroundColor: '#fff' }} />
           </Pressable>
         </View>
-        <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 9, textAlign: 'center' }}>Recording… tap ◼ to stop</Text>
+        <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 9, textAlign: 'center' }}>Recording… tap ◼ to stop & transcribe</Text>
       </View>
     );
   }
+
+  if (mode === 'transcribing') {
+    return (
+      <View style={{ marginTop: 16 }}>
+        <View style={voicebar}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 13, color: colors.ink }}>Transcribing your note…</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={{ marginTop: 16 }}>
       <Row style={{ gap: 10, alignItems: 'flex-end' }}>
@@ -173,11 +206,13 @@ export function DescriptionInput() {
           onChangeText={(t) => up({ descText: t })}
           style={{ flex: 1, minHeight: 50, borderRadius: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, padding: 13, fontSize: 15, fontFamily: fonts.semibold, color: colors.ink, ...shadow.sm }}
         />
-        <Pressable onPress={() => { setSecs(0); setRec('recording'); }} style={mic}><Icon name="mic" size={22} color={colors.primary} /></Pressable>
+        <Pressable onPress={startRec} style={mic}><Icon name="mic" size={22} color={colors.primary} /></Pressable>
       </Row>
       <Row style={{ gap: 6, marginTop: 9 }}>
-        <Icon name="mic" size={13} color={colors.muted} />
-        <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted }}>Or tap the mic to record a voice note instead of typing.</Text>
+        <Icon name={err ? 'flag' : 'mic'} size={13} color={err ? colors.error : colors.muted} />
+        <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 12, color: err ? colors.error : colors.muted }}>
+          {err || 'Or tap the mic to dictate — we’ll transcribe it into the description.'}
+        </Text>
       </Row>
     </View>
   );
@@ -204,9 +239,13 @@ export function EstimateScreen({ go, back, params }: NavProp) {
   const marginRate = store.marginRate ?? 0;
   const editing = store.editing;
   const count = (store.photos || []).length;
+  const analyzed = Math.min(count, MAX_AI_PHOTOS); // how many actually went to the AI
 
   // Real AI flow: call the ai-estimate Edge Function once when arriving fresh from the camera.
-  const [phase, setPhase] = useState<EstPhase>(params && params.fresh ? 'analyzing' : 'done');
+  // Guard on items.length so navigating back INTO this screen doesn't re-run the AI or wipe edits
+  // (the lightweight Navigator remounts a screen each time it becomes the stack top).
+  const needsAI = !!(params && params.fresh) && (store.items?.length || 0) === 0;
+  const [phase, setPhase] = useState<EstPhase>(needsAI ? 'analyzing' : 'done');
   const [reason, setReason] = useState(''); // rejection reason or error message
   const ranRef = useRef(false);
 
@@ -227,7 +266,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
   };
 
   useEffect(() => {
-    if (params && params.fresh && !ranRef.current) {
+    if (needsAI && !ranRef.current) {
       ranRef.current = true;
       runAI();
     }
@@ -255,7 +294,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
           <LinearGradient colors={[colors.primaryTint, colors.card]} style={{ flexDirection: 'row', alignItems: 'center', gap: 13, borderRadius: radii.lg, padding: 16, borderWidth: 1, borderColor: colors.primaryTint2 }}>
             <ActivityIndicator color={colors.primary} />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: fonts.extrabold, fontSize: 14.5, color: colors.ink }}>Analyzing {count} {count === 1 ? 'photo' : 'photos'}…</Text>
+              <Text style={{ fontFamily: fonts.extrabold, fontSize: 14.5, color: colors.ink }}>Analyzing {analyzed} {analyzed === 1 ? 'photo' : 'photos'}…</Text>
               <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 2 }}>Reading surfaces, materials & scope</Text>
             </View>
           </LinearGradient>
@@ -290,7 +329,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
               <Icon name="sparkles" size={22} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: fonts.extrabold, fontSize: 14.5, color: colors.ink }}>AI analyzed {count} {count === 1 ? 'photo' : 'photos'}</Text>
+              <Text style={{ fontFamily: fonts.extrabold, fontSize: 14.5, color: colors.ink }}>AI analyzed {analyzed} {analyzed === 1 ? 'photo' : 'photos'}</Text>
               <Text numberOfLines={2} style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 2, lineHeight: 17 }}>{store.aiNotes || 'Review the items below and adjust as needed.'}</Text>
             </View>
             {conf > 0 ? (
