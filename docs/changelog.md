@@ -4,6 +4,16 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-01 13:35] — fix: v2 — câmera ao vivo (expo-camera) + CEP autofill no cliente
+- **O que mudou**:
+  - **Câmera ao vivo**: `CameraScreen` usa `expo-camera` `<CameraView>` (preview de verdade) no lugar do fundo escuro. **Permissões de câmera + microfone pedidas ao ABRIR a tela** (useEffect no mount) → os prompts aparecem na hora (corrige a falha reportada: "tela preta" sem pedir permissão). Shutter captura do preview (`takePictureAsync`); botão de virar câmera (frente/trás); fallback claro se a permissão for negada (com botão "Allow camera").
+  - **CEP autofill no cadastro de cliente**: o campo ZIP do `ClientEditScreen` chama `lookupZip` (Zippopotam) e preenche cidade/estado automático — saiu o mock hardcoded "Austin, TX".
+  - Ícone `flip` adicionado ao set; plugin `expo-camera` no `app.config`.
+- **Arquivos**: `src/v2/screens/Flow.tsx`, `src/v2/screens/Misc.tsx`, `src/v2/Icon.tsx`, `app.config.js`, `package*.json`
+- **Decisão técnica**: `expo-camera` (no SDK 54/Expo Go) dá o preview ao vivo; permissões no mount atendem ao pedido do dono ("aprovar na hora"). Precisou **reiniciar o metro com `--clear`** (o cache antigo não resolvia `expo-camera/Camera.types`).
+- **Verificação**: `tsc` 0 erros + bundle iOS limpo (42 refs de câmera) + manifesto via túnel 200.
+- **Falta provar no device**: abrir nova cotação → câmera ao vivo + prompts; CEP no cliente preenchendo cidade.
+
 ### [2026-06-01 01:00] — feat: v2 — preço regional por CEP (índice por estado)
 - **O que mudou**:
   - **Tabela `regional_pricing`** (estado → multiplicador de custo, 51 linhas US, avg=1.00) no servidor — editável sem republicar o app. Leitura pública (RLS `using(true)` + grant select).

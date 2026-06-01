@@ -8,7 +8,7 @@ import { Client, CLIENTS, initials, JOBS } from '../data';
 import { Avatar, Between, Btn, Card, Divider, Field, Input, Nav, NavBtn, Row, SectionTitle, useStore } from '../ui';
 import { JobCard } from './Tabs';
 import { useAuth } from '../lib/auth';
-import { createClient, deleteClient, fetchCompanyProfile, updateClient, updateCompanyProfile } from '../lib/api';
+import { createClient, deleteClient, fetchCompanyProfile, lookupZip, updateClient, updateCompanyProfile } from '../lib/api';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
@@ -84,6 +84,18 @@ export function ClientEditScreen({ back, params }: NavProp) {
   const [address, setAddress] = useState(existing?.addr || '');
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
+  const [zipBusy, setZipBusy] = useState(false);
+
+  // ZIP → real city/state via Zippopotam (was a hardcoded "Austin, TX" mock)
+  const onZip = async (v: string) => {
+    const clean = v.replace(/\D/g, '').slice(0, 5);
+    setZip(clean);
+    if (clean.length < 5) return;
+    setZipBusy(true);
+    const r = await lookupZip(clean);
+    setZipBusy(false);
+    if (r) setCity(`${r.city}, ${r.state}`);
+  };
 
   const save = async () => {
     if (!name.trim()) { Alert.alert('Required', 'Client name is required.'); return; }
@@ -138,10 +150,10 @@ export function ClientEditScreen({ back, params }: NavProp) {
         <Field label="Email" opt><Input value={email} onChangeText={setEmail} placeholder="name@email.com" keyboardType="email-address" autoCapitalize="none" /></Field>
         <Row style={{ gap: 10, alignItems: 'flex-start' }}>
           <View style={{ flex: 0.4 }}>
-            <Field label="ZIP"><Input value={zip} onChangeText={(v) => { setZip(v); if (v.length >= 5 && !city) setCity('Austin, TX'); }} placeholder="ZIP" keyboardType="number-pad" /></Field>
+            <Field label="ZIP"><Input value={zip} onChangeText={onZip} placeholder="ZIP" keyboardType="number-pad" maxLength={5} /></Field>
           </View>
           <View style={{ flex: 1 }}>
-            <Field label="City / State"><Input value={city} onChangeText={setCity} placeholder="auto-fills from ZIP" /></Field>
+            <Field label="City / State"><Input value={city} onChangeText={setCity} placeholder={zipBusy ? 'Looking up…' : 'auto-fills from ZIP'} /></Field>
           </View>
         </Row>
         <Field label="Street address" opt><Input value={address} onChangeText={setAddress} placeholder="123 Main St" /></Field>

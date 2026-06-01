@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
+import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
@@ -25,6 +26,17 @@ export function CameraScreen({ go, back }: NavProp) {
   const photos = store.photos || [];
   const svcs = store.svcs || [];
   const toggle = (s: string) => up((st) => ({ svcs: st.svcs.includes(s) ? st.svcs.filter((x) => x !== s) : [...st.svcs, s] }));
+
+  // live camera (expo-camera) — request camera + mic permission as soon as the screen opens
+  const camRef = useRef<CameraView>(null);
+  const [camPerm, requestCamPerm] = useCameraPermissions();
+  const [, requestMicPerm] = useMicrophonePermissions();
+  const [facing, setFacing] = useState<'back' | 'front'>('back');
+  const [capturing, setCapturing] = useState(false);
+  useEffect(() => {
+    (async () => { await requestCamPerm(); await requestMicPerm(); })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // job location → regional cost multiplier (applied to the estimate prices when generating)
   const zip = store.aZip || '';
@@ -55,15 +67,18 @@ export function CameraScreen({ go, back }: NavProp) {
   const addAssets = (assets: { uri: string }[]) =>
     up((st) => ({ photos: [...st.photos, ...assets.map((a) => ({ uri: a.uri }))].slice(0, 30) }));
 
-  // Expo Go has no live preview component bundled, so we launch the system camera.
+  // capture straight from the live preview
   const takePhoto = async () => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Camera access needed', 'Allow camera access for PhotoQuote in Settings to take job photos.');
-      return;
+    if (!camRef.current || capturing) return;
+    try {
+      setCapturing(true);
+      const p = await camRef.current.takePictureAsync({ quality: 0.8 });
+      if (p?.uri) addAssets([{ uri: p.uri }]);
+    } catch (e: any) {
+      Alert.alert('Could not take the photo', e?.message || 'Try again.');
+    } finally {
+      setCapturing(false);
     }
-    const res = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8 });
-    if (!res.canceled) addAssets(res.assets);
   };
 
   const pickLibrary = async () => {
@@ -73,21 +88,32 @@ export function CameraScreen({ go, back }: NavProp) {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#0C1116' }}>
-      {/* camera view — tap anywhere to capture */}
-      <Pressable onPress={takePhoto} style={{ flex: 1 }}>
-        <LinearGradient colors={['#2A3340', '#0C1116']} start={{ x: 0.5, y: 0.1 }} end={{ x: 0.5, y: 1 }} style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <View style={{ alignItems: 'center' }}>
+      {/* live camera view */}
+      <View style={{ flex: 1 }}>
+        {camPerm?.granted ? (
+          <CameraView ref={camRef} style={{ flex: 1 }} facing={facing} />
+        ) : (
+          <LinearGradient colors={['#2A3340', '#0C1116']} start={{ x: 0.5, y: 0.1 }} end={{ x: 0.5, y: 1 }} style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
             <View style={{ width: 66, height: 66, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
               <Icon name="camera" size={28} color="rgba(255,255,255,0.55)" />
             </View>
-            <Text style={{ fontFamily: fonts.semibold, fontSize: 13.5, color: 'rgba(255,255,255,0.6)', marginTop: 12 }}>Tap to take a photo</Text>
-            <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: 'rgba(255,255,255,0.32)', marginTop: 3 }}>or pick from your library below</Text>
-          </View>
-          <View style={{ position: 'absolute', top: 50, left: 0, right: 0, paddingHorizontal: 18, flexDirection: 'row', justifyContent: 'space-between' }}>
-            <CamSide icon="x" onPress={back} />
-          </View>
-        </LinearGradient>
-      </Pressable>
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: 'rgba(255,255,255,0.7)', marginTop: 14, textAlign: 'center' }}>
+              {camPerm && !camPerm.granted ? 'Camera access needed' : 'Starting camera…'}
+            </Text>
+            {camPerm && !camPerm.granted ? (
+              camPerm.canAskAgain ? (
+                <Btn variant="soft" sm icon="camera" title="Allow camera" onPress={() => requestCamPerm()} style={{ marginTop: 14, paddingHorizontal: 18 }} />
+              ) : (
+                <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: 'rgba(255,255,255,0.4)', marginTop: 8, textAlign: 'center' }}>Enable it in Settings, or pick from your library below.</Text>
+              )
+            ) : null}
+          </LinearGradient>
+        )}
+        {/* close button overlay */}
+        <View style={{ position: 'absolute', top: 50, left: 0, right: 0, paddingHorizontal: 18, flexDirection: 'row', justifyContent: 'space-between' }}>
+          <CamSide icon="x" onPress={back} />
+        </View>
+      </View>
 
       {/* photo strip */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 20, paddingVertical: 14 }}>
@@ -112,9 +138,12 @@ export function CameraScreen({ go, back }: NavProp) {
         <CamSide icon="image" big onPress={pickLibrary} />
         <Pressable
           onPress={takePhoto}
-          style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: '#fff', borderWidth: 5, borderColor: 'rgba(255,255,255,0.35)' }}
-        />
-        <CamSide icon="camera" big onPress={takePhoto} />
+          disabled={capturing || !camPerm?.granted}
+          style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: '#fff', borderWidth: 5, borderColor: 'rgba(255,255,255,0.35)', opacity: capturing || !camPerm?.granted ? 0.5 : 1, alignItems: 'center', justifyContent: 'center' }}
+        >
+          {capturing ? <ActivityIndicator color="#0C1116" /> : null}
+        </Pressable>
+        <CamSide icon="flip" big onPress={() => setFacing((f) => (f === 'back' ? 'front' : 'back'))} />
       </View>
 
       {/* bottom sheet card */}
