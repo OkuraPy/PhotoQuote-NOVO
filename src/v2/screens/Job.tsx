@@ -1,11 +1,11 @@
 // PhotoQuote v2 — Job screen: timeline + Quote / Invoice / Contract / Progress tabs
-import React from 'react';
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
 import { calcTotals, CLIENTS, COMPANY, fmt, LineItem, split, STAGES } from '../data';
-import { useQuery } from '@tanstack/react-query';
-import { fetchCompanyProfile, fetchJobDetail, JobDetail } from '../lib/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { createInvoice, fetchCompanyProfile, fetchJobDetail, JobDetail } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { sendDoc } from '../lib/send';
 import { Between, Btn, Card, CatChip, Divider, Nav, NavBtn, PhotoTile, Row, SectionTitle, SendSheet, StageChip, useStore } from '../ui';
@@ -80,11 +80,31 @@ export function JobScreen({ go, back, params }: NavProp) {
   const cName = job ? job.client || 'No client' : client?.name || 'No client';
   const addr = job ? job.addr : client?.addr || store.aLoc?.city || 'No address yet';
   const next = NEXT[stage];
+  const queryClient = useQueryClient();
+  const [genningInv, setGenningInv] = useState(false);
+
+  // generate a real invoice from the saved estimate (copies its totals; sequential number)
+  const generateInvoice = async () => {
+    if (inv) { setStage('Invoiced'); setTab('invoice'); return; }
+    if (!user?.id || !est?.id || !projectId) { Alert.alert('Estimate needed', 'Save the estimate first, then generate the invoice.'); return; }
+    setGenningInv(true);
+    try {
+      await createInvoice(user.id, est.id, projectId);
+      await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      setStage('Invoiced');
+      setTab('invoice');
+    } catch (e: any) {
+      Alert.alert('Could not create the invoice', e?.message || 'Try again.');
+    } finally {
+      setGenningInv(false);
+    }
+  };
 
   const doNext = () => {
     if (next.act === 'send') return up({ sheet: true });
     if (next.act === 'approve') setStage('Approved');
-    if (next.act === 'invoice') { setStage('Invoiced'); setTab('invoice'); }
+    if (next.act === 'invoice') return generateInvoice();
     if (next.act === 'paid') setStage('Paid');
   };
 
@@ -133,7 +153,7 @@ export function JobScreen({ go, back, params }: NavProp) {
         </View>
 
         {tab === 'quote' && <QuoteTab items={items} totals={quoteTotals} go={go} photos={detail?.photoUrls || []} />}
-        {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} company={company} invoice={inv} onGen={() => { setStage('Invoiced'); }} setSheet={(b: boolean) => up({ sheet: b })} />}
+        {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} company={company} invoice={inv} genning={genningInv} onGen={generateInvoice} setSheet={(b: boolean) => up({ sheet: b })} />}
         {tab === 'contract' && <ContractTab setSheet={(b: boolean) => up({ sheet: b })} />}
         {tab === 'progress' && <ProgressTab />}
       </ScrollView>
@@ -215,11 +235,16 @@ function QuoteTab({ items, totals, go, photos }: { items: LineItem[]; totals: To
   );
 }
 
-function InvoiceTab({ stage, items, totals, client, company, invoice, onGen, setSheet }: { stage: Stage; items: LineItem[]; totals: Totals; client: JobDetail['client']; company?: any; invoice?: JobDetail['invoice']; onGen: () => void; setSheet: (b: boolean) => void }) {
+function InvoiceTab({ stage, items, totals, client, company, invoice, genning, onGen, setSheet }: { stage: Stage; items: LineItem[]; totals: Totals; client: JobDetail['client']; company?: any; invoice?: JobDetail['invoice']; genning: boolean; onGen: () => void; setSheet: (b: boolean) => void }) {
   const has = !!invoice || ['Invoiced', 'Paid'].includes(stage);
   const deposit = 25;
   const co = company || {};
   const coName = co.company_name || 'Your company';
+  // real issued / due dates (Net 15 from issue)
+  const issued = invoice?.created ? new Date(invoice.created) : new Date();
+  const due = new Date(issued);
+  due.setDate(due.getDate() + 15);
+  const md = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   if (!has) {
     return (
       <View style={{ marginTop: 16, alignItems: 'center', paddingVertical: 40, paddingHorizontal: 24 }}>
@@ -228,7 +253,7 @@ function InvoiceTab({ stage, items, totals, client, company, invoice, onGen, set
         </View>
         <Text style={{ fontFamily: fonts.extrabold, fontSize: 19, color: colors.ink }}>No invoice yet</Text>
         <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.muted, marginTop: 8, textAlign: 'center', lineHeight: 21 }}>Generate a professional invoice from this quote. Totals stay in sync automatically.</Text>
-        <Btn title="Generate invoice" icon="receipt" onPress={onGen} style={{ marginTop: 20, maxWidth: 240 }} />
+        <Btn title={genning ? 'Generating…' : 'Generate invoice'} icon={genning ? undefined : 'receipt'} disabled={genning} onPress={onGen} style={{ marginTop: 20, maxWidth: 240 }} />
       </View>
     );
   }
@@ -256,7 +281,7 @@ function InvoiceTab({ stage, items, totals, client, company, invoice, onGen, set
           </Between>
           <Between style={{ marginTop: 16, alignItems: 'flex-start' }}>
             <View><DpLab text="Invoice" /><Text style={{ fontFamily: fonts.num, fontSize: 14, color: colors.muted, marginTop: 3 }}>{invoice?.number || 'INV-2026-0001'}</Text></View>
-            <View style={{ alignItems: 'flex-end' }}><DpLab text="Issued · Due" /><Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.ink, marginTop: 3 }}>May 31 · Jun 15</Text></View>
+            <View style={{ alignItems: 'flex-end' }}><DpLab text="Issued · Due" /><Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.ink, marginTop: 3 }}>{md(issued)} · {md(due)}</Text></View>
           </Between>
         </View>
         {/* parties */}

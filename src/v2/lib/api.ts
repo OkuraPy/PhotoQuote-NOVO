@@ -203,6 +203,41 @@ export async function createJob(input: {
   return { projectId: proj.id, estimateId: est.id };
 }
 
+/* ---------------- Invoice (generated from an approved estimate) ---------------- */
+// Copies the estimate's totals (the DB trigger keeps those correct) and assigns a sequential
+// per-user invoice number INV-YYYY-NNNN. No invoice-number trigger exists, so we mint it here.
+export async function createInvoice(userId: string, estimateId: string, projectId: string): Promise<{ id: string; number: string }> {
+  const { data: est, error: eErr } = await supabase
+    .from('estimates')
+    .select('subtotal, tax_rate, tax_percent, tax_amount, margin_rate, margin_amount, total, grand_total')
+    .eq('id', estimateId)
+    .maybeSingle();
+  if (eErr) throw eErr;
+
+  const { count } = await supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('user_id', userId);
+  const number = `INV-${new Date().getFullYear()}-${String((count || 0) + 1).padStart(4, '0')}`;
+
+  const { data: inv, error } = await supabase
+    .from('invoices')
+    .insert({
+      user_id: userId,
+      estimate_id: estimateId,
+      project_id: projectId,
+      invoice_number: number,
+      status: 'Unpaid',
+      subtotal: Number(est?.subtotal ?? 0),
+      tax_rate: Number(est?.tax_rate ?? est?.tax_percent ?? 0),
+      tax_amount: Number(est?.tax_amount ?? 0),
+      margin_rate: Number(est?.margin_rate ?? 0),
+      margin_amount: Number(est?.margin_amount ?? 0),
+      total: Number(est?.total ?? est?.grand_total ?? 0),
+    })
+    .select('id, invoice_number')
+    .single();
+  if (error) throw error;
+  return { id: inv.id, number: inv.invoice_number };
+}
+
 /* ---------------- Jobs (project + its estimate/invoice → v2 Job) ---------------- */
 export type RealJob = Job & { projectId: string };
 
@@ -287,7 +322,7 @@ export async function updateCompanyProfile(userId: string, p: { company_name?: s
 export type JobDetail = {
   estimate: { id: string; total: number; subtotal: number; taxRate: number; tax: number; marginRate: number; status: string; notes: string | null } | null;
   items: LineItem[];
-  invoice: { id: string; number: string; status: string; subtotal: number; taxRate: number; tax: number; total: number } | null;
+  invoice: { id: string; number: string; status: string; subtotal: number; taxRate: number; tax: number; total: number; created: string } | null;
   client: { name: string; addr: string; city: string; email: string; phone: string } | null;
   photoUrls: string[];
 };
@@ -324,7 +359,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
 
   const invRes = await supabase
     .from('invoices')
-    .select('id, invoice_number, status, subtotal, tax_rate, tax_amount, total')
+    .select('id, invoice_number, status, subtotal, tax_rate, tax_amount, total, created_at')
     .eq('project_id', projectId)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -350,7 +385,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
       : null,
     items,
     invoice: inv
-      ? { id: inv.id, number: inv.invoice_number, status: inv.status, subtotal: Number(inv.subtotal ?? 0), taxRate: Number(inv.tax_rate ?? 0), tax: Number(inv.tax_amount ?? 0), total: Number(inv.total ?? 0) }
+      ? { id: inv.id, number: inv.invoice_number, status: inv.status, subtotal: Number(inv.subtotal ?? 0), taxRate: Number(inv.tax_rate ?? 0), tax: Number(inv.tax_amount ?? 0), total: Number(inv.total ?? 0), created: inv.created_at }
       : null,
     client,
     photoUrls: Array.isArray(projRes.data?.photo_urls) ? (projRes.data!.photo_urls as string[]) : [],

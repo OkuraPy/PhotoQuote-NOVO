@@ -4,6 +4,16 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-01 15:20] — feat: v2 Fase 3 — gerar fatura real do orçamento
+- **O que mudou**:
+  - **`createInvoice`** (`lib/api.ts`): gera a fatura a partir do orçamento — copia os totais do estimate (fonte de verdade do trigger) e cria **número sequencial** `INV-AAAA-NNNN` (count por usuário; não há trigger de número). Status 'Unpaid'.
+  - **Job**: o botão "Generate invoice" (e o CTA da timeline no estágio Aprovado) agora CRIA a fatura no banco (handler async `generateInvoice` + invalida `jobDetail`/`jobs`), com loading. Antes só mudava o estágio local sem persistir.
+  - **Datas reais** na fatura: emitida = `created_at`, vencimento = +15 dias (Net 15) — saiu o "May 31 · Jun 15" fixo. `fetchJobDetail` passou a trazer `invoice.created_at`.
+- **Arquivos**: `src/v2/lib/api.ts`, `src/v2/screens/Job.tsx`
+- **Decisão técnica**: a fatura COPIA os totais do estimate (não recalcula) — o estimate já é a fonte de verdade (trigger `update_estimate_totals`). Número sequencial gerado no app (count+1) por falta de trigger; ok pra 1 contratante. Vencimento Net 15 / depósito 25% fixos por ora (sem coluna no banco — configurável fica pro futuro). Envio (PDF/email/WhatsApp) já existia via SendSheet.
+- **Verificação**: `tsc` 0 erros + bundle iOS limpo. Testado no banco real: fatura de um orçamento de $5.998,50 → número `INV-2026-0002`, totais idênticos ao estimate (`totais_batem=true`); teste removido depois (conta rodrigo intacta).
+- **Falta provar no device**: aprovar orçamento → gerar fatura → ver número/datas/totais + enviar.
+
 ### [2026-06-01 13:35] — fix: v2 — câmera ao vivo (expo-camera) + CEP autofill no cliente
 - **O que mudou**:
   - **Câmera ao vivo**: `CameraScreen` usa `expo-camera` `<CameraView>` (preview de verdade) no lugar do fundo escuro. **Permissões de câmera + microfone pedidas ao ABRIR a tela** (useEffect no mount) → os prompts aparecem na hora (corrige a falha reportada: "tela preta" sem pedir permissão). Shutter captura do preview (`takePictureAsync`); botão de virar câmera (frente/trás); fallback claro se a permissão for negada (com botão "Allow camera").
