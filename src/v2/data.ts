@@ -22,6 +22,9 @@ export type LineItem = {
   taxable: boolean;
 };
 
+// A captured/picked photo waiting to be analyzed (local file uri from the camera or library).
+export type Photo = { uri: string };
+
 // §9 official formula — mirrors the planned calc-totals Edge Function
 export function calcTotals(items: LineItem[], taxRate: number, marginRate = 0) {
   const subtotal = items.reduce((s, i) => s + i.qty * i.price, 0);

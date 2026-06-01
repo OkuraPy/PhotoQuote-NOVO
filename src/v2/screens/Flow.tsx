@@ -1,10 +1,15 @@
 // PhotoQuote v2 — priority flow: Camera (photo-first + voice), Estimate (AI + editing), Attach client
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
-import { calcTotals, CLIENTS, fmt, LineItem, split } from '../data';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { calcTotals, fmt, LineItem, split } from '../data';
+import { requestEstimate } from '../lib/ai';
+import { createClient, createJob, fetchClients } from '../lib/api';
+import { useAuth } from '../lib/auth';
 import { Avatar, Between, Btn, Card, Chip, CatChip, DecimalInput, Divider, Field, Input, Nav, NavBtn, Row, SearchBar, SectionTitle, Sheet, Switch, useStore } from '../ui';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
@@ -19,27 +24,49 @@ export function CameraScreen({ go, back }: NavProp) {
   const photos = store.photos || [];
   const svcs = store.svcs || [];
   const toggle = (s: string) => up((st) => ({ svcs: st.svcs.includes(s) ? st.svcs.filter((x) => x !== s) : [...st.svcs, s] }));
+
+  const addAssets = (assets: { uri: string }[]) =>
+    up((st) => ({ photos: [...st.photos, ...assets.map((a) => ({ uri: a.uri }))].slice(0, 30) }));
+
+  // Expo Go has no live preview component bundled, so we launch the system camera.
+  const takePhoto = async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Camera access needed', 'Allow camera access for PhotoQuote in Settings to take job photos.');
+      return;
+    }
+    const res = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8 });
+    if (!res.canceled) addAssets(res.assets);
+  };
+
+  const pickLibrary = async () => {
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: 30, quality: 0.8 });
+    if (!res.canceled) addAssets(res.assets);
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: '#0C1116' }}>
-      {/* camera view */}
-      <LinearGradient colors={['#2A3340', '#0C1116']} start={{ x: 0.5, y: 0.1 }} end={{ x: 0.5, y: 1 }} style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <View style={{ alignItems: 'center' }}>
-          <Icon name="camera" size={30} color="rgba(255,255,255,0.35)" />
-          <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: 'rgba(255,255,255,0.45)', marginTop: 8 }}>Point at the work area</Text>
-        </View>
-        <View style={{ position: 'absolute', top: 50, left: 0, right: 0, paddingHorizontal: 18, flexDirection: 'row', justifyContent: 'space-between' }}>
-          <CamSide icon="x" onPress={back} />
-          <CamSide icon="zap" />
-        </View>
-      </LinearGradient>
+      {/* camera view — tap anywhere to capture */}
+      <Pressable onPress={takePhoto} style={{ flex: 1 }}>
+        <LinearGradient colors={['#2A3340', '#0C1116']} start={{ x: 0.5, y: 0.1 }} end={{ x: 0.5, y: 1 }} style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <View style={{ alignItems: 'center' }}>
+            <View style={{ width: 66, height: 66, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="camera" size={28} color="rgba(255,255,255,0.55)" />
+            </View>
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 13.5, color: 'rgba(255,255,255,0.6)', marginTop: 12 }}>Tap to take a photo</Text>
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: 'rgba(255,255,255,0.32)', marginTop: 3 }}>or pick from your library below</Text>
+          </View>
+          <View style={{ position: 'absolute', top: 50, left: 0, right: 0, paddingHorizontal: 18, flexDirection: 'row', justifyContent: 'space-between' }}>
+            <CamSide icon="x" onPress={back} />
+          </View>
+        </LinearGradient>
+      </Pressable>
 
       {/* photo strip */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 20, paddingVertical: 14 }}>
         {photos.map((p, i) => (
-          <View key={p}>
-            <LinearGradient colors={['#CBD5D0', '#E9EEEB']} style={{ width: 56, height: 56, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.18)' }}>
-              <Icon name="image" size={18} color="rgba(255,255,255,0.7)" />
-            </LinearGradient>
+          <View key={`${p.uri}-${i}`}>
+            <Image source={{ uri: p.uri }} style={{ width: 56, height: 56, borderRadius: 12, borderWidth: 2, borderColor: 'rgba(255,255,255,0.18)' }} />
             <Pressable
               onPress={() => up((st) => ({ photos: st.photos.filter((_, x) => x !== i) }))}
               style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: 10, backgroundColor: '#0C1116', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.3)' }}
@@ -48,19 +75,19 @@ export function CameraScreen({ go, back }: NavProp) {
             </Pressable>
           </View>
         ))}
-        <View style={{ width: 56, height: 56, borderRadius: 12, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center' }}>
+        <Pressable onPress={takePhoto} style={{ width: 56, height: 56, borderRadius: 12, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ fontFamily: fonts.bold, fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>{photos.length}/30</Text>
-        </View>
+        </Pressable>
       </ScrollView>
 
       {/* controls */}
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 28, paddingBottom: 14, paddingTop: 4 }}>
-        <CamSide icon="image" big />
+        <CamSide icon="image" big onPress={pickLibrary} />
         <Pressable
-          onPress={() => up((st) => ({ photos: [...st.photos, (st.photos[st.photos.length - 1] || 0) + 1] }))}
+          onPress={takePhoto}
           style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: '#fff', borderWidth: 5, borderColor: 'rgba(255,255,255,0.35)' }}
         />
-        <CamSide icon="camera" big />
+        <CamSide icon="camera" big onPress={takePhoto} />
       </View>
 
       {/* bottom sheet card */}
@@ -76,7 +103,7 @@ export function CameraScreen({ go, back }: NavProp) {
           <Chip label="Custom" icon="plus" />
         </ScrollView>
         <DescriptionInput />
-        <Btn title="Generate estimate" icon="sparkles" disabled={!photos.length} onPress={() => go('estimate', { fresh: true, count: photos.length })} style={{ marginTop: 16 }} />
+        <Btn title="Generate estimate" icon="sparkles" disabled={!photos.length} onPress={() => go('estimate', { fresh: true })} style={{ marginTop: 16 }} />
       </View>
     </View>
   );
@@ -168,21 +195,48 @@ function Wave({ bars, color }: { bars: number[]; color: string }) {
 }
 
 /* ---------------- ESTIMATE (AI + editing) ---------------- */
+type EstPhase = 'analyzing' | 'done' | 'rejected' | 'error';
+
 export function EstimateScreen({ go, back, params }: NavProp) {
   const { store, up } = useStore();
   const items = store.items || [];
   const taxRate = store.taxRate ?? 8.25;
   const marginRate = store.marginRate ?? 0;
   const editing = store.editing;
-  const [analyzing, setAnalyzing] = useState(!!(params && params.fresh));
-  const count = (params && params.count) || 6;
-  useEffect(() => {
-    if (analyzing) {
-      const t = setTimeout(() => setAnalyzing(false), 2200);
-      return () => clearTimeout(t);
-    }
-  }, [analyzing]);
+  const count = (store.photos || []).length;
 
+  // Real AI flow: call the ai-estimate Edge Function once when arriving fresh from the camera.
+  const [phase, setPhase] = useState<EstPhase>(params && params.fresh ? 'analyzing' : 'done');
+  const [reason, setReason] = useState(''); // rejection reason or error message
+  const ranRef = useRef(false);
+
+  const runAI = async () => {
+    setPhase('analyzing');
+    setReason('');
+    const r = await requestEstimate({ photos: store.photos, services: store.svcs, description: store.descText });
+    if (r.ok) {
+      up({ items: r.items, confidence: r.confidence, aiNotes: r.notes });
+      setPhase('done');
+    } else if ('error' in r) {
+      setReason(r.error);
+      setPhase('error');
+    } else {
+      setReason(r.reason);
+      setPhase('rejected');
+    }
+  };
+
+  useEffect(() => {
+    if (params && params.fresh && !ranRef.current) {
+      ranRef.current = true;
+      runAI();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const analyzing = phase === 'analyzing';
+  const conf = Math.round(store.confidence || 0);
+  const showEstimate = phase === 'done' || analyzing;
   const t = calcTotals(items, taxRate, marginRate);
   const [d, c] = split(t.total);
   const updateItem = (id: number, patch: Partial<LineItem>) => up((st) => ({ items: st.items.map((it) => (it.id === id ? { ...it, ...patch } : it)) }));
@@ -196,31 +250,60 @@ export function EstimateScreen({ go, back, params }: NavProp) {
     <>
       <Nav title="Estimate" center onBack={back} right={<NavBtn icon="share" size={17} />} />
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false}>
-        {/* AI banner */}
+        {/* AI status banner */}
         {analyzing ? (
-          <LinearGradient colors={[colors.primaryTint, colors.card]} style={{ flexDirection: 'row', alignItems: 'center', gap: 13, borderRadius: radii.lg, padding: 14, borderWidth: 1, borderColor: colors.primaryTint2 }}>
-            <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 2.5, borderColor: colors.primaryTint2, borderTopColor: colors.primary }} />
+          <LinearGradient colors={[colors.primaryTint, colors.card]} style={{ flexDirection: 'row', alignItems: 'center', gap: 13, borderRadius: radii.lg, padding: 16, borderWidth: 1, borderColor: colors.primaryTint2 }}>
+            <ActivityIndicator color={colors.primary} />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: fonts.extrabold, fontSize: 14.5, color: colors.ink }}>Analyzing {count} photos…</Text>
-              <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 2 }}>Detecting surfaces & scope</Text>
+              <Text style={{ fontFamily: fonts.extrabold, fontSize: 14.5, color: colors.ink }}>Analyzing {count} {count === 1 ? 'photo' : 'photos'}…</Text>
+              <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 2 }}>Reading surfaces, materials & scope</Text>
             </View>
           </LinearGradient>
+        ) : phase === 'rejected' ? (
+          <Card style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 13, padding: 16 }}>
+            <View style={{ width: 44, height: 44, borderRadius: 13, backgroundColor: colors.errorTint, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="flag" size={20} color={colors.error} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: fonts.extrabold, fontSize: 14.5, color: colors.ink }}>These don’t look like job photos</Text>
+              <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 3, lineHeight: 18 }}>{reason}</Text>
+              <Btn variant="soft" sm icon="camera" title="Retake photos" onPress={back} style={{ marginTop: 12, alignSelf: 'flex-start', paddingHorizontal: 16 }} />
+            </View>
+          </Card>
+        ) : phase === 'error' ? (
+          <Card style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 13, padding: 16 }}>
+            <View style={{ width: 44, height: 44, borderRadius: 13, backgroundColor: colors.errorTint, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="flag" size={20} color={colors.error} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: fonts.extrabold, fontSize: 14.5, color: colors.ink }}>Couldn’t generate the estimate</Text>
+              <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 3, lineHeight: 18 }}>{reason}</Text>
+              <Row style={{ gap: 10, marginTop: 12 }}>
+                <Btn variant="soft" sm icon="sparkles" title="Try again" onPress={runAI} style={{ paddingHorizontal: 16 }} />
+                <Btn variant="ghost" sm title="Add manually" onPress={() => { up({ items: [], confidence: 0, aiNotes: '' }); setPhase('done'); }} style={{ paddingHorizontal: 16 }} />
+              </Row>
+            </View>
+          </Card>
         ) : (
           <Card style={{ flexDirection: 'row', alignItems: 'center', gap: 13, padding: 14 }}>
             <View style={{ width: 44, height: 44, borderRadius: 13, backgroundColor: colors.primaryTint, alignItems: 'center', justifyContent: 'center' }}>
               <Icon name="sparkles" size={22} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: fonts.extrabold, fontSize: 14.5, color: colors.ink }}>AI analyzed {count} photos</Text>
-              <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 2 }}>Exterior repaint · 2 surfaces detected</Text>
+              <Text style={{ fontFamily: fonts.extrabold, fontSize: 14.5, color: colors.ink }}>AI analyzed {count} {count === 1 ? 'photo' : 'photos'}</Text>
+              <Text numberOfLines={2} style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 2, lineHeight: 17 }}>{store.aiNotes || 'Review the items below and adjust as needed.'}</Text>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 9, borderRadius: radii.pill, backgroundColor: colors.accentTint, borderWidth: 1, borderColor: colors.accentBorder }}>
-              <Icon name="check" size={12} sw={2.6} color={colors.accentInk} />
-              <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: colors.accentInk }}>High confidence</Text>
-            </View>
+            {conf > 0 ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 9, borderRadius: radii.pill, backgroundColor: colors.accentTint, borderWidth: 1, borderColor: colors.accentBorder }}>
+                <Icon name="check" size={12} sw={2.6} color={colors.accentInk} />
+                <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: colors.accentInk }}>{conf}%</Text>
+              </View>
+            ) : null}
           </Card>
         )}
 
+        {showEstimate ? (
+        <>
         {/* hero total */}
         <View style={{ paddingHorizontal: 4, paddingTop: 22 }}>
           <Text style={{ fontFamily: fonts.bold, fontSize: 12, letterSpacing: 1.4, color: colors.muted }}>ESTIMATED TOTAL</Text>
@@ -289,9 +372,11 @@ export function EstimateScreen({ go, back, params }: NavProp) {
             </Between>
           </Card>
         ) : null}
+        </>
+        ) : null}
       </ScrollView>
       <View style={actionbar}>
-        <Btn title="Continue" icon="arrowRight" disabled={analyzing} onPress={() => go('attach', {})} />
+        <Btn title="Continue" icon="arrowRight" disabled={phase !== 'done'} onPress={() => go('attach', {})} />
       </View>
 
       <Sheet open={!!editing} onClose={() => up({ editing: null })} title="Edit item">
@@ -351,12 +436,58 @@ function ItemEditor({ it, onChange, onRemove, onDone }: { it: LineItem; onChange
 /* ---------------- ATTACH CLIENT ---------------- */
 export function AttachScreen({ go, back }: NavProp) {
   const { store, up } = useStore();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const q = store.aQ || '';
   const sel = store.aSel;
   const zip = store.aZip || '';
   const loc = store.aLoc;
-  const results = q ? CLIENTS.filter((c) => c.name.toLowerCase().includes(q.toLowerCase())) : [];
+  const [saving, setSaving] = useState(false);
+
+  // search the user's REAL clients (was a mock list before)
+  const { data: clients = [] } = useQuery({ queryKey: ['clients', user?.id], queryFn: () => fetchClients(user!.id), enabled: !!user?.id });
+  const ql = q.toLowerCase();
+  const results = q
+    ? clients.filter((c) => c.name.toLowerCase().includes(ql) || (c.phone || '').includes(q) || (c.email || '').toLowerCase().includes(ql))
+    : [];
   const lookupZip = (z: string) => up({ aZip: z, aLoc: z.length >= 5 ? { city: 'Austin, TX', region: '+4% regional' } : null });
+
+  // existing client → its real id; quick-add (name only) → create it first
+  async function resolveClientId(): Promise<string | null> {
+    if (!sel || !user?.id) return null;
+    if (sel.id) return sel.id;
+    const created = await createClient(user.id, { name: sel.name || 'New client' });
+    return created.id;
+  }
+
+  async function onSave(skipClient = false) {
+    if (!store.items.length) { Alert.alert('Nothing to save', 'Generate an estimate first.'); return; }
+    if (!user?.id) { Alert.alert('Not signed in', 'Please sign in again.'); return; }
+    setSaving(true);
+    try {
+      const clientId = skipClient ? null : await resolveClientId(); // client is optional
+      const { projectId } = await createJob({
+        userId: user.id,
+        clientId,
+        name: store.svcs[0] ? `${store.svcs[0]} job` : 'New estimate',
+        address: sel.addr || undefined,
+        city: sel.city || loc?.city || undefined,
+        taxRate: store.taxRate ?? 8.25,
+        marginRate: store.marginRate ?? 0,
+        confidence: store.confidence,
+        notes: store.aiNotes,
+        services: store.svcs,
+        items: store.items,
+      });
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      await queryClient.invalidateQueries({ queryKey: ['clients'] });
+      go('job', { id: projectId });
+    } catch (e: any) {
+      Alert.alert('Could not save', e?.message || 'Try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <>
@@ -433,8 +564,8 @@ export function AttachScreen({ go, back }: NavProp) {
       </ScrollView>
       <View style={actionbar}>
         <Row style={{ gap: 10 }}>
-          <Btn variant="ghost" title="Skip" onPress={() => go('job', { id: 'new' })} style={{ flex: 0.4 }} />
-          <Btn title="Save job" icon="arrowRight" onPress={() => go('job', { id: 'new' })} style={{ flex: 1 }} />
+          <Btn variant="ghost" title="Skip" disabled={saving} onPress={() => onSave(true)} style={{ flex: 0.4 }} />
+          <Btn title={saving ? 'Saving…' : 'Save job'} icon={saving ? undefined : 'arrowRight'} disabled={saving} onPress={() => onSave(false)} style={{ flex: 1 }} />
         </Row>
       </View>
     </>

@@ -4,7 +4,6 @@ import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from './theme';
-import { ESTIMATE_ITEMS } from './data';
 import { StoreCtx, TabBar, V2Store } from './ui';
 import { useAuth } from './lib/auth';
 import { ForgotScreen, LoginScreen, OnboardScreen, SignupScreen } from './screens/Auth';
@@ -36,11 +35,13 @@ const TAB_ROOTS = ['home', 'jobs', 'clients', 'profile'];
 const FULLBLEED = ['camera'];
 
 const initStore = (): V2Store => ({
-  photos: [0, 1, 2, 3],
-  svcs: ['Painting'],
+  photos: [],
+  svcs: [],
   descText: '',
   voice: null,
-  items: ESTIMATE_ITEMS.map((x) => ({ ...x })),
+  items: [],
+  confidence: 0,
+  aiNotes: '',
   taxRate: 8.25,
   marginRate: 0,
   editing: null,
@@ -91,7 +92,8 @@ function AppFlow() {
 
   const go = (name: string, params: any = {}, mode?: string) => {
     if (name === 'camera') {
-      up({ photos: [0, 1, 2, 3], svcs: ['Painting'], descText: '', voice: null, items: ESTIMATE_ITEMS.map((x) => ({ ...x })), taxRate: 8.25, marginRate: 0 });
+      // fresh capture session — clear any prior photos / AI estimate
+      up({ photos: [], svcs: [], descText: '', voice: null, items: [], confidence: 0, aiNotes: '', taxRate: 8.25, marginRate: 0 });
     }
     if (name === 'job') up({ jobTab: (params && params.tab) || 'quote', sheet: false });
     if (mode === 'tab') setStack([{ name, params }]);

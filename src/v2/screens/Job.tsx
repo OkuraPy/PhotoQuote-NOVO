@@ -3,7 +3,7 @@ import React from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
-import { calcTotals, CLIENTS, COMPANY, ESTIMATE_ITEMS, fmt, LineItem, split, STAGES } from '../data';
+import { calcTotals, CLIENTS, COMPANY, fmt, LineItem, split, STAGES } from '../data';
 import { useQuery } from '@tanstack/react-query';
 import { fetchCompanyProfile, fetchJobDetail, JobDetail } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -50,7 +50,7 @@ function Timeline({ stage }: { stage: Stage }) {
 export function JobScreen({ go, back, params }: NavProp) {
   const { store, up } = useStore();
   const job = params?.job || null;
-  const client = job ? CLIENTS.find((c) => c.name === job.client) || null : CLIENTS[0];
+  const client = job ? CLIENTS.find((c) => c.name === job.client) || null : store.aSel || null;
   const id = job?.id || (params && params.id) || 'new';
   const baseStage: Stage = job ? job.stage : 'Quoted';
   const stage = store.stageOverride[id] || baseStage;
@@ -59,14 +59,15 @@ export function JobScreen({ go, back, params }: NavProp) {
   const setTab = (k: string) => up({ jobTab: k });
   const { user } = useAuth();
   const { data: company } = useQuery({ queryKey: ['company', user?.id], queryFn: () => fetchCompanyProfile(user!.id), enabled: !!user?.id });
-  const projectId: string | null = job?.projectId || job?.id || null;
+  const projectId: string | null = job?.projectId || job?.id || (params?.id && params.id !== 'new' ? params.id : null);
   const { data: detail } = useQuery({ queryKey: ['jobDetail', projectId], queryFn: () => fetchJobDetail(projectId!), enabled: !!projectId });
   const est = detail?.estimate;
   const inv = detail?.invoice;
   const realClient = detail?.client || null;
-  const items = detail?.items?.length ? detail.items : job ? [] : ESTIMATE_ITEMS;
-  const taxRate = est?.taxRate ?? 8.25;
-  const computed = calcTotals(items, taxRate, est?.marginRate ?? 0);
+  // new job (not yet persisted): show the AI estimate the user just generated, held in the store
+  const items = detail?.items?.length ? detail.items : job ? [] : store.items;
+  const taxRate = est?.taxRate ?? store.taxRate ?? 8.25;
+  const computed = calcTotals(items, taxRate, est?.marginRate ?? store.marginRate ?? 0);
   // stored DB totals are the source of truth (trigger); fall back to computed for mock/no-estimate
   const quoteTotals: Totals = est
     ? { subtotal: est.subtotal, taxableSubtotal: computed.taxableSubtotal, tax: est.tax, total: est.total, taxRate }
@@ -75,9 +76,9 @@ export function JobScreen({ go, back, params }: NavProp) {
     ? { subtotal: inv.subtotal, taxableSubtotal: computed.taxableSubtotal, tax: inv.tax, total: inv.total, taxRate: inv.taxRate }
     : quoteTotals;
   const [vd, vc] = split(job ? job.value : quoteTotals.total);
-  const name = job ? job.title : 'Exterior repaint';
-  const cName = job ? job.client || 'No client' : client?.name || 'Maria Alvarez';
-  const addr = job ? job.addr : client?.addr || '14 Linden Ave';
+  const name = job ? job.title : store.svcs[0] ? `${store.svcs[0]} job` : 'New estimate';
+  const cName = job ? job.client || 'No client' : client?.name || 'No client';
+  const addr = job ? job.addr : client?.addr || store.aLoc?.city || 'No address yet';
   const next = NEXT[stage];
 
   const doNext = () => {

@@ -45,6 +45,83 @@ export async function deleteClient(id: string) {
   if (error) throw error;
 }
 
+/* ---------------- Create a job (project + estimate + line items) ---------------- */
+// Persists a freshly-generated estimate. The estimate's tax_rate/margin_rate are set BEFORE the
+// line items so the `update_estimate_totals` trigger (fires on line_item insert) computes the
+// subtotal/tax/margin/total itself — keeping the DB the single source of truth for money.
+export async function createJob(input: {
+  userId: string;
+  clientId: string | null; // null = client-less draft (client is optional)
+  name: string;
+  address?: string;
+  city?: string;
+  taxRate: number;
+  marginRate: number;
+  confidence?: number;
+  notes?: string;
+  services?: string[];
+  items: LineItem[];
+}): Promise<{ projectId: string; estimateId: string }> {
+  const serviceType = (input.services && input.services[0]) || null;
+  const title = input.name.trim() || 'New estimate';
+
+  const { data: proj, error: pErr } = await supabase
+    .from('projects')
+    .insert({
+      user_id: input.userId,
+      client_id: input.clientId,
+      name: title,
+      address: input.address || null,
+      city: input.city || null,
+      status: 'draft',
+      service_type: serviceType,
+    })
+    .select('id')
+    .single();
+  if (pErr) throw pErr;
+
+  const { data: est, error: eErr } = await supabase
+    .from('estimates')
+    .insert({
+      project_id: proj.id,
+      user_id: input.userId,
+      status: 'draft',
+      service_type: serviceType,
+      tax_rate: input.taxRate,
+      tax_percent: input.taxRate,
+      margin_rate: input.marginRate,
+      margin_percent: input.marginRate,
+      confidence: input.confidence ?? 0,
+      ai_confidence_score: input.confidence ?? null,
+      title,
+      estimate_notes: input.notes || null,
+      notes: input.notes || null,
+    })
+    .select('id')
+    .single();
+  if (eErr) throw eErr;
+
+  if (input.items.length) {
+    const rows = input.items.map((it, i) => ({
+      estimate_id: est.id,
+      category: it.cat || 'Item',
+      description: it.desc || '',
+      unit: it.unit || 'ea',
+      quantity: it.qty || 0,
+      unit_price: it.price || 0,
+      taxable: !!it.taxable,
+      is_labor: (it.cat || '').toLowerCase() === 'labor',
+      ai_generated: true,
+      display_order: i,
+      item_order: i,
+    }));
+    const { error: liErr } = await supabase.from('line_items').insert(rows);
+    if (liErr) throw liErr;
+  }
+
+  return { projectId: proj.id, estimateId: est.id };
+}
+
 /* ---------------- Jobs (project + its estimate/invoice → v2 Job) ---------------- */
 export type RealJob = Job & { projectId: string };
 

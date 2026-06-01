@@ -19,11 +19,13 @@ import { colors, fonts, radii, shadow, Stage, stageColors } from './theme';
 
 /* ============================ shared store ============================ */
 export type V2Store = {
-  photos: number[];
+  photos: import('./data').Photo[];
   svcs: string[];
   descText: string;
   voice: { dur: string } | null;
   items: import('./data').LineItem[];
+  confidence: number; // AI confidence 0-100 for the current estimate
+  aiNotes: string; // AI's "what I saw / assumptions" note
   taxRate: number;
   marginRate: number;
   editing: import('./data').LineItem | null;
