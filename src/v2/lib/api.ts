@@ -1,7 +1,64 @@
 // PhotoQuote v2 — data access (Supabase). Maps real tables to the v2 UI shapes.
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as Location from 'expo-location';
+import { decode } from 'base64-arraybuffer';
 import { supabase } from './supabase';
-import { Client, Job, LineItem } from '../data';
+import { Client, Job, LineItem, Photo } from '../data';
 import { Stage } from '../theme';
+
+/* ---------------- Location: real ZIP (Zippopotam, keyless) + GPS (expo-location) ---------------- */
+export async function lookupZip(zip: string): Promise<{ city: string; state: string } | null> {
+  try {
+    const res = await fetch(`https://api.zippopotam.us/us/${zip}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const place = data?.places?.[0];
+    if (!place) return null;
+    return { city: place['place name'], state: place['state abbreviation'] };
+  } catch {
+    return null;
+  }
+}
+
+export async function getMyLocation(): Promise<{ city: string; state: string; zip: string } | null> {
+  try {
+    const perm = await Location.requestForegroundPermissionsAsync();
+    if (!perm.granted) return null;
+    const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+    const [g] = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+    if (!g) return null;
+    return { city: g.city || g.subregion || '', state: g.region || '', zip: g.postalCode || '' };
+  } catch {
+    return null;
+  }
+}
+
+const PHOTO_BUCKET = 'project-photos';
+
+// Resize + upload each photo to project-photos/${userId}/${projectId}/ and return the public URLs.
+// Best-effort: a photo that fails to upload is skipped, never blocks saving the job.
+async function uploadProjectPhotos(userId: string, projectId: string, photos: Photo[]): Promise<string[]> {
+  const results = await Promise.all(
+    photos.map(async (photo, i): Promise<string | null> => {
+      try {
+        const m = await ImageManipulator.manipulateAsync(photo.uri, [{ resize: { width: 1280 } }], {
+          compress: 0.7,
+          format: ImageManipulator.SaveFormat.JPEG,
+          base64: true,
+        });
+        if (!m.base64) return null;
+        const path = `${userId}/${projectId}/photo_${i}.jpg`;
+        const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, decode(m.base64), { contentType: 'image/jpeg', upsert: true });
+        if (error) return null;
+        const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+        return data?.publicUrl || null;
+      } catch {
+        return null; // skip a photo that fails, never block the save
+      }
+    })
+  );
+  return results.filter((u): u is string => !!u);
+}
 
 /* ---------------- Clients ---------------- */
 export async function fetchClients(userId: string): Promise<Client[]> {
@@ -61,6 +118,7 @@ export async function createJob(input: {
   notes?: string;
   services?: string[];
   items: LineItem[];
+  photos?: Photo[];
 }): Promise<{ projectId: string; estimateId: string }> {
   const serviceType = (input.services && input.services[0]) || null;
   const title = input.name.trim() || 'New estimate';
@@ -119,6 +177,12 @@ export async function createJob(input: {
     if (liErr) throw liErr;
   }
 
+  // photos are best-effort — the estimate is already safely saved, so a failed upload won't lose it
+  if (input.photos?.length) {
+    const urls = await uploadProjectPhotos(input.userId, proj.id, input.photos);
+    if (urls.length) await supabase.from('projects').update({ photo_urls: urls }).eq('id', proj.id);
+  }
+
   return { projectId: proj.id, estimateId: est.id };
 }
 
@@ -154,7 +218,7 @@ const monthDay = (iso?: string) => {
 
 export async function fetchJobs(userId: string): Promise<RealJob[]> {
   const [proj, cli, est, inv] = await Promise.all([
-    supabase.from('projects').select('id, name, client_id, address, city, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    supabase.from('projects').select('id, name, client_id, address, city, created_at, photo_urls').eq('user_id', userId).order('created_at', { ascending: false }),
     supabase.from('clients').select('id, full_name').eq('user_id', userId),
     supabase.from('estimates').select('project_id, status, total, grand_total, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     supabase.from('invoices').select('project_id, status, total').eq('user_id', userId),
@@ -181,7 +245,7 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
       title: p.name || 'Untitled',
       stage: deriveStage(e?.status, iv?.status),
       value,
-      photos: 0,
+      photos: Array.isArray(p.photo_urls) ? p.photo_urls.length : 0,
       date: monthDay(p.created_at),
     };
   });
@@ -208,6 +272,7 @@ export type JobDetail = {
   items: LineItem[];
   invoice: { id: string; number: string; status: string; subtotal: number; taxRate: number; tax: number; total: number } | null;
   client: { name: string; addr: string; city: string; email: string; phone: string } | null;
+  photoUrls: string[];
 };
 
 export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
@@ -252,7 +317,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
 
   // real client for the invoice "Bill to"
   let client: JobDetail['client'] = null;
-  const projRes = await supabase.from('projects').select('client_id').eq('id', projectId).maybeSingle();
+  const projRes = await supabase.from('projects').select('client_id, photo_urls').eq('id', projectId).maybeSingle();
   if (projRes.data?.client_id) {
     const { data: c } = await supabase
       .from('clients')
@@ -271,5 +336,6 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
       ? { id: inv.id, number: inv.invoice_number, status: inv.status, subtotal: Number(inv.subtotal ?? 0), taxRate: Number(inv.tax_rate ?? 0), tax: Number(inv.tax_amount ?? 0), total: Number(inv.total ?? 0) }
       : null,
     client,
+    photoUrls: Array.isArray(projRes.data?.photo_urls) ? (projRes.data!.photo_urls as string[]) : [],
   };
 }

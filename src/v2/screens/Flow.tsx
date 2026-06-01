@@ -9,7 +9,7 @@ import { colors, fonts, radii, shadow } from '../theme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { calcTotals, fmt, LineItem, split } from '../data';
 import { MAX_AI_PHOTOS, requestEstimate, transcribeAudio } from '../lib/ai';
-import { createClient, createJob, fetchClients } from '../lib/api';
+import { createClient, createJob, fetchClients, getMyLocation, lookupZip } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Avatar, Between, Btn, Card, Chip, CatChip, DecimalInput, Divider, Field, Input, Nav, NavBtn, Row, SearchBar, SectionTitle, Sheet, Switch, useStore } from '../ui';
 
@@ -489,7 +489,28 @@ export function AttachScreen({ go, back }: NavProp) {
   const results = q
     ? clients.filter((c) => c.name.toLowerCase().includes(ql) || (c.phone || '').includes(q) || (c.email || '').toLowerCase().includes(ql))
     : [];
-  const lookupZip = (z: string) => up({ aZip: z, aLoc: z.length >= 5 ? { city: 'Austin, TX', region: '+4% regional' } : null });
+  const [zipBusy, setZipBusy] = useState(false);
+  const [gpsBusy, setGpsBusy] = useState(false);
+
+  // type a ZIP → real city/state via Zippopotam (keyless public API)
+  const onZip = async (z: string) => {
+    const clean = z.replace(/\D/g, '').slice(0, 5);
+    up({ aZip: clean });
+    if (clean.length < 5) { up({ aLoc: null }); return; }
+    setZipBusy(true);
+    const r = await lookupZip(clean);
+    setZipBusy(false);
+    up({ aLoc: r ? { city: `${r.city}, ${r.state}`, region: '' } : null });
+  };
+
+  // GPS → reverse-geocode to city/state/ZIP
+  const onGps = async () => {
+    setGpsBusy(true);
+    const r = await getMyLocation();
+    setGpsBusy(false);
+    if (!r) { Alert.alert('Location unavailable', 'Allow location access, or enter the ZIP manually.'); return; }
+    up({ aZip: r.zip, aLoc: { city: [r.city, r.state].filter(Boolean).join(', '), region: '' } });
+  };
 
   // existing client → its real id; quick-add (name only) → create it first
   async function resolveClientId(): Promise<string | null> {
@@ -505,18 +526,20 @@ export function AttachScreen({ go, back }: NavProp) {
     setSaving(true);
     try {
       const clientId = skipClient ? null : await resolveClientId(); // client is optional
+      const client = skipClient ? null : sel; // for address/city autofill
       const { projectId } = await createJob({
         userId: user.id,
         clientId,
         name: store.svcs[0] ? `${store.svcs[0]} job` : 'New estimate',
-        address: sel.addr || undefined,
-        city: sel.city || loc?.city || undefined,
+        address: client?.addr || undefined,
+        city: client?.city || loc?.city || undefined,
         taxRate: store.taxRate ?? 8.25,
         marginRate: store.marginRate ?? 0,
         confidence: store.confidence,
         notes: store.aiNotes,
         services: store.svcs,
         items: store.items,
+        photos: store.photos,
       });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
       await queryClient.invalidateQueries({ queryKey: ['clients'] });
@@ -588,16 +611,23 @@ export function AttachScreen({ go, back }: NavProp) {
           </Card>
         )}
 
-        <SectionTitle title="Job location" link="sets regional price" />
-        <Btn variant="ghost" icon="gps" title="Use my location" onPress={() => up({ aZip: '78701', aLoc: { city: 'Austin, TX', region: '+4% regional' } })} />
-        <Input placeholder="or enter ZIP" keyboardType="number-pad" value={zip} onChangeText={lookupZip} style={{ marginTop: 12 }} />
-        {loc ? (
+        <SectionTitle title="Job location" />
+        <Btn variant="ghost" icon="gps" title={gpsBusy ? 'Locating…' : 'Use my location'} disabled={gpsBusy} onPress={onGps} />
+        <Input placeholder="or enter ZIP" keyboardType="number-pad" value={zip} onChangeText={onZip} maxLength={5} style={{ marginTop: 12 }} />
+        {zipBusy ? (
+          <Row style={{ gap: 8, marginTop: 12, paddingHorizontal: 2 }}>
+            <ActivityIndicator size="small" color={colors.muted} />
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>Looking up ZIP…</Text>
+          </Row>
+        ) : loc ? (
           <Card pad style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12, backgroundColor: colors.primaryTint, borderWidth: 0 }}>
             <Icon name="check" size={18} color={colors.primary} sw={3} />
             <Text style={{ flex: 1, fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{loc.city}</Text>
-            <View style={{ paddingVertical: 5, paddingHorizontal: 9, borderRadius: radii.pill, backgroundColor: colors.accentTint, borderWidth: 1, borderColor: colors.accentBorder }}>
-              <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: colors.accentInk }}>{loc.region}</Text>
-            </View>
+            {loc.region ? (
+              <View style={{ paddingVertical: 5, paddingHorizontal: 9, borderRadius: radii.pill, backgroundColor: colors.accentTint, borderWidth: 1, borderColor: colors.accentBorder }}>
+                <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: colors.accentInk }}>{loc.region}</Text>
+              </View>
+            ) : null}
           </Card>
         ) : null}
       </ScrollView>

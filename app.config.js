@@ -30,6 +30,7 @@ export default ({ config }) => {
       'expo-font',
       ['expo-audio', { microphonePermission: 'Allow PhotoQuote to record voice notes describing the job.' }],
       ['expo-image-picker', { photosPermission: 'Allow PhotoQuote to attach job photos to an estimate.', cameraPermission: 'Allow PhotoQuote to take job photos for an estimate.' }],
+      ['expo-location', { locationWhenInUsePermission: 'Allow PhotoQuote to use your location to set the job site.' }],
     ],
     extra,
   };

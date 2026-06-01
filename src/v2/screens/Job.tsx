@@ -1,6 +1,6 @@
 // PhotoQuote v2 — Job screen: timeline + Quote / Invoice / Contract / Progress tabs
 import React from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
 import { calcTotals, CLIENTS, COMPANY, fmt, LineItem, split, STAGES } from '../data';
@@ -132,7 +132,7 @@ export function JobScreen({ go, back, params }: NavProp) {
           ))}
         </View>
 
-        {tab === 'quote' && <QuoteTab items={items} totals={quoteTotals} go={go} />}
+        {tab === 'quote' && <QuoteTab items={items} totals={quoteTotals} go={go} photos={detail?.photoUrls || []} />}
         {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} company={company} invoice={inv} onGen={() => { setStage('Invoiced'); }} setSheet={(b: boolean) => up({ sheet: b })} />}
         {tab === 'contract' && <ContractTab setSheet={(b: boolean) => up({ sheet: b })} />}
         {tab === 'progress' && <ProgressTab />}
@@ -172,9 +172,19 @@ function TotRow({ label, value, bold, color }: { label: string; value: string; b
   );
 }
 
-function QuoteTab({ items, totals, go }: { items: LineItem[]; totals: Totals; go: NavProp['go'] }) {
+function QuoteTab({ items, totals, go, photos }: { items: LineItem[]; totals: Totals; go: NavProp['go']; photos: string[] }) {
   return (
     <View style={{ marginTop: 16 }}>
+      {photos.length ? (
+        <>
+          <SectionTitle title={`Photos · ${photos.length}`} />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingVertical: 2 }}>
+            {photos.map((u, i) => (
+              <Image key={i} source={{ uri: u }} style={{ width: 96, height: 96, borderRadius: 14, backgroundColor: colors.chipBg }} />
+            ))}
+          </ScrollView>
+        </>
+      ) : null}
       <SectionTitle title="Line items" link="Edit" onLink={() => go('estimate', {})} />
       <View style={{ gap: 10 }}>
         {items.map((it) => (

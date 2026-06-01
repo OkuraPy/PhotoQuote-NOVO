@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Icon } from '../Icon';
 import { colors, fonts } from '../theme';
 import { Client, CLIENTS, initials, JOBS } from '../data';
-import { Avatar, Between, Btn, Card, Divider, Field, Input, Nav, NavBtn, Row, SectionTitle } from '../ui';
+import { Avatar, Between, Btn, Card, Divider, Field, Input, Nav, NavBtn, Row, SectionTitle, useStore } from '../ui';
 import { JobCard } from './Tabs';
 import { useAuth } from '../lib/auth';
 import { createClient, deleteClient, fetchCompanyProfile, updateClient, updateCompanyProfile } from '../lib/api';
@@ -74,6 +74,7 @@ export function ClientEditScreen({ back, params }: NavProp) {
   const existing: Client | undefined = params?.client;
   const editing = !!existing;
   const { user } = useAuth();
+  const { up } = useStore();
   const qc = useQueryClient();
   const [name, setName] = useState(existing?.name || '');
   const [phone, setPhone] = useState(existing?.phone || '');
@@ -90,8 +91,15 @@ export function ClientEditScreen({ back, params }: NavProp) {
     setBusy(true);
     try {
       const payload = { name, phone, email, address: address || city, notes };
-      if (editing && existing) await updateClient(existing.id, payload);
-      else await createClient(user.id, payload);
+      if (editing && existing) {
+        await updateClient(existing.id, payload);
+      } else {
+        const created = await createClient(user.id, payload);
+        // coming from the estimate flow → pre-select the new client back on the Attach screen
+        if (params?.from === 'attach' && created?.id) {
+          up({ aSel: { id: created.id, name: name.trim(), phone, email, addr: address || city, city } });
+        }
+      }
       qc.invalidateQueries({ queryKey: ['clients'] });
       back();
     } catch (e: any) {
