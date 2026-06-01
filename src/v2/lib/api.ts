@@ -7,27 +7,40 @@ import { Client, Job, LineItem, Photo } from '../data';
 import { Stage } from '../theme';
 
 /* ---------------- Location: real ZIP (Zippopotam, keyless) + GPS (expo-location) ---------------- */
-export async function lookupZip(zip: string): Promise<{ city: string; state: string } | null> {
+export type Region = { city: string; state: string; zip: string; multiplier: number; label: string };
+
+// Regional cost index for a US state (from the server table; national avg = 1.0 if unknown).
+async function regionFor(state: string): Promise<{ multiplier: number; label: string }> {
+  if (!state) return { multiplier: 1, label: 'Standard' };
+  const { data } = await supabase.from('regional_pricing').select('multiplier, label').eq('state_code', state.toUpperCase()).maybeSingle();
+  return { multiplier: Number(data?.multiplier) || 1, label: data?.label || 'Average' };
+}
+
+export async function lookupZip(zip: string): Promise<Region | null> {
   try {
     const res = await fetch(`https://api.zippopotam.us/us/${zip}`);
     if (!res.ok) return null;
     const data = await res.json();
     const place = data?.places?.[0];
     if (!place) return null;
-    return { city: place['place name'], state: place['state abbreviation'] };
+    const state = place['state abbreviation'];
+    const r = await regionFor(state);
+    return { city: place['place name'], state, zip, multiplier: r.multiplier, label: r.label };
   } catch {
     return null;
   }
 }
 
-export async function getMyLocation(): Promise<{ city: string; state: string; zip: string } | null> {
+export async function getMyLocation(): Promise<Region | null> {
   try {
     const perm = await Location.requestForegroundPermissionsAsync();
     if (!perm.granted) return null;
     const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
     const [g] = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
     if (!g) return null;
-    return { city: g.city || g.subregion || '', state: g.region || '', zip: g.postalCode || '' };
+    const state = g.region || '';
+    const r = await regionFor(state);
+    return { city: g.city || g.subregion || '', state, zip: g.postalCode || '', multiplier: r.multiplier, label: r.label };
   } catch {
     return null;
   }
@@ -119,6 +132,8 @@ export async function createJob(input: {
   services?: string[];
   items: LineItem[];
   photos?: Photo[];
+  zip?: string;
+  state?: string;
 }): Promise<{ projectId: string; estimateId: string }> {
   const serviceType = (input.services && input.services[0]) || null;
   const title = input.name.trim() || 'New estimate';
@@ -131,6 +146,8 @@ export async function createJob(input: {
       name: title,
       address: input.address || null,
       city: input.city || null,
+      zip: input.zip || null,
+      property_state: input.state || null,
       status: 'draft',
       service_type: serviceType,
     })

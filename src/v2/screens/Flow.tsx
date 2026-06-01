@@ -9,7 +9,7 @@ import { colors, fonts, radii, shadow } from '../theme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { calcTotals, fmt, LineItem, split } from '../data';
 import { MAX_AI_PHOTOS, requestEstimate, transcribeAudio } from '../lib/ai';
-import { createClient, createJob, fetchClients, getMyLocation, lookupZip } from '../lib/api';
+import { createClient, createJob, fetchClients, getMyLocation, lookupZip, Region } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Avatar, Between, Btn, Card, Chip, CatChip, DecimalInput, Divider, Field, Input, Nav, NavBtn, Row, SearchBar, SectionTitle, Sheet, Switch, useStore } from '../ui';
 
@@ -25,6 +25,32 @@ export function CameraScreen({ go, back }: NavProp) {
   const photos = store.photos || [];
   const svcs = store.svcs || [];
   const toggle = (s: string) => up((st) => ({ svcs: st.svcs.includes(s) ? st.svcs.filter((x) => x !== s) : [...st.svcs, s] }));
+
+  // job location → regional cost multiplier (applied to the estimate prices when generating)
+  const zip = store.aZip || '';
+  const loc = store.aLoc;
+  const [zipBusy, setZipBusy] = useState(false);
+  const [gpsBusy, setGpsBusy] = useState(false);
+  const setRegion = (r: Region | null) =>
+    r
+      ? up({ aZip: r.zip, aLoc: { city: [r.city, r.state].filter(Boolean).join(', '), region: r.label }, regionMult: r.multiplier, regionState: r.state })
+      : up({ aLoc: null, regionMult: 1, regionState: '' });
+  const onZip = async (z: string) => {
+    const clean = z.replace(/\D/g, '').slice(0, 5);
+    up({ aZip: clean });
+    if (clean.length < 5) { setRegion(null); return; }
+    setZipBusy(true);
+    const r = await lookupZip(clean);
+    setZipBusy(false);
+    setRegion(r);
+  };
+  const onGps = async () => {
+    setGpsBusy(true);
+    const r = await getMyLocation();
+    setGpsBusy(false);
+    if (!r) { Alert.alert('Location unavailable', 'Allow location access, or enter the ZIP manually.'); return; }
+    setRegion(r);
+  };
 
   const addAssets = (assets: { uri: string }[]) =>
     up((st) => ({ photos: [...st.photos, ...assets.map((a) => ({ uri: a.uri }))].slice(0, 30) }));
@@ -92,7 +118,7 @@ export function CameraScreen({ go, back }: NavProp) {
       </View>
 
       {/* bottom sheet card */}
-      <View style={{ backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 26, maxHeight: 320 }}>
+      <ScrollView style={{ backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: 380 }} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 26 }} keyboardShouldPersistTaps="handled">
         <Row style={{ gap: 6 }}>
           <Text style={{ fontFamily: fonts.extrabold, fontSize: 13, color: colors.ink, letterSpacing: 0.5 }}>SERVICE TYPES</Text>
           <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.muted }}>· helps the AI</Text>
@@ -104,8 +130,30 @@ export function CameraScreen({ go, back }: NavProp) {
           <Chip label="Custom" icon="plus" />
         </ScrollView>
         <DescriptionInput />
+
+        {/* job location → regional pricing */}
+        <Row style={{ gap: 8, marginTop: 16, alignItems: 'center' }}>
+          <View style={{ flex: 1 }}>
+            <Input placeholder="ZIP — sets regional pricing" keyboardType="number-pad" value={zip} onChangeText={onZip} maxLength={5} />
+          </View>
+          <Pressable onPress={onGps} disabled={gpsBusy} style={{ width: 50, height: 50, borderRadius: 13, backgroundColor: colors.primaryTint, alignItems: 'center', justifyContent: 'center' }}>
+            {gpsBusy ? <ActivityIndicator size="small" color={colors.primary} /> : <Icon name="gps" size={20} color={colors.primary} />}
+          </Pressable>
+        </Row>
+        {zipBusy ? (
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 7 }}>Looking up ZIP…</Text>
+        ) : loc ? (
+          <Row style={{ gap: 6, marginTop: 8 }}>
+            <Icon name="mapPin" size={13} color={colors.primary} />
+            <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.ink }}>{loc.city}</Text>
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>
+              · {store.regionMult === 1 ? 'Standard pricing' : `${loc.region} ${store.regionMult > 1 ? '+' : ''}${Math.round((store.regionMult - 1) * 100)}%`}
+            </Text>
+          </Row>
+        ) : null}
+
         <Btn title="Generate estimate" icon="sparkles" disabled={!photos.length} onPress={() => go('estimate', { fresh: true })} style={{ marginTop: 16 }} />
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -252,7 +300,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
   const runAI = async () => {
     setPhase('analyzing');
     setReason('');
-    const r = await requestEstimate({ photos: store.photos, services: store.svcs, description: store.descText });
+    const r = await requestEstimate({ photos: store.photos, services: store.svcs, description: store.descText, regionMult: store.regionMult });
     if (r.ok) {
       up({ items: r.items, confidence: r.confidence, aiNotes: r.notes });
       setPhase('done');
@@ -357,6 +405,14 @@ export function EstimateScreen({ go, back, params }: NavProp) {
             <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.muted, marginTop: 12 }}>
               Subtotal <Text style={{ fontFamily: fonts.bold, color: colors.ink }}>{fmt(t.subtotal)}</Text> · Tax ({taxRate}%) <Text style={{ fontFamily: fonts.bold, color: colors.ink }}>{fmt(t.tax)}</Text>
             </Text>
+          ) : null}
+          {!analyzing && store.regionMult !== 1 && store.aLoc ? (
+            <Row style={{ gap: 6, marginTop: 8 }}>
+              <Icon name="mapPin" size={13} color={colors.accentInk} />
+              <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>
+                {store.aLoc.city} · regional pricing {store.regionMult > 1 ? '+' : ''}{Math.round((store.regionMult - 1) * 100)}% applied
+              </Text>
+            </Row>
           ) : null}
         </View>
 
@@ -479,8 +535,7 @@ export function AttachScreen({ go, back }: NavProp) {
   const queryClient = useQueryClient();
   const q = store.aQ || '';
   const sel = store.aSel;
-  const zip = store.aZip || '';
-  const loc = store.aLoc;
+  const loc = store.aLoc; // captured on the setup screen (for the project's city fallback)
   const [saving, setSaving] = useState(false);
 
   // search the user's REAL clients (was a mock list before)
@@ -489,29 +544,6 @@ export function AttachScreen({ go, back }: NavProp) {
   const results = q
     ? clients.filter((c) => c.name.toLowerCase().includes(ql) || (c.phone || '').includes(q) || (c.email || '').toLowerCase().includes(ql))
     : [];
-  const [zipBusy, setZipBusy] = useState(false);
-  const [gpsBusy, setGpsBusy] = useState(false);
-
-  // type a ZIP → real city/state via Zippopotam (keyless public API)
-  const onZip = async (z: string) => {
-    const clean = z.replace(/\D/g, '').slice(0, 5);
-    up({ aZip: clean });
-    if (clean.length < 5) { up({ aLoc: null }); return; }
-    setZipBusy(true);
-    const r = await lookupZip(clean);
-    setZipBusy(false);
-    up({ aLoc: r ? { city: `${r.city}, ${r.state}`, region: '' } : null });
-  };
-
-  // GPS → reverse-geocode to city/state/ZIP
-  const onGps = async () => {
-    setGpsBusy(true);
-    const r = await getMyLocation();
-    setGpsBusy(false);
-    if (!r) { Alert.alert('Location unavailable', 'Allow location access, or enter the ZIP manually.'); return; }
-    up({ aZip: r.zip, aLoc: { city: [r.city, r.state].filter(Boolean).join(', '), region: '' } });
-  };
-
   // existing client → its real id; quick-add (name only) → create it first
   async function resolveClientId(): Promise<string | null> {
     if (!sel || !user?.id) return null;
@@ -540,6 +572,8 @@ export function AttachScreen({ go, back }: NavProp) {
         services: store.svcs,
         items: store.items,
         photos: store.photos,
+        zip: store.aZip || undefined,
+        state: store.regionState || undefined,
       });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
       await queryClient.invalidateQueries({ queryKey: ['clients'] });
@@ -611,24 +645,19 @@ export function AttachScreen({ go, back }: NavProp) {
           </Card>
         )}
 
-        <SectionTitle title="Job location" />
-        <Btn variant="ghost" icon="gps" title={gpsBusy ? 'Locating…' : 'Use my location'} disabled={gpsBusy} onPress={onGps} />
-        <Input placeholder="or enter ZIP" keyboardType="number-pad" value={zip} onChangeText={onZip} maxLength={5} style={{ marginTop: 12 }} />
-        {zipBusy ? (
-          <Row style={{ gap: 8, marginTop: 12, paddingHorizontal: 2 }}>
-            <ActivityIndicator size="small" color={colors.muted} />
-            <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>Looking up ZIP…</Text>
-          </Row>
-        ) : loc ? (
-          <Card pad style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12, backgroundColor: colors.primaryTint, borderWidth: 0 }}>
-            <Icon name="check" size={18} color={colors.primary} sw={3} />
-            <Text style={{ flex: 1, fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{loc.city}</Text>
-            {loc.region ? (
-              <View style={{ paddingVertical: 5, paddingHorizontal: 9, borderRadius: radii.pill, backgroundColor: colors.accentTint, borderWidth: 1, borderColor: colors.accentBorder }}>
-                <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: colors.accentInk }}>{loc.region}</Text>
-              </View>
-            ) : null}
-          </Card>
+        {loc ? (
+          <>
+            <SectionTitle title="Job location" />
+            <Card pad style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.primaryTint, borderWidth: 0 }}>
+              <Icon name="mapPin" size={17} color={colors.primary} />
+              <Text style={{ flex: 1, fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{loc.city}</Text>
+              {store.regionMult !== 1 ? (
+                <View style={{ paddingVertical: 5, paddingHorizontal: 9, borderRadius: radii.pill, backgroundColor: colors.accentTint, borderWidth: 1, borderColor: colors.accentBorder }}>
+                  <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: colors.accentInk }}>{loc.region} {store.regionMult > 1 ? '+' : ''}{Math.round((store.regionMult - 1) * 100)}%</Text>
+                </View>
+              ) : null}
+            </Card>
+          </>
         ) : null}
       </ScrollView>
       <View style={actionbar}>

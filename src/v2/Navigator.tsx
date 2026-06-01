@@ -49,6 +49,8 @@ const initStore = (): V2Store => ({
   aSel: null,
   aZip: '',
   aLoc: null,
+  regionMult: 1,
+  regionState: '',
   jobTab: 'quote',
   sheet: false,
   stageOverride: {},
@@ -92,8 +94,8 @@ function AppFlow() {
 
   const go = (name: string, params: any = {}, mode?: string) => {
     if (name === 'camera') {
-      // fresh capture session — clear any prior photos / AI estimate
-      up({ photos: [], svcs: [], descText: '', voice: null, items: [], confidence: 0, aiNotes: '', taxRate: 8.25, marginRate: 0 });
+      // fresh capture session — clear any prior photos / AI estimate / client / location
+      up({ photos: [], svcs: [], descText: '', voice: null, items: [], confidence: 0, aiNotes: '', taxRate: 8.25, marginRate: 0, aSel: null, aQ: '', aZip: '', aLoc: null, regionMult: 1, regionState: '' });
     }
     if (name === 'job') up({ jobTab: (params && params.tab) || 'quote', sheet: false });
     if (mode === 'tab') setStack([{ name, params }]);

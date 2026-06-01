@@ -33,6 +33,8 @@ export type V2Store = {
   aSel: any;
   aZip: string;
   aLoc: { city: string; region: string } | null;
+  regionMult: number; // regional cost multiplier applied to the estimate (1.0 = national avg)
+  regionState: string;
   jobTab: string;
   sheet: boolean;
   stageOverride: Record<string, Stage>;

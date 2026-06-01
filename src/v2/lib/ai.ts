@@ -49,7 +49,9 @@ export async function requestEstimate(input: {
   photos: Photo[];
   services: string[];
   description: string;
+  regionMult?: number; // scale the AI's national-average prices to the job's region
 }): Promise<EstimateResult> {
+  const mult = input.regionMult && input.regionMult > 0 ? input.regionMult : 1;
   const imageUrls = await toDataUrls(input.photos);
   if (imageUrls.length === 0) return { ok: false, error: 'No photos to analyze. Add at least one photo.' };
 
@@ -71,7 +73,7 @@ export async function requestEstimate(input: {
     desc: String(it.description || ''),
     qty: Number(it.quantity) || 0,
     unit: String(it.unit || 'ea'),
-    price: Number(it.unitPrice) || 0,
+    price: Math.round((Number(it.unitPrice) || 0) * mult * 100) / 100, // region-adjusted
     taxable: !!it.taxable,
   }));
   if (items.length === 0) return { ok: false, error: 'The AI didn’t return any line items. Try again with clearer photos.' };
