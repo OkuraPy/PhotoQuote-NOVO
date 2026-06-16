@@ -1,5 +1,5 @@
 // PhotoQuote v2 — design tokens (Emerald & Gold). Ported from the Claude Design handoff (styles/tokens.css).
-import { TextStyle, ViewStyle } from 'react-native';
+import type { TextStyle, ViewStyle } from 'react-native';
 
 export const colors = {
   // surfaces

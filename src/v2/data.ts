@@ -1,6 +1,6 @@
 // PhotoQuote v2 — mock data + money helpers (mirrors the handoff app/data.jsx).
 // First pass uses this so the app is runnable; later wired to Supabase + Edge Functions.
-import { Stage } from './theme';
+import type { Stage } from './theme';
 
 export const fmt = (n: number) =>
   '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -36,6 +36,24 @@ export function calcTotals(items: LineItem[], taxRate: number, marginRate = 0) {
 }
 
 export const STAGES: Stage[] = ['Draft', 'Quoted', 'Sent', 'Approved', 'Invoiced', 'Paid'];
+
+// Derive the v2 pipeline stage from the raw estimate/invoice statuses (case-insensitive).
+// Any unpaid/sent/overdue invoice = "Invoiced"; only a paid invoice = "Paid".
+export function deriveStage(estStatus?: string, invStatus?: string): Stage {
+  const inv = (invStatus || '').toLowerCase();
+  if (inv === 'paid') return 'Paid';
+  if (invStatus) return 'Invoiced';
+  switch ((estStatus || '').toLowerCase()) {
+    case 'approved':
+    case 'in progress':
+    case 'completed': // work done but never invoiced → still pipeline, NOT money received
+      return 'Approved';
+    case 'sent':
+      return 'Sent';
+    default:
+      return estStatus ? 'Quoted' : 'Draft';
+  }
+}
 
 export const COMPANY = {
   name: 'Apex Renovations',

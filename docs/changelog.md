@@ -4,6 +4,11 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-16 22:00] — test: v2 Fase A6 — primeiros testes automáticos (jest) + funções de cálculo puras
+- **O que mudou**: configurado **jest** (preset `jest-expo`, script `npm test`). `deriveStage` movido para `data.ts` (módulo puro) e reexportado por `api.ts`; imports de tipo (`import type`) em `theme.ts`/`data.ts` para o módulo de dados ficar sem dependência nativa. **10 testes** cobrindo `calcTotals` (subtotal, imposto só em itens taxáveis, margem sobre subtotal+imposto, lista vazia) e `deriveStage` (Draft/Quoted/Sent/Approved, case-insensitive, Completed≠Paid, fatura paga vs não-paga).
+- **Arquivos**: `src/v2/lib/__tests__/data.test.ts` (novo), `src/v2/data.ts`, `src/v2/theme.ts`, `src/v2/lib/api.ts`, `package.json`, `package-lock.json`
+- **Validação**: `npm test` → 10/10 passam; `tsc --noEmit` limpo.
+
 ### [2026-06-16 21:45] — feat: v2 Fase B — estágio e status persistidos + numeração de fatura atômica
 - **O que mudou**:
   - **B1 · Estágio persiste**: avançar para "Aprovado" grava `estimates.status` no banco (era um override em memória que sumia ao recarregar). O estágio exibido passa a ser derivado do banco (`deriveStage` do detalhe). (`screens/Job.tsx`, `updateEstimateStatus`)

@@ -3,8 +3,8 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as Location from 'expo-location';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from './supabase';
-import { Client, Job, LineItem, Photo } from '../data';
-import { Stage } from '../theme';
+import { Client, deriveStage, Job, LineItem, Photo } from '../data';
+export { deriveStage }; // re-exported for screens (lives in ../data so it's unit-testable)
 
 /* ---------------- Location: real ZIP (Zippopotam, keyless) + GPS (expo-location) ---------------- */
 export type Region = { city: string; state: string; zip: string; multiplier: number; label: string };
@@ -360,22 +360,7 @@ export async function createAgreement(userId: string, projectId: string, invoice
 /* ---------------- Jobs (project + its estimate/invoice → v2 Job) ---------------- */
 export type RealJob = Job & { projectId: string };
 
-export function deriveStage(estStatus?: string, invStatus?: string): Stage {
-  // case-insensitive: the DB has mixed casing ('Draft' vs 'draft', etc.)
-  const inv = (invStatus || '').toLowerCase();
-  if (inv === 'paid') return 'Paid';
-  if (invStatus) return 'Invoiced'; // any unpaid/sent/overdue invoice = awaiting payment
-  switch ((estStatus || '').toLowerCase()) {
-    case 'approved':
-    case 'in progress':
-    case 'completed': // work done but never invoiced → still pipeline, NOT money received
-      return 'Approved';
-    case 'sent':
-      return 'Sent';
-    default:
-      return estStatus ? 'Quoted' : 'Draft';
-  }
-}
+// deriveStage moved to ../data (pure, unit-tested) and re-exported above.
 
 const monthDay = (iso?: string) => {
   if (!iso) return '';
