@@ -238,8 +238,8 @@ export async function createInvoice(userId: string, estimateId: string, projectI
     .maybeSingle();
   if (eErr) throw eErr;
 
-  // atomic per-user/per-year number from the DB (no race / no collision after deletes)
-  const { data: numData, error: nErr } = await supabase.rpc('next_invoice_number', { p_user: userId });
+  // atomic per-user/per-year number from the DB (forces auth.uid() server-side; no race/collision)
+  const { data: numData, error: nErr } = await supabase.rpc('next_invoice_number');
   if (nErr) throw nErr;
   const number = String(numData);
 

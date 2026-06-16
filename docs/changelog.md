@@ -4,6 +4,16 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-16 22:20] — fix: v2 — correções da revisão (override de estágio, segurança/unicidade da numeração)
+- **O que mudou** (revisão adversarial de tudo que foi feito hoje, 2 revisores):
+  - **Override de estágio robusto** (`Job.tsx`): a guarda de `id` passou para ANTES do update otimista, e o override é limpo no sucesso (o estágio derivado do banco assume) e revertido na falha — antes, um write que falhasse deixava um estágio falso preso na UI, divergindo do banco. `generateInvoice` também limpa o override (deriva "Invoiced").
+  - **Numeração de fatura segura** (migration): `next_invoice_number` agora usa `auth.uid()` internamente (sem argumento) — fecha o furo cross-tenant (um usuário podia incrementar o contador de outro). `createInvoice` chama a RPC sem `p_user`.
+  - **UNIQUE (user_id, invoice_number)** em `invoices` — garante por construção que um número nunca duplica, mesmo se o contador falhar.
+- **Arquivos**: `src/v2/screens/Job.tsx`, `src/v2/lib/api.ts`, `supabase/migrations/20260616221500_harden_invoice_numbering.sql`
+- **Banco (aplicado em prod, verificado)**: função sem-arg criada (pronargs=0), versão (uuid) removida, índice único `invoices_user_number_uniq` criado.
+- **Validação**: `tsc` limpo, `npm test` 10/10.
+- **Achados da revisão para depois (🟡)**: depósito 25% (fatura) vs 50% (contrato) → unificar na Fase C (configurável); endereço de cliente legado pode desestruturar no 1º save (degradação leve). Dados hoje: íntegros (0 órfãos, 0 colisões).
+
 ### [2026-06-16 22:00] — test: v2 Fase A6 — primeiros testes automáticos (jest) + funções de cálculo puras
 - **O que mudou**: configurado **jest** (preset `jest-expo`, script `npm test`). `deriveStage` movido para `data.ts` (módulo puro) e reexportado por `api.ts`; imports de tipo (`import type`) em `theme.ts`/`data.ts` para o módulo de dados ficar sem dependência nativa. **10 testes** cobrindo `calcTotals` (subtotal, imposto só em itens taxáveis, margem sobre subtotal+imposto, lista vazia) e `deriveStage` (Draft/Quoted/Sent/Approved, case-insensitive, Completed≠Paid, fatura paga vs não-paga).
 - **Arquivos**: `src/v2/lib/__tests__/data.test.ts` (novo), `src/v2/data.ts`, `src/v2/theme.ts`, `src/v2/lib/api.ts`, `package.json`, `package-lock.json`

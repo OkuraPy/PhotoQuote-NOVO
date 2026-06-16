@@ -54,6 +54,7 @@ export function JobScreen({ go, back, params }: NavProp) {
   const id = job?.id || (params && params.id) || 'new';
   const tab = store.jobTab || 'quote';
   const setStage = (s: Stage) => up((st) => ({ stageOverride: { ...st.stageOverride, [id]: s } }));
+  const clearStage = () => up((st) => { const o = { ...st.stageOverride }; delete o[id]; return { stageOverride: o }; });
   const setTab = (k: string) => up({ jobTab: k });
   const { user } = useAuth();
   const { data: company } = useQuery({ queryKey: ['company', user?.id], queryFn: () => fetchCompanyProfile(user!.id), enabled: !!user?.id });
@@ -86,14 +87,14 @@ export function JobScreen({ go, back, params }: NavProp) {
 
   // generate a real invoice from the saved estimate (copies its totals; sequential number)
   const generateInvoice = async () => {
-    if (inv) { setStage('Invoiced'); setTab('invoice'); return; }
+    if (inv) { clearStage(); setTab('invoice'); return; }
     if (!user?.id || !est?.id || !projectId) { Alert.alert('Estimate needed', 'Save the estimate first, then generate the invoice.'); return; }
     setGenningInv(true);
     try {
       await createInvoice(user.id, est.id, projectId);
       await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
-      setStage('Invoiced');
+      clearStage(); // invoice now exists → DB-derived stage becomes "Invoiced"
       setTab('invoice');
     } catch (e: any) {
       Alert.alert('Could not create the invoice', e?.message || 'Try again.');
@@ -127,26 +128,32 @@ export function JobScreen({ go, back, params }: NavProp) {
     }
   };
 
-  // persist a status change to the DB then refetch (was an in-memory-only override before)
+  // persist a status change to the DB then refetch. The optimistic update is applied only AFTER the
+  // id guard, and is cleared on success (DB-derived stage takes over) and reverted on failure —
+  // so a failed/blocked write never leaves a fake stage stuck in the UI.
   const setEstimateStatus = async (status: string, optimistic: Stage) => {
-    setStage(optimistic);
     if (!est?.id) return;
+    setStage(optimistic);
     try {
       await updateEstimateStatus(est.id, status);
       await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      clearStage();
     } catch (e: any) {
+      clearStage();
       Alert.alert('Could not update', e?.message || 'Try again.');
     }
   };
   const setInvoiceStatus = async (status: string, optimistic?: Stage) => {
-    if (optimistic) setStage(optimistic);
     if (!inv?.id) return;
+    if (optimistic) setStage(optimistic);
     try {
       await updateInvoiceStatus(inv.id, status);
       await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      if (optimistic) clearStage();
     } catch (e: any) {
+      if (optimistic) clearStage();
       Alert.alert('Could not update', e?.message || 'Try again.');
     }
   };
