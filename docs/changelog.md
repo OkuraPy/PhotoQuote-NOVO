@@ -4,6 +4,14 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-16 21:12] — feat: v2 — contrato real (ContractTab) + plano de execução para finalizar
+- **O que mudou**:
+  - **Contrato/Agreement REAL** (saiu o mock): `createAgreement` (`lib/api.ts`) gera o contrato a partir da fatura — lê o template de `contract_templates` por estado (fallback `is_default`), preenche as variáveis com escape de HTML, grava em `agreements` com token e `status='sent'`, e devolve o link de assinatura do portal. `fetchJobDetail` traz o `agreement` (status/signed_name/signed_date). A `ContractTab` (`screens/Job.tsx`) mostra status real (DRAFT/SENT/SIGNED), compartilha o link e lê o estado assinado de volta.
+  - **Auditoria + plano**: `docs/V2_FINISH_PLAN.md` — auditoria de 6 frentes (código v2, banco, Edge Functions, portal) + runbook de 10 fases (A–J) para finalizar a v2, com as decisões do dono (chave OpenAI fica por ora; 50 estados → template US genérico; depósito definido pelo usuário; i18n EN/ES/PT com EN ativo).
+- **Arquivos**: `src/v2/lib/api.ts`, `src/v2/screens/Job.tsx`, `docs/V2_FINISH_PLAN.md`, `docs/changelog.md`
+- **Decisão técnica**: contrato gera do template por estado com fallback para o default; round-trip validado contra o RPC `sign_agreement` do portal (exige `status='sent'` + invoice/cliente vinculados).
+- **Pendência (Fase C do plano)**: token ainda usa `Math.random()` (trocar por CSPRNG), `terms_blocks` sai vazio, e o depósito está chumbado (50% no contrato vs 25% na fatura) — será unificado e tornado configurável pelo usuário.
+
 ### [2026-06-01 15:20] — feat: v2 Fase 3 — gerar fatura real do orçamento
 - **O que mudou**:
   - **`createInvoice`** (`lib/api.ts`): gera a fatura a partir do orçamento — copia os totais do estimate (fonte de verdade do trigger) e cria **número sequencial** `INV-AAAA-NNNN` (count por usuário; não há trigger de número). Status 'Unpaid'.

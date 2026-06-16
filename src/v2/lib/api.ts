@@ -238,6 +238,88 @@ export async function createInvoice(userId: string, estimateId: string, projectI
   return { id: inv.id, number: inv.invoice_number };
 }
 
+/* ---------------- Contract / Agreement (generated from the invoice) ---------------- */
+export const PORTAL_URL = 'https://photoquote-client-portal.vercel.app';
+export const agreementLink = (token: string) => `${PORTAL_URL}/agreement/sign/${token}`;
+
+// Escape dynamic values before they go into the contract HTML (rendered with dangerouslySetInnerHTML
+// on the portal). The template itself is trusted; only the data needs escaping.
+const escC = (s: unknown): string => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const money2 = (n: number) => (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function lineItemsTableHtml(items: any[]): string {
+  const rows = (items || [])
+    .map((it) => {
+      const qty = Number(it.quantity) || 0;
+      const price = Number(it.unit_price) || 0;
+      return `<tr><td style="padding:6px 8px;border-bottom:1px solid #E6E9EE">${escC(it.description)}</td><td style="padding:6px 8px;border-bottom:1px solid #E6E9EE;text-align:right;white-space:nowrap">${qty} ${escC(it.unit)} × $${money2(price)}</td><td style="padding:6px 8px;border-bottom:1px solid #E6E9EE;text-align:right;white-space:nowrap">$${money2(qty * price)}</td></tr>`;
+    })
+    .join('');
+  return `<table style="width:100%;border-collapse:collapse;margin:8px 0;font-size:13px"><thead><tr><th style="text-align:left;padding:6px 8px;border-bottom:2px solid #11705A">Item</th><th style="text-align:right;padding:6px 8px;border-bottom:2px solid #11705A">Qty</th><th style="text-align:right;padding:6px 8px;border-bottom:2px solid #11705A">Amount</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function fillTemplate(template: string, d: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (_, k) => (k in d ? d[k] : ''));
+}
+
+// Generates the service agreement from the invoice + a contract template, stores it with a
+// random token, and returns the token (used to build the client's signing link).
+export async function createAgreement(userId: string, projectId: string, invoiceId: string): Promise<{ id: string; token: string }> {
+  const [{ data: proj }, { data: inv }, { data: company }] = await Promise.all([
+    supabase.from('projects').select('client_id, name, address, city, property_state, service_type, zip').eq('id', projectId).maybeSingle(),
+    supabase.from('invoices').select('invoice_number, estimate_id, subtotal, tax_rate, tax_amount, total').eq('id', invoiceId).maybeSingle(),
+    supabase.from('users').select('company_name, company_address, company_phone, company_email, company_license, default_state').eq('id', userId).maybeSingle(),
+  ]);
+  if (!proj) throw new Error('Project not found.');
+  if (!proj.client_id) throw new Error('Add a client to this job before creating a contract.');
+  if (!inv) throw new Error('Generate the invoice first.');
+
+  const [{ data: client }, { data: items }] = await Promise.all([
+    supabase.from('clients').select('full_name, address, address_city, address_state, phone, email').eq('id', proj.client_id).maybeSingle(),
+    supabase.from('line_items').select('description, quantity, unit, unit_price').eq('estimate_id', inv.estimate_id).order('item_order', { ascending: true }),
+  ]);
+
+  const state = proj.property_state || company?.default_state || 'FL';
+  let tpl = (await supabase.from('contract_templates').select('content').eq('state', state).limit(1).maybeSingle()).data;
+  if (!tpl?.content) tpl = (await supabase.from('contract_templates').select('content').eq('is_default', true).limit(1).maybeSingle()).data;
+  if (!tpl?.content) throw new Error('No contract template available.');
+
+  const total = Number(inv.total) || 0;
+  const html = fillTemplate(tpl.content, {
+    date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+    company_name: escC(company?.company_name || 'Your Company'),
+    company_address: escC(company?.company_address || ''),
+    company_phone: escC(company?.company_phone || ''),
+    company_email: escC(company?.company_email || ''),
+    license_number: escC(company?.company_license || 'N/A'),
+    client_name: escC(client?.full_name || ''),
+    client_address: escC([client?.address, client?.address_city, client?.address_state].filter(Boolean).join(', ')),
+    client_phone: escC(client?.phone || ''),
+    client_email: escC(client?.email || ''),
+    project_name: escC(proj.name || ''),
+    service_address: escC([proj.address, proj.city, proj.zip].filter(Boolean).join(', ')),
+    service_type: escC(proj.service_type || 'General construction'),
+    invoice_number: escC(inv.invoice_number || ''),
+    line_items_table: lineItemsTableHtml(items || []),
+    total_amount: money2(total),
+    subtotal: money2(Number(inv.subtotal) || 0),
+    tax_rate: String(Number(inv.tax_rate) || 0),
+    tax_amount: money2(Number(inv.tax_amount) || 0),
+    deposit_amount: money2(total / 2),
+    balance_amount: money2(total / 2),
+    terms_blocks: '',
+  });
+
+  const token = `agr_${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  const { data: agr, error } = await supabase
+    .from('agreements')
+    .insert({ user_id: userId, invoice_id: invoiceId, project_id: projectId, client_id: proj.client_id, state, contract_html: html, token, status: 'sent' })
+    .select('id, token')
+    .single();
+  if (error) throw error;
+  return { id: agr.id, token: agr.token };
+}
+
 /* ---------------- Jobs (project + its estimate/invoice → v2 Job) ---------------- */
 export type RealJob = Job & { projectId: string };
 
@@ -325,6 +407,7 @@ export type JobDetail = {
   invoice: { id: string; number: string; status: string; subtotal: number; taxRate: number; tax: number; total: number; created: string } | null;
   client: { name: string; addr: string; city: string; email: string; phone: string } | null;
   photoUrls: string[];
+  agreement: { id: string; token: string; status: string; signedName: string | null; signedDate: string | null } | null;
 };
 
 export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
@@ -367,6 +450,15 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
   if (invRes.error) throw invRes.error;
   const inv = invRes.data;
 
+  const agrRes = await supabase
+    .from('agreements')
+    .select('id, token, status, signed_name, signed_date')
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const agr = agrRes.data;
+
   // real client for the invoice "Bill to"
   let client: JobDetail['client'] = null;
   const projRes = await supabase.from('projects').select('client_id, photo_urls').eq('id', projectId).maybeSingle();
@@ -389,5 +481,6 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
       : null,
     client,
     photoUrls: Array.isArray(projRes.data?.photo_urls) ? (projRes.data!.photo_urls as string[]) : [],
+    agreement: agr ? { id: agr.id, token: agr.token, status: agr.status, signedName: agr.signed_name, signedDate: agr.signed_date } : null,
   };
 }

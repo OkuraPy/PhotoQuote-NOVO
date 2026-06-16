@@ -1,11 +1,11 @@
 // PhotoQuote v2 — Job screen: timeline + Quote / Invoice / Contract / Progress tabs
 import React, { useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Image, Pressable, Share, ScrollView, Text, View } from 'react-native';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
 import { calcTotals, CLIENTS, COMPANY, fmt, LineItem, split, STAGES } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { createInvoice, fetchCompanyProfile, fetchJobDetail, JobDetail } from '../lib/api';
+import { agreementLink, createAgreement, createInvoice, fetchCompanyProfile, fetchJobDetail, JobDetail } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { sendDoc } from '../lib/send';
 import { Between, Btn, Card, CatChip, Divider, Nav, NavBtn, PhotoTile, Row, SectionTitle, SendSheet, StageChip, useStore } from '../ui';
@@ -101,6 +101,31 @@ export function JobScreen({ go, back, params }: NavProp) {
     }
   };
 
+  // contract / service agreement → generate (from the invoice) and share the signing link
+  const [genningContract, setGenningContract] = useState(false);
+  const shareContract = async (token: string) => {
+    try {
+      await Share.share({ message: `Please review and sign your service agreement:\n${agreementLink(token)}` });
+    } catch {
+      /* user dismissed the share sheet */
+    }
+  };
+  const generateContract = async () => {
+    if (detail?.agreement) return shareContract(detail.agreement.token);
+    if (!inv) { Alert.alert('Invoice needed', 'Generate the invoice first, then the contract.'); return; }
+    if (!user?.id || !projectId) return;
+    setGenningContract(true);
+    try {
+      const { token } = await createAgreement(user.id, projectId, inv.id);
+      await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
+      await shareContract(token);
+    } catch (e: any) {
+      Alert.alert('Could not create the contract', e?.message || 'Try again.');
+    } finally {
+      setGenningContract(false);
+    }
+  };
+
   const doNext = () => {
     if (next.act === 'send') return up({ sheet: true });
     if (next.act === 'approve') setStage('Approved');
@@ -154,7 +179,7 @@ export function JobScreen({ go, back, params }: NavProp) {
 
         {tab === 'quote' && <QuoteTab items={items} totals={quoteTotals} go={go} photos={detail?.photoUrls || []} />}
         {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} company={company} invoice={inv} genning={genningInv} onGen={generateInvoice} setSheet={(b: boolean) => up({ sheet: b })} />}
-        {tab === 'contract' && <ContractTab setSheet={(b: boolean) => up({ sheet: b })} />}
+        {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={invoiceTotals} company={company} genning={genningContract} onGenerate={generateContract} />}
         {tab === 'progress' && <ProgressTab />}
       </ScrollView>
 
@@ -336,7 +361,27 @@ function InvoiceTab({ stage, items, totals, client, company, invoice, genning, o
 }
 const DpLab = ({ text }: { text: string }) => <Text style={{ fontFamily: fonts.extrabold, fontSize: 10, letterSpacing: 1, color: colors.faint }}>{text.toUpperCase()}</Text>;
 
-function ContractTab({ setSheet }: { setSheet: (b: boolean) => void }) {
+function ContractTab({ agreement, hasInvoice, totals, company, genning, onGenerate }: { agreement: JobDetail['agreement']; hasInvoice: boolean; totals: Totals; company?: any; genning: boolean; onGenerate: () => void }) {
+  const coName = company?.company_name || 'Your company';
+  const signed = agreement?.status === 'signed';
+  const sent = !!agreement && !signed;
+  const deposit = totals.total / 2; // template terms = 50% deposit
+  const statusLabel = signed ? 'SIGNED' : sent ? 'SENT' : 'DRAFT';
+  const statusColor = signed ? colors.success : sent ? colors.accentInk : '#8A93A3';
+  const statusBg = signed ? colors.successTint : sent ? colors.accentTint : '#EEF0F3';
+
+  if (!hasInvoice) {
+    return (
+      <View style={{ marginTop: 16, alignItems: 'center', paddingVertical: 40, paddingHorizontal: 24 }}>
+        <View style={{ width: 72, height: 72, borderRadius: 22, backgroundColor: colors.primaryTint, alignItems: 'center', justifyContent: 'center', marginBottom: 18 }}>
+          <Icon name="signature" size={30} color={colors.primary} />
+        </View>
+        <Text style={{ fontFamily: fonts.extrabold, fontSize: 19, color: colors.ink }}>Invoice needed first</Text>
+        <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.muted, marginTop: 8, textAlign: 'center', lineHeight: 21 }}>Generate the invoice, then create a service agreement for the client to sign.</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={{ marginTop: 16 }}>
       <Card pad>
@@ -345,35 +390,51 @@ function ContractTab({ setSheet }: { setSheet: (b: boolean) => void }) {
             <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: colors.primaryTint, alignItems: 'center', justifyContent: 'center' }}>
               <Icon name="signature" size={18} color={colors.primary} />
             </View>
-            <View>
+            <View style={{ flex: 1 }}>
               <Text style={{ fontFamily: fonts.extrabold, fontSize: 15, color: colors.ink }}>Service agreement</Text>
-              <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>Standard template · TX</Text>
+              <Text numberOfLines={1} style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{coName}</Text>
             </View>
           </Row>
-          <View style={{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: radii.pill, backgroundColor: '#EEF0F3' }}>
-            <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: '#8A93A3' }}>DRAFT</Text>
+          <View style={{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: radii.pill, backgroundColor: statusBg }}>
+            <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: statusColor }}>{statusLabel}</Text>
           </View>
         </Between>
         <Divider />
         <Between>
-          <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>Required deposit</Text>
-          <Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.ink }}>25% · {fmt(4238.8 * 0.25)}</Text>
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>Required deposit (50%)</Text>
+          <Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.ink }}>{fmt(deposit)}</Text>
         </Between>
         <Between style={{ marginTop: 12 }}>
           <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>Signature</Text>
-          <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.ink }}>Awaiting client</Text>
+          <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: signed ? colors.success : colors.ink }}>
+            {signed ? `Signed by ${agreement?.signedName || 'client'}` : sent ? 'Awaiting client' : 'Not sent yet'}
+          </Text>
         </Between>
+        {signed && agreement?.signedDate ? (
+          <Between style={{ marginTop: 12 }}>
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>Signed on</Text>
+            <Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.ink }}>{new Date(agreement.signedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
+          </Between>
+        ) : null}
       </Card>
+
       <Card pad style={{ marginTop: 12, backgroundColor: colors.card2 }}>
-        <DpLab text="Preview" />
-        <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 8, lineHeight: 20 }}>
-          This agreement is between <Text style={{ fontFamily: fonts.bold, color: colors.ink }}>{COMPANY.name}</Text> and the client for <Text style={{ fontFamily: fonts.bold, color: colors.ink }}>exterior repaint</Text> services at the property listed. Work to begin upon deposit and signature…
+        <Row style={{ gap: 6 }}>
+          <Icon name="shield" size={14} color={colors.accentInk} />
+          <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.ink }}>Secure e-signature</Text>
+        </Row>
+        <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 8, lineHeight: 19 }}>
+          {signed
+            ? 'The client signed the agreement online — recorded with date and IP.'
+            : 'The client gets a secure link to review and sign on their phone — legally binding under the ESIGN Act.'}
         </Text>
       </Card>
-      <Row style={{ gap: 10, marginTop: 16 }}>
-        <Btn variant="ghost" icon="fileText" title="PDF" onPress={() => setSheet(true)} style={{ flex: 0.4 }} />
-        <Btn title="Send for signature" icon="send" onPress={() => setSheet(true)} style={{ flex: 1 }} />
-      </Row>
+
+      {!signed ? (
+        <Btn title={genning ? 'Working…' : sent ? 'Resend signing link' : 'Generate & send contract'} icon={genning ? undefined : 'send'} disabled={genning} onPress={onGenerate} style={{ marginTop: 16 }} />
+      ) : (
+        <Btn variant="ghost" title="Share signed link" icon="share" onPress={onGenerate} style={{ marginTop: 16 }} />
+      )}
     </View>
   );
 }
