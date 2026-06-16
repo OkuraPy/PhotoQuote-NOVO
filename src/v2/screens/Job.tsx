@@ -5,7 +5,7 @@ import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
 import { calcTotals, CLIENTS, COMPANY, fmt, LineItem, split, STAGES } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { agreementLink, createAgreement, createInvoice, fetchCompanyProfile, fetchJobDetail, JobDetail } from '../lib/api';
+import { agreementLink, createAgreement, createInvoice, deriveStage, fetchCompanyProfile, fetchJobDetail, JobDetail, updateEstimateStatus, updateInvoiceStatus } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { sendDoc } from '../lib/send';
 import { Between, Btn, Card, CatChip, Divider, Nav, NavBtn, PhotoTile, Row, SectionTitle, SendSheet, StageChip, useStore } from '../ui';
@@ -52,8 +52,6 @@ export function JobScreen({ go, back, params }: NavProp) {
   const job = params?.job || null;
   const client = job ? CLIENTS.find((c) => c.name === job.client) || null : store.aSel || null;
   const id = job?.id || (params && params.id) || 'new';
-  const baseStage: Stage = job ? job.stage : 'Quoted';
-  const stage = store.stageOverride[id] || baseStage;
   const tab = store.jobTab || 'quote';
   const setStage = (s: Stage) => up((st) => ({ stageOverride: { ...st.stageOverride, [id]: s } }));
   const setTab = (k: string) => up({ jobTab: k });
@@ -63,6 +61,9 @@ export function JobScreen({ go, back, params }: NavProp) {
   const { data: detail } = useQuery({ queryKey: ['jobDetail', projectId], queryFn: () => fetchJobDetail(projectId!), enabled: !!projectId });
   const est = detail?.estimate;
   const inv = detail?.invoice;
+  // stage derived from the DB (estimate/invoice status) once detail loads; falls back to the list value
+  const baseStage: Stage = detail ? deriveStage(est?.status, inv?.status) : job ? job.stage : 'Quoted';
+  const stage = store.stageOverride[id] || baseStage;
   const realClient = detail?.client || null;
   // new job (not yet persisted): show the AI estimate the user just generated, held in the store
   const items = detail?.items?.length ? detail.items : job ? [] : store.items;
@@ -126,11 +127,35 @@ export function JobScreen({ go, back, params }: NavProp) {
     }
   };
 
+  // persist a status change to the DB then refetch (was an in-memory-only override before)
+  const setEstimateStatus = async (status: string, optimistic: Stage) => {
+    setStage(optimistic);
+    if (!est?.id) return;
+    try {
+      await updateEstimateStatus(est.id, status);
+      await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    } catch (e: any) {
+      Alert.alert('Could not update', e?.message || 'Try again.');
+    }
+  };
+  const setInvoiceStatus = async (status: string, optimistic?: Stage) => {
+    if (optimistic) setStage(optimistic);
+    if (!inv?.id) return;
+    try {
+      await updateInvoiceStatus(inv.id, status);
+      await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    } catch (e: any) {
+      Alert.alert('Could not update', e?.message || 'Try again.');
+    }
+  };
+
   const doNext = () => {
     if (next.act === 'send') return up({ sheet: true });
-    if (next.act === 'approve') setStage('Approved');
+    if (next.act === 'approve') return setEstimateStatus('Approved', 'Approved');
     if (next.act === 'invoice') return generateInvoice();
-    if (next.act === 'paid') setStage('Paid');
+    if (next.act === 'paid') return setInvoiceStatus('Paid', 'Paid');
   };
 
   return (
@@ -201,7 +226,8 @@ export function JobScreen({ go, back, params }: NavProp) {
             items,
             totals: tt,
           });
-          if (kind === 'quote') setStage('Sent');
+          if (kind === 'quote') setEstimateStatus('Sent', 'Sent');
+          else if (kind === 'invoice') setInvoiceStatus('Sent');
         }}
       />
     </>

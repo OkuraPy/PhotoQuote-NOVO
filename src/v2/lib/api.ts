@@ -238,8 +238,10 @@ export async function createInvoice(userId: string, estimateId: string, projectI
     .maybeSingle();
   if (eErr) throw eErr;
 
-  const { count } = await supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('user_id', userId);
-  const number = `INV-${new Date().getFullYear()}-${String((count || 0) + 1).padStart(4, '0')}`;
+  // atomic per-user/per-year number from the DB (no race / no collision after deletes)
+  const { data: numData, error: nErr } = await supabase.rpc('next_invoice_number', { p_user: userId });
+  if (nErr) throw nErr;
+  const number = String(numData);
 
   const { data: inv, error } = await supabase
     .from('invoices')
@@ -260,6 +262,17 @@ export async function createInvoice(userId: string, estimateId: string, projectI
     .single();
   if (error) throw error;
   return { id: inv.id, number: inv.invoice_number };
+}
+
+// Persist a status change to the DB (replaces the old in-memory-only stage override).
+export async function updateEstimateStatus(estimateId: string, status: string) {
+  const { error } = await supabase.from('estimates').update({ status }).eq('id', estimateId);
+  if (error) throw error;
+}
+
+export async function updateInvoiceStatus(invoiceId: string, status: string) {
+  const { error } = await supabase.from('invoices').update({ status }).eq('id', invoiceId);
+  if (error) throw error;
 }
 
 /* ---------------- Contract / Agreement (generated from the invoice) ---------------- */
@@ -347,7 +360,7 @@ export async function createAgreement(userId: string, projectId: string, invoice
 /* ---------------- Jobs (project + its estimate/invoice → v2 Job) ---------------- */
 export type RealJob = Job & { projectId: string };
 
-function deriveStage(estStatus?: string, invStatus?: string): Stage {
+export function deriveStage(estStatus?: string, invStatus?: string): Stage {
   // case-insensitive: the DB has mixed casing ('Draft' vs 'draft', etc.)
   const inv = (invStatus || '').toLowerCase();
   if (inv === 'paid') return 'Paid';

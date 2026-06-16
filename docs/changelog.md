@@ -4,6 +4,16 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-16 21:45] — feat: v2 Fase B — estágio e status persistidos + numeração de fatura atômica
+- **O que mudou**:
+  - **B1 · Estágio persiste**: avançar para "Aprovado" grava `estimates.status` no banco (era um override em memória que sumia ao recarregar). O estágio exibido passa a ser derivado do banco (`deriveStage` do detalhe). (`screens/Job.tsx`, `updateEstimateStatus`)
+  - **B2 · Status da fatura persiste**: enviar a fatura grava `invoices.status='Sent'` e "Mark paid" grava `='Paid'`; enviar o orçamento grava `estimates.status='Sent'`. Tudo com refetch. (`updateInvoiceStatus`)
+  - **B3 · Número de fatura atômico**: tabela `invoice_counters` + função `next_invoice_number(user)` (SECURITY DEFINER, INSERT…ON CONFLICT increment) geram `INV-AAAA-NNNN` sem corrida nem colisão ao deletar — saiu o `count+1` do cliente. Seed continua a sequência atual de cada usuário. (migration, `createInvoice`)
+- **Arquivos**: `src/v2/lib/api.ts`, `src/v2/screens/Job.tsx`, `supabase/migrations/20260616213000_invoice_number_counter.sql`
+- **Banco (aplicado em prod, testado)**: `next_invoice_number` retornou 0001/0002 sequenciais; seed = max(count, maior sufixo) por usuário (user A seq=7→próx 0008; user B seq=1→próx 0002).
+- **Bug corrigido**: marcar Aprovado/Enviado/Pago não persistia (sumia ao reabrir); número de fatura podia duplicar/colidir.
+- **Validação**: `tsc --noEmit` limpo.
+
 ### [2026-06-16 21:30] — fix: v2 Fase A — integridade de dados (cliente, estágio, métricas, cadastro, exclusão)
 - **O que mudou**:
   - **A1 · Endereço do cliente persiste**: `createClient`/`updateClient` gravam as colunas estruturadas `address_street/city/state/zip` (antes só `address`); o editor separa "City, ST" e o CEP do autofill agora é salvo. `fetchClients` lê os campos certos. (`lib/api.ts`, `screens/Misc.tsx`, `data.ts`)
