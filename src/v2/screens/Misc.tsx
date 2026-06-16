@@ -8,7 +8,7 @@ import { Client, CLIENTS, initials, JOBS } from '../data';
 import { Avatar, Between, Btn, Card, Divider, Field, Input, Nav, NavBtn, Row, SectionTitle, useStore } from '../ui';
 import { JobCard } from './Tabs';
 import { useAuth } from '../lib/auth';
-import { createClient, deleteClient, fetchCompanyProfile, lookupZip, updateClient, updateCompanyProfile } from '../lib/api';
+import { countClientProjects, createClient, deleteClient, fetchCompanyProfile, lookupZip, updateClient, updateCompanyProfile } from '../lib/api';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
@@ -79,7 +79,7 @@ export function ClientEditScreen({ back, params }: NavProp) {
   const [name, setName] = useState(existing?.name || '');
   const [phone, setPhone] = useState(existing?.phone || '');
   const [email, setEmail] = useState(existing?.email || '');
-  const [zip, setZip] = useState('');
+  const [zip, setZip] = useState(existing?.zip || '');
   const [city, setCity] = useState(existing?.city || '');
   const [address, setAddress] = useState(existing?.addr || '');
   const [notes, setNotes] = useState('');
@@ -102,14 +102,17 @@ export function ClientEditScreen({ back, params }: NavProp) {
     if (!user) return;
     setBusy(true);
     try {
-      const payload = { name, phone, email, address: address || city, notes };
+      // the city field holds "City, ST" (from the ZIP lookup or typed) — split into structured parts
+      const [cityName, stateRaw] = city.split(',').map((s) => s.trim());
+      const state = (stateRaw || '').toUpperCase().slice(0, 2);
+      const payload = { name, phone, email, street: address, city: cityName || '', state, zip, notes };
       if (editing && existing) {
         await updateClient(existing.id, payload);
       } else {
         const created = await createClient(user.id, payload);
         // coming from the estimate flow → pre-select the new client back on the Attach screen
         if (params?.from === 'attach' && created?.id) {
-          up({ aSel: { id: created.id, name: name.trim(), phone, email, addr: address || city, city } });
+          up({ aSel: { id: created.id, name: name.trim(), phone, email, addr: address, city } });
         }
       }
       qc.invalidateQueries({ queryKey: ['clients'] });
@@ -121,23 +124,26 @@ export function ClientEditScreen({ back, params }: NavProp) {
     }
   };
 
-  const remove = () => {
+  const remove = async () => {
     if (!existing) return;
-    Alert.alert('Delete client?', `Remove ${existing.name}? This can't be undone.`, [
+    const doDelete = async () => {
+      try {
+        await deleteClient(existing.id);
+        qc.invalidateQueries({ queryKey: ['clients'] });
+        qc.invalidateQueries({ queryKey: ['jobs'] });
+        back();
+      } catch (e: any) {
+        Alert.alert('Error', e.message || 'Could not delete.');
+      }
+    };
+    // jobs are kept (FK is ON DELETE SET NULL) — warn that they'll just be unlinked
+    const n = await countClientProjects(existing.id).catch(() => 0);
+    const msg = n > 0
+      ? `${existing.name} has ${n} job${n > 1 ? 's' : ''}. Deleting keeps ${n > 1 ? 'them' : 'it'} but unlinks ${n > 1 ? 'them' : 'it'} from this client. This can't be undone.`
+      : `Remove ${existing.name}? This can't be undone.`;
+    Alert.alert('Delete client?', msg, [
       { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteClient(existing.id);
-            qc.invalidateQueries({ queryKey: ['clients'] });
-            back();
-          } catch (e: any) {
-            Alert.alert('Error', e.message || 'Could not delete.');
-          }
-        },
-      },
+      { text: 'Delete', style: 'destructive', onPress: doDelete },
     ]);
   };
 

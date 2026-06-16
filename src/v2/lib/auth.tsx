@@ -46,14 +46,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signUp = async (email: string, password: string, name: string) => {
-    const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
+    // Pass the company name in user metadata so the handle_new_user trigger creates the profile
+    // WITH the name, atomically server-side — works even when email confirmation is on (no session yet).
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: { data: { company_name: name.trim() } },
+    });
     if (error) return { error, needsConfirm: false };
-    // Best-effort profile row (a DB trigger may also create it — upsert avoids conflicts).
-    if (data.user) {
-      await supabase.from('users').upsert({ id: data.user.id, email: email.trim(), company_name: name }).then(
-        () => {},
-        () => {}
-      );
+    // If a session exists right away (email confirmation disabled), make sure the name is set.
+    if (data.session && data.user) {
+      await supabase.from('users').update({ company_name: name.trim() }).eq('id', data.user.id).then(() => {}, () => {});
     }
     return { error: null, needsConfirm: !data.session };
   };

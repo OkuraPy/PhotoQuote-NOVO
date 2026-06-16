@@ -79,6 +79,8 @@ export type Client = {
   email: string;
   addr: string;
   city: string;
+  zip?: string;
+  state?: string;
   jobs: number;
 };
 

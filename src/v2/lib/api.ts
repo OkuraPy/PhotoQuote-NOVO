@@ -77,7 +77,7 @@ async function uploadProjectPhotos(userId: string, projectId: string, photos: Ph
 export async function fetchClients(userId: string): Promise<Client[]> {
   const { data, error } = await supabase
     .from('clients')
-    .select('id, full_name, phone, email, address, address_city, address_state, created_at')
+    .select('id, full_name, phone, email, address, address_street, address_city, address_state, address_zip, created_at')
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
   if (error) throw error;
@@ -86,33 +86,57 @@ export async function fetchClients(userId: string): Promise<Client[]> {
     name: c.full_name || 'Unnamed',
     phone: c.phone || '',
     email: c.email || '',
-    addr: c.address || '',
+    addr: c.address_street || c.address || '',
     city: [c.address_city, c.address_state].filter(Boolean).join(', '),
+    zip: c.address_zip || '',
+    state: c.address_state || '',
     jobs: 0,
   }));
 }
 
-export async function createClient(userId: string, c: { name: string; phone?: string; email?: string; address?: string; notes?: string }) {
+export type ClientInput = { name: string; phone?: string; email?: string; street?: string; city?: string; state?: string; zip?: string; notes?: string };
+
+// Maps the editor fields to the clients table: structured address columns (street/city/state/zip)
+// plus the legacy `address` (kept = street, since the portal & contract read clients.address).
+function clientRow(c: ClientInput) {
+  return {
+    full_name: c.name.trim(),
+    phone: c.phone || null,
+    email: c.email || null,
+    address_street: c.street || null,
+    address_city: c.city || null,
+    address_state: c.state || null,
+    address_zip: c.zip || null,
+    address: c.street || null,
+    notes: c.notes || null,
+  };
+}
+
+export async function createClient(userId: string, c: ClientInput) {
   const { data, error } = await supabase
     .from('clients')
-    .insert({ user_id: userId, full_name: c.name.trim(), phone: c.phone || null, email: c.email || null, address: c.address || null, notes: c.notes || null })
+    .insert({ user_id: userId, ...clientRow(c) })
     .select()
     .single();
   if (error) throw error;
   return data;
 }
 
-export async function updateClient(id: string, c: { name: string; phone?: string; email?: string; address?: string; notes?: string }) {
-  const { error } = await supabase
-    .from('clients')
-    .update({ full_name: c.name.trim(), phone: c.phone || null, email: c.email || null, address: c.address || null, notes: c.notes || null })
-    .eq('id', id);
+export async function updateClient(id: string, c: ClientInput) {
+  const { error } = await supabase.from('clients').update(clientRow(c)).eq('id', id);
   if (error) throw error;
 }
 
 export async function deleteClient(id: string) {
   const { error } = await supabase.from('clients').delete().eq('id', id);
   if (error) throw error;
+}
+
+// How many projects (jobs) are linked to this client — used to warn before deleting.
+// With the FK now ON DELETE SET NULL, deleting only unlinks them; the jobs are kept.
+export async function countClientProjects(clientId: string): Promise<number> {
+  const { count } = await supabase.from('projects').select('id', { count: 'exact', head: true }).eq('client_id', clientId);
+  return count || 0;
 }
 
 /* ---------------- Create a job (project + estimate + line items) ---------------- */
@@ -148,7 +172,7 @@ export async function createJob(input: {
       city: input.city || null,
       zip: input.zip || null,
       property_state: input.state || null,
-      status: 'draft',
+      status: 'Draft',
       service_type: serviceType,
     })
     .select('id')
@@ -160,7 +184,7 @@ export async function createJob(input: {
     .insert({
       project_id: proj.id,
       user_id: input.userId,
-      status: 'draft',
+      status: 'Draft',
       service_type: serviceType,
       tax_rate: input.taxRate,
       tax_percent: input.taxRate,
@@ -324,18 +348,17 @@ export async function createAgreement(userId: string, projectId: string, invoice
 export type RealJob = Job & { projectId: string };
 
 function deriveStage(estStatus?: string, invStatus?: string): Stage {
-  if (invStatus === 'Paid') return 'Paid';
-  if (invStatus) return 'Invoiced';
-  switch (estStatus) {
-    case 'Approved':
-    case 'In Progress':
+  // case-insensitive: the DB has mixed casing ('Draft' vs 'draft', etc.)
+  const inv = (invStatus || '').toLowerCase();
+  if (inv === 'paid') return 'Paid';
+  if (invStatus) return 'Invoiced'; // any unpaid/sent/overdue invoice = awaiting payment
+  switch ((estStatus || '').toLowerCase()) {
+    case 'approved':
+    case 'in progress':
+    case 'completed': // work done but never invoiced → still pipeline, NOT money received
       return 'Approved';
-    case 'Completed':
-      return 'Paid';
-    case 'Sent':
+    case 'sent':
       return 'Sent';
-    case 'Draft':
-      return 'Quoted';
     default:
       return estStatus ? 'Quoted' : 'Draft';
   }

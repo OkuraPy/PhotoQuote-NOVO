@@ -4,6 +4,18 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-16 21:30] — fix: v2 Fase A — integridade de dados (cliente, estágio, métricas, cadastro, exclusão)
+- **O que mudou**:
+  - **A1 · Endereço do cliente persiste**: `createClient`/`updateClient` gravam as colunas estruturadas `address_street/city/state/zip` (antes só `address`); o editor separa "City, ST" e o CEP do autofill agora é salvo. `fetchClients` lê os campos certos. (`lib/api.ts`, `screens/Misc.tsx`, `data.ts`)
+  - **A2 · Status capitalizado**: `createJob` grava `status='Draft'` (era `'draft'` minúsculo) e `deriveStage` virou case-insensitive — fim da inconsistência de casing.
+  - **A3 · "Recebido" honesto**: orçamento `Completed` SEM fatura deixa de contar como dinheiro recebido (mapeia para `Approved`); só fatura `Paid` entra em "Collected".
+  - **A4 · Nome da empresa no cadastro**: o signup passa o nome em `user_metadata` e o trigger `handle_new_user` o lê — o perfil nasce com o nome mesmo com confirmação de e-mail ligada (antes ficava vazio por bloqueio de RLS). (`lib/auth.tsx`, migration)
+  - **A5 · Exclusão de cliente segura**: FK `projects.client_id` passou de `ON DELETE CASCADE` para `SET NULL` — apagar cliente NÃO apaga mais os trabalhos, só desvincula; o app avisa quantos serão desvinculados. (migration, `countClientProjects`, `screens/Misc.tsx`)
+- **Arquivos**: `src/v2/lib/api.ts`, `src/v2/lib/auth.tsx`, `src/v2/screens/Misc.tsx`, `src/v2/data.ts`, `supabase/migrations/20260616211500_signup_company_name_from_metadata.sql`, `supabase/migrations/20260616211600_projects_client_id_set_null.sql`
+- **Banco (aplicado em produção, verificado)**: `handle_new_user` lê `raw_user_meta_data->>'company_name'`; FK `projects_client_id_fkey` agora `ON DELETE SET NULL` (confdeltype='n'). Migrations versionadas no repo.
+- **Bug corrigido**: cidade/CEP do cliente sumiam ao recarregar; "Recebido" inflava com orçamentos concluídos não pagos; apagar cliente apagava os trabalhos junto; nome da empresa nascia vazio no cadastro com confirmação de e-mail.
+- **Validação**: `tsc --noEmit` limpo.
+
 ### [2026-06-16 21:12] — feat: v2 — contrato real (ContractTab) + plano de execução para finalizar
 - **O que mudou**:
   - **Contrato/Agreement REAL** (saiu o mock): `createAgreement` (`lib/api.ts`) gera o contrato a partir da fatura — lê o template de `contract_templates` por estado (fallback `is_default`), preenche as variáveis com escape de HTML, grava em `agreements` com token e `status='sent'`, e devolve o link de assinatura do portal. `fetchJobDetail` traz o `agreement` (status/signed_name/signed_date). A `ContractTab` (`screens/Job.tsx`) mostra status real (DRAFT/SENT/SIGNED), compartilha o link e lê o estado assinado de volta.
