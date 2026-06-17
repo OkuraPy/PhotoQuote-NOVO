@@ -1,6 +1,7 @@
 // PhotoQuote v2 — data access (Supabase). Maps real tables to the v2 UI shapes.
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as Location from 'expo-location';
+import * as Crypto from 'expo-crypto';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from './supabase';
 import { Client, deriveStage, Job, LineItem, Photo } from '../data';
@@ -231,12 +232,12 @@ export async function createJob(input: {
 // Copies the estimate's totals (the DB trigger keeps those correct) and assigns a sequential
 // per-user invoice number INV-YYYY-NNNN. No invoice-number trigger exists, so we mint it here.
 export async function createInvoice(userId: string, estimateId: string, projectId: string): Promise<{ id: string; number: string }> {
-  const { data: est, error: eErr } = await supabase
-    .from('estimates')
-    .select('subtotal, tax_rate, tax_percent, tax_amount, margin_rate, margin_amount, total, grand_total')
-    .eq('id', estimateId)
-    .maybeSingle();
+  const [{ data: est, error: eErr }, { data: prof }] = await Promise.all([
+    supabase.from('estimates').select('subtotal, tax_rate, tax_percent, tax_amount, margin_rate, margin_amount, total, grand_total').eq('id', estimateId).maybeSingle(),
+    supabase.from('users').select('default_deposit_percent').eq('id', userId).maybeSingle(),
+  ]);
   if (eErr) throw eErr;
+  const depositPct = prof?.default_deposit_percent ?? 25; // snapshot the contractor's default deposit at invoice time
 
   // atomic per-user/per-year number from the DB (forces auth.uid() server-side; no race/collision)
   const { data: numData, error: nErr } = await supabase.rpc('next_invoice_number');
@@ -257,6 +258,7 @@ export async function createInvoice(userId: string, estimateId: string, projectI
       margin_rate: Number(est?.margin_rate ?? 0),
       margin_amount: Number(est?.margin_amount ?? 0),
       total: Number(est?.total ?? est?.grand_total ?? 0),
+      deposit_percent: depositPct,
     })
     .select('id, invoice_number')
     .single();
@@ -299,13 +301,21 @@ function fillTemplate(template: string, d: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, k) => (k in d ? d[k] : ''));
 }
 
+// Render the template's terms_blocks (jsonb: [{title, content}]). The content is trusted template HTML.
+function renderTermsBlocks(blocks: unknown): string {
+  if (!Array.isArray(blocks)) return '';
+  return blocks
+    .map((b: any) => `<h3>${escC(b?.title || '')}</h3>${typeof b?.content === 'string' ? b.content : ''}`)
+    .join('\n');
+}
+
 // Generates the service agreement from the invoice + a contract template, stores it with a
 // random token, and returns the token (used to build the client's signing link).
 export async function createAgreement(userId: string, projectId: string, invoiceId: string): Promise<{ id: string; token: string }> {
   const [{ data: proj }, { data: inv }, { data: company }] = await Promise.all([
     supabase.from('projects').select('client_id, name, address, city, property_state, service_type, zip').eq('id', projectId).maybeSingle(),
-    supabase.from('invoices').select('invoice_number, estimate_id, subtotal, tax_rate, tax_amount, total').eq('id', invoiceId).maybeSingle(),
-    supabase.from('users').select('company_name, company_address, company_phone, company_email, company_license, default_state').eq('id', userId).maybeSingle(),
+    supabase.from('invoices').select('invoice_number, estimate_id, subtotal, tax_rate, tax_amount, total, deposit_percent').eq('id', invoiceId).maybeSingle(),
+    supabase.from('users').select('company_name, company_address, company_phone, company_email, company_license, default_state, default_deposit_percent').eq('id', userId).maybeSingle(),
   ]);
   if (!proj) throw new Error('Project not found.');
   if (!proj.client_id) throw new Error('Add a client to this job before creating a contract.');
@@ -316,11 +326,13 @@ export async function createAgreement(userId: string, projectId: string, invoice
     supabase.from('line_items').select('description, quantity, unit, unit_price').eq('estimate_id', inv.estimate_id).order('item_order', { ascending: true }),
   ]);
 
-  const state = proj.property_state || company?.default_state || 'FL';
-  let tpl = (await supabase.from('contract_templates').select('content').eq('state', state).limit(1).maybeSingle()).data;
-  if (!tpl?.content) tpl = (await supabase.from('contract_templates').select('content').eq('is_default', true).limit(1).maybeSingle()).data;
+  const state = proj.property_state || company?.default_state || 'US';
+  // one generic US template (is_default) covers all 50 states — the owner operates nationwide
+  const tpl = (await supabase.from('contract_templates').select('content, terms_blocks').eq('is_default', true).limit(1).maybeSingle()).data;
   if (!tpl?.content) throw new Error('No contract template available.');
 
+  // deposit % is set by the contractor; the invoice snapshots it so invoice & contract always match
+  const depositPct = Number(inv.deposit_percent ?? company?.default_deposit_percent ?? 25);
   const total = Number(inv.total) || 0;
   const html = fillTemplate(tpl.content, {
     date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
@@ -342,15 +354,16 @@ export async function createAgreement(userId: string, projectId: string, invoice
     subtotal: money2(Number(inv.subtotal) || 0),
     tax_rate: String(Number(inv.tax_rate) || 0),
     tax_amount: money2(Number(inv.tax_amount) || 0),
-    deposit_amount: money2(total / 2),
-    balance_amount: money2(total / 2),
-    terms_blocks: '',
+    deposit_percent: String(depositPct),
+    deposit_amount: money2(total * (depositPct / 100)),
+    balance_amount: money2(total - total * (depositPct / 100)),
+    terms_blocks: renderTermsBlocks(tpl.terms_blocks),
   });
 
-  const token = `agr_${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  const token = `agr_${Crypto.randomUUID().replace(/-/g, '')}`;
   const { data: agr, error } = await supabase
     .from('agreements')
-    .insert({ user_id: userId, invoice_id: invoiceId, project_id: projectId, client_id: proj.client_id, state, contract_html: html, token, status: 'sent' })
+    .insert({ user_id: userId, invoice_id: invoiceId, project_id: projectId, client_id: proj.client_id, state, contract_html: html, token, status: 'sent', sent_at: new Date().toISOString(), sent_method: 'link' })
     .select('id, token')
     .single();
   if (error) throw error;
@@ -410,13 +423,13 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
 export async function fetchCompanyProfile(userId: string) {
   const { data } = await supabase
     .from('users')
-    .select('company_name, company_address, company_phone, company_email, company_license, company_website, default_city, default_state')
+    .select('company_name, company_address, company_phone, company_email, company_license, company_website, default_city, default_state, default_deposit_percent')
     .eq('id', userId)
     .maybeSingle();
   return data;
 }
 
-export async function updateCompanyProfile(userId: string, p: { company_name?: string; company_license?: string; company_phone?: string; company_email?: string; company_address?: string }) {
+export async function updateCompanyProfile(userId: string, p: { company_name?: string; company_license?: string; company_phone?: string; company_email?: string; company_address?: string; default_deposit_percent?: number | null }) {
   const { error } = await supabase.from('users').update(p).eq('id', userId);
   if (error) throw error;
 }
@@ -425,7 +438,7 @@ export async function updateCompanyProfile(userId: string, p: { company_name?: s
 export type JobDetail = {
   estimate: { id: string; total: number; subtotal: number; taxRate: number; tax: number; marginRate: number; status: string; notes: string | null } | null;
   items: LineItem[];
-  invoice: { id: string; number: string; status: string; subtotal: number; taxRate: number; tax: number; total: number; created: string } | null;
+  invoice: { id: string; number: string; status: string; subtotal: number; taxRate: number; tax: number; total: number; created: string; depositPercent: number | null } | null;
   client: { name: string; addr: string; city: string; email: string; phone: string } | null;
   photoUrls: string[];
   agreement: { id: string; token: string; status: string; signedName: string | null; signedDate: string | null } | null;
@@ -463,7 +476,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
 
   const invRes = await supabase
     .from('invoices')
-    .select('id, invoice_number, status, subtotal, tax_rate, tax_amount, total, created_at')
+    .select('id, invoice_number, status, subtotal, tax_rate, tax_amount, total, created_at, deposit_percent')
     .eq('project_id', projectId)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -498,7 +511,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
       : null,
     items,
     invoice: inv
-      ? { id: inv.id, number: inv.invoice_number, status: inv.status, subtotal: Number(inv.subtotal ?? 0), taxRate: Number(inv.tax_rate ?? 0), tax: Number(inv.tax_amount ?? 0), total: Number(inv.total ?? 0), created: inv.created_at }
+      ? { id: inv.id, number: inv.invoice_number, status: inv.status, subtotal: Number(inv.subtotal ?? 0), taxRate: Number(inv.tax_rate ?? 0), tax: Number(inv.tax_amount ?? 0), total: Number(inv.total ?? 0), created: inv.created_at, depositPercent: inv.deposit_percent ?? null }
       : null,
     client,
     photoUrls: Array.isArray(projRes.data?.photo_urls) ? (projRes.data!.photo_urls as string[]) : [],

@@ -4,6 +4,17 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 02:30] — feat: v2 Fase C — contrato com modelo US genérico, depósito configurável e token seguro
+- **O que mudou**:
+  - **Modelo de contrato US genérico** (migration): novo template `contract_templates` (state `US`, `is_default`) válido em qualquer estado — o específico da Flórida virou variante não-default. `createAgreement` usa sempre o template padrão. Cláusulas completas (escopo, preço, pagamento, prazo, change orders, garantia, cancelamento, responsabilidade, lei aplicável, entire agreement) + termos gerais via `terms_blocks` (antes saíam em branco).
+  - **Depósito configurável pelo usuário**: coluna `users.default_deposit_percent` (definido no Perfil → "Default deposit %") + `invoices.deposit_percent` (snapshot na geração da fatura). **Fatura e contrato usam o MESMO %** (lido da fatura) — acaba a divergência 25%/50%; o `%` é parametrizado no template (`{{deposit_percent}}`).
+  - **Token de assinatura seguro**: gerado via `expo-crypto` (`Crypto.randomUUID`) no lugar de `Math.random()`.
+  - **Metadados de envio**: `agreements.sent_at`/`sent_method` gravados ao gerar.
+- **Arquivos**: `supabase/migrations/20260617021500_phase_c_deposit_and_us_template.sql`, `src/v2/lib/api.ts`, `src/v2/screens/Misc.tsx`, `src/v2/screens/Job.tsx`, `package.json`/`package-lock.json` (expo-crypto)
+- **Banco (aplicado em prod, verificado)**: template US é o único `is_default` (FL desmarcado); colunas de depósito criadas; `{{deposit_percent}}`/`{{terms_blocks}}` presentes.
+- **Validação**: `tsc` limpo, `npm test` 10/10.
+- **Nota**: template é um Service Agreement padrão (sem revisão jurídica) — adequado nacionalmente; revisão por advogado pode vir depois. Falta provar o fluxo no device (gerar contrato → assinar no portal).
+
 ### [2026-06-16 22:20] — fix: v2 — correções da revisão (override de estágio, segurança/unicidade da numeração)
 - **O que mudou** (revisão adversarial de tudo que foi feito hoje, 2 revisores):
   - **Override de estágio robusto** (`Job.tsx`): a guarda de `id` passou para ANTES do update otimista, e o override é limpo no sucesso (o estágio derivado do banco assume) e revertido na falha — antes, um write que falhasse deixava um estágio falso preso na UI, divergindo do banco. `generateInvoice` também limpa o override (deriva "Invoiced").

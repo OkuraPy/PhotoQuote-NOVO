@@ -182,6 +182,7 @@ export function CompanyScreen({ back }: NavProp) {
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
+  const [deposit, setDeposit] = useState('');
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     const p = profile as any;
@@ -191,13 +192,15 @@ export function CompanyScreen({ back }: NavProp) {
       setPhone(p.company_phone || '');
       setEmail(p.company_email || '');
       setAddress(p.company_address || '');
+      setDeposit(p.default_deposit_percent != null ? String(p.default_deposit_percent) : '');
     }
   }, [profile]);
   const save = async () => {
     if (!user) return;
     setBusy(true);
     try {
-      await updateCompanyProfile(user.id, { company_name: name, company_license: license, company_phone: phone, company_email: email, company_address: address });
+      const depNum = deposit.trim() === '' ? null : Math.max(0, Math.min(100, parseInt(deposit, 10) || 0));
+      await updateCompanyProfile(user.id, { company_name: name, company_license: license, company_phone: phone, company_email: email, company_address: address, default_deposit_percent: depNum });
       qc.invalidateQueries({ queryKey: ['company'] });
       back();
     } catch (e: any) {
@@ -215,6 +218,7 @@ export function CompanyScreen({ back }: NavProp) {
         <Field label="Phone"><Input value={phone} onChangeText={setPhone} keyboardType="phone-pad" /></Field>
         <Field label="Email"><Input value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" /></Field>
         <Field label="Address"><Input value={address} onChangeText={setAddress} placeholder="Street, city, state" /></Field>
+        <Field label="Default deposit %" opt><Input value={deposit} onChangeText={setDeposit} keyboardType="number-pad" placeholder="e.g. 25" maxLength={3} /></Field>
       </ScrollView>
       <View style={actionbar}>
         <Btn title={busy ? 'Saving…' : 'Save'} onPress={save} disabled={busy} />

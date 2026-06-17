@@ -211,7 +211,7 @@ export function JobScreen({ go, back, params }: NavProp) {
 
         {tab === 'quote' && <QuoteTab items={items} totals={quoteTotals} go={go} photos={detail?.photoUrls || []} />}
         {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} company={company} invoice={inv} genning={genningInv} onGen={generateInvoice} setSheet={(b: boolean) => up({ sheet: b })} />}
-        {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={invoiceTotals} company={company} genning={genningContract} onGenerate={generateContract} />}
+        {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={invoiceTotals} depositPercent={inv?.depositPercent ?? 25} company={company} genning={genningContract} onGenerate={generateContract} />}
         {tab === 'progress' && <ProgressTab />}
       </ScrollView>
 
@@ -295,7 +295,7 @@ function QuoteTab({ items, totals, go, photos }: { items: LineItem[]; totals: To
 
 function InvoiceTab({ stage, items, totals, client, company, invoice, genning, onGen, setSheet }: { stage: Stage; items: LineItem[]; totals: Totals; client: JobDetail['client']; company?: any; invoice?: JobDetail['invoice']; genning: boolean; onGen: () => void; setSheet: (b: boolean) => void }) {
   const has = !!invoice || ['Invoiced', 'Paid'].includes(stage);
-  const deposit = 25;
+  const deposit = invoice?.depositPercent ?? 25;
   const co = company || {};
   const coName = co.company_name || 'Your company';
   // real issued / due dates (Net 15 from issue)
@@ -394,11 +394,11 @@ function InvoiceTab({ stage, items, totals, client, company, invoice, genning, o
 }
 const DpLab = ({ text }: { text: string }) => <Text style={{ fontFamily: fonts.extrabold, fontSize: 10, letterSpacing: 1, color: colors.faint }}>{text.toUpperCase()}</Text>;
 
-function ContractTab({ agreement, hasInvoice, totals, company, genning, onGenerate }: { agreement: JobDetail['agreement']; hasInvoice: boolean; totals: Totals; company?: any; genning: boolean; onGenerate: () => void }) {
+function ContractTab({ agreement, hasInvoice, totals, depositPercent, company, genning, onGenerate }: { agreement: JobDetail['agreement']; hasInvoice: boolean; totals: Totals; depositPercent: number; company?: any; genning: boolean; onGenerate: () => void }) {
   const coName = company?.company_name || 'Your company';
   const signed = agreement?.status === 'signed';
   const sent = !!agreement && !signed;
-  const deposit = totals.total / 2; // template terms = 50% deposit
+  const deposit = totals.total * (depositPercent / 100);
   const statusLabel = signed ? 'SIGNED' : sent ? 'SENT' : 'DRAFT';
   const statusColor = signed ? colors.success : sent ? colors.accentInk : '#8A93A3';
   const statusBg = signed ? colors.successTint : sent ? colors.accentTint : '#EEF0F3';
@@ -434,7 +434,7 @@ function ContractTab({ agreement, hasInvoice, totals, company, genning, onGenera
         </Between>
         <Divider />
         <Between>
-          <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>Required deposit (50%)</Text>
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>Required deposit ({depositPercent}%)</Text>
           <Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.ink }}>{fmt(deposit)}</Text>
         </Between>
         <Between style={{ marginTop: 12 }}>
