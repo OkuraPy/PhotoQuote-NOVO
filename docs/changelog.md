@@ -4,6 +4,14 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 03:55] — feat: v2 Fase E (perfil) — logo da empresa + alíquota/margem/depósito configuráveis
+- **O que mudou**:
+  - **Logo da empresa**: upload no perfil — `uploadCompanyLogo` (bucket público `company-logos`, resize 512) → `users.logo_url`; aparece no avatar do perfil e o portal já usa no acompanhamento da obra.
+  - **Defaults configuráveis**: campos Default tax % / margin % / deposit % no perfil (gravam `default_tax_percent`/`default_margin_percent`/`default_deposit_percent`); a tela de Perfil mostra os valores reais (saiu o 8.25%/25% chumbado de exibição) e tudo abre o editor.
+  - **Alimentação**: o orçamento novo nasce com a alíquota/margem padrão do perfil (useEffect ref-guarded no EstimateScreen quando é `fresh`) — saiu o 8.25% fixo. O depósito já alimentava fatura/contrato desde a Fase C.
+- **Arquivos**: `src/v2/lib/api.ts`, `src/v2/screens/Misc.tsx`, `src/v2/screens/Tabs.tsx`, `src/v2/screens/Flow.tsx`
+- **Validação**: `tsc` limpo, `npm test` 10/10.
+
 ### [2026-06-17 03:40] — feat: v2 Fase E (cliente) — ficha com histórico real + busca + contagem
 - **O que mudou**: a ficha do cliente saiu do mock — mostra o **histórico real** de trabalhos (filtra `fetchJobs` por `clientId`, novo campo em `RealJob`); `fetchClients` conta os trabalhos reais por cliente (era `0` fixo); a busca de clientes cobre nome/telefone/email/cidade (era só nome). Removidos os últimos imports mock `JOBS`/`CLIENTS` (Misc) e `COMPANY` (Tabs).
 - **Arquivos**: `src/v2/lib/api.ts`, `src/v2/screens/Misc.tsx`, `src/v2/screens/Tabs.tsx`

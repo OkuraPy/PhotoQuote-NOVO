@@ -10,7 +10,7 @@ import { colors, fonts, radii, shadow } from '../theme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { calcTotals, fmt, LineItem, split } from '../data';
 import { MAX_AI_PHOTOS, requestEstimate, transcribeAudio } from '../lib/ai';
-import { createClient, createJob, fetchClients, getMyLocation, lookupZip, Region } from '../lib/api';
+import { createClient, createJob, fetchClients, fetchCompanyProfile, getMyLocation, lookupZip, Region } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Avatar, Between, Btn, Card, Chip, CatChip, DecimalInput, Divider, Field, Input, Nav, NavBtn, Row, SearchBar, SectionTitle, Sheet, Switch, useStore } from '../ui';
 
@@ -325,6 +325,22 @@ export function EstimateScreen({ go, back, params }: NavProp) {
   const [phase, setPhase] = useState<EstPhase>(needsAI ? 'analyzing' : 'done');
   const [reason, setReason] = useState(''); // rejection reason or error message
   const ranRef = useRef(false);
+
+  // pre-fill tax/margin from the company defaults on a fresh estimate (once the profile loads)
+  const { user } = useAuth();
+  const { data: companyProfile } = useQuery({ queryKey: ['company', user?.id], queryFn: () => fetchCompanyProfile(user!.id), enabled: !!user?.id });
+  const defaultsRef = useRef(false);
+  useEffect(() => {
+    const p = companyProfile as any;
+    if (needsAI && p && !defaultsRef.current) {
+      defaultsRef.current = true;
+      const patch: Partial<{ taxRate: number; marginRate: number }> = {};
+      if (p.default_tax_percent != null) patch.taxRate = Number(p.default_tax_percent);
+      if (p.default_margin_percent != null) patch.marginRate = Number(p.default_margin_percent);
+      if (Object.keys(patch).length) up(patch);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyProfile, needsAI]);
 
   const runAI = async () => {
     setPhase('analyzing');

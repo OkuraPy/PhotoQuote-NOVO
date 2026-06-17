@@ -1,6 +1,7 @@
 // PhotoQuote v2 — Client detail, Client edit, Company edit
 import React, { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Icon } from '../Icon';
 import { colors, fonts } from '../theme';
@@ -8,7 +9,7 @@ import { Client, initials } from '../data';
 import { Avatar, Between, Btn, Card, Divider, Empty, Field, Input, Nav, NavBtn, Row, SectionTitle, useStore } from '../ui';
 import { JobCard } from './Tabs';
 import { useAuth } from '../lib/auth';
-import { countClientProjects, createClient, deleteClient, fetchCompanyProfile, fetchJobs, lookupZip, updateClient, updateCompanyProfile } from '../lib/api';
+import { countClientProjects, createClient, deleteClient, fetchCompanyProfile, fetchJobs, lookupZip, updateClient, updateCompanyProfile, uploadCompanyLogo } from '../lib/api';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
@@ -195,6 +196,10 @@ export function CompanyScreen({ back }: NavProp) {
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
   const [deposit, setDeposit] = useState('');
+  const [taxRate, setTaxRate] = useState('');
+  const [margin, setMargin] = useState('');
+  const [logoUrl, setLogoUrl] = useState('');
+  const [logoBusy, setLogoBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     const p = profile as any;
@@ -205,14 +210,34 @@ export function CompanyScreen({ back }: NavProp) {
       setEmail(p.company_email || '');
       setAddress(p.company_address || '');
       setDeposit(p.default_deposit_percent != null ? String(p.default_deposit_percent) : '');
+      setTaxRate(p.default_tax_percent != null ? String(p.default_tax_percent) : '');
+      setMargin(p.default_margin_percent != null ? String(p.default_margin_percent) : '');
+      setLogoUrl(p.logo_url || '');
     }
   }, [profile]);
+
+  const pickLogo = async () => {
+    if (!user) return;
+    const res = await ImagePicker.launchImageLibraryAsync({ allowsMultipleSelection: false, quality: 0.9 });
+    if (res.canceled || !res.assets?.length) return;
+    setLogoBusy(true);
+    try {
+      const url = await uploadCompanyLogo(user.id, res.assets[0].uri);
+      setLogoUrl(url);
+    } catch (e: any) {
+      Alert.alert('Could not upload logo', e?.message || 'Try again.');
+    } finally {
+      setLogoBusy(false);
+    }
+  };
   const save = async () => {
     if (!user) return;
     setBusy(true);
     try {
       const depNum = deposit.trim() === '' ? null : Math.max(0, Math.min(100, parseInt(deposit, 10) || 0));
-      await updateCompanyProfile(user.id, { company_name: name, company_license: license, company_phone: phone, company_email: email, company_address: address, default_deposit_percent: depNum });
+      const taxNum = taxRate.trim() === '' ? null : Math.max(0, parseFloat(taxRate) || 0);
+      const marginNum = margin.trim() === '' ? null : Math.max(0, parseFloat(margin) || 0);
+      await updateCompanyProfile(user.id, { company_name: name, company_license: license, company_phone: phone, company_email: email, company_address: address, default_deposit_percent: depNum, default_tax_percent: taxNum, default_margin_percent: marginNum, logo_url: logoUrl || null });
       qc.invalidateQueries({ queryKey: ['company'] });
       back();
     } catch (e: any) {
@@ -225,12 +250,24 @@ export function CompanyScreen({ back }: NavProp) {
     <>
       <Nav title="Business details" center onBack={back} />
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+        <View style={{ alignItems: 'center', marginBottom: 18 }}>
+          <Pressable onPress={pickLogo} style={{ width: 96, height: 96, borderRadius: 24, backgroundColor: colors.primaryTint, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: 1, borderColor: colors.border }}>
+            {logoUrl ? <Image source={{ uri: logoUrl }} style={{ width: 96, height: 96 }} resizeMode="cover" /> : <Icon name="image" size={30} color={colors.primary} />}
+          </Pressable>
+          <Pressable onPress={pickLogo} disabled={logoBusy} hitSlop={8}>
+            <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.primary, marginTop: 10 }}>{logoBusy ? 'Uploading…' : logoUrl ? 'Change logo' : 'Add logo'}</Text>
+          </Pressable>
+        </View>
         <Field label="Company name"><Input value={name} onChangeText={setName} placeholder="Your company" /></Field>
         <Field label="License #" opt><Input value={license} onChangeText={setLicense} placeholder="GC-000000" /></Field>
         <Field label="Phone"><Input value={phone} onChangeText={setPhone} keyboardType="phone-pad" /></Field>
         <Field label="Email"><Input value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" /></Field>
         <Field label="Address"><Input value={address} onChangeText={setAddress} placeholder="Street, city, state" /></Field>
-        <Field label="Default deposit %" opt><Input value={deposit} onChangeText={setDeposit} keyboardType="number-pad" placeholder="e.g. 25" maxLength={3} /></Field>
+        <Row style={{ gap: 10 }}>
+          <View style={{ flex: 1 }}><Field label="Default tax %" opt><Input value={taxRate} onChangeText={setTaxRate} keyboardType="decimal-pad" placeholder="e.g. 8.25" /></Field></View>
+          <View style={{ flex: 1 }}><Field label="Default deposit %" opt><Input value={deposit} onChangeText={setDeposit} keyboardType="number-pad" placeholder="e.g. 25" maxLength={3} /></Field></View>
+        </Row>
+        <Field label="Default margin % (internal markup)" opt><Input value={margin} onChangeText={setMargin} keyboardType="decimal-pad" placeholder="e.g. 15" /></Field>
       </ScrollView>
       <View style={actionbar}>
         <Btn title={busy ? 'Saving…' : 'Save'} onPress={save} disabled={busy} />

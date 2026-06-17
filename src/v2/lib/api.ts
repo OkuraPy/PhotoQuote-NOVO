@@ -425,15 +425,27 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
 export async function fetchCompanyProfile(userId: string) {
   const { data } = await supabase
     .from('users')
-    .select('company_name, company_address, company_phone, company_email, company_license, company_website, default_city, default_state, default_deposit_percent')
+    .select('company_name, company_address, company_phone, company_email, company_license, company_website, default_city, default_state, default_deposit_percent, default_tax_percent, default_margin_percent, logo_url')
     .eq('id', userId)
     .maybeSingle();
   return data;
 }
 
-export async function updateCompanyProfile(userId: string, p: { company_name?: string; company_license?: string; company_phone?: string; company_email?: string; company_address?: string; default_deposit_percent?: number | null }) {
+export async function updateCompanyProfile(userId: string, p: { company_name?: string; company_license?: string; company_phone?: string; company_email?: string; company_address?: string; default_deposit_percent?: number | null; default_tax_percent?: number | null; default_margin_percent?: number | null; logo_url?: string | null }) {
   const { error } = await supabase.from('users').update(p).eq('id', userId);
   if (error) throw error;
+}
+
+const LOGO_BUCKET = 'company-logos';
+// Resize + upload the company logo (public bucket) and return its URL (cache-busted so the new one shows).
+export async function uploadCompanyLogo(userId: string, uri: string): Promise<string> {
+  const m = await ImageManipulator.manipulateAsync(uri, [{ resize: { width: 512 } }], { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true });
+  if (!m.base64) throw new Error('Could not process the image.');
+  const path = `${userId}/logo.jpg`;
+  const { error } = await supabase.storage.from(LOGO_BUCKET).upload(path, decode(m.base64), { contentType: 'image/jpeg', upsert: true });
+  if (error) throw error;
+  const { data } = supabase.storage.from(LOGO_BUCKET).getPublicUrl(path);
+  return `${data.publicUrl}?v=${Date.now()}`;
 }
 
 /* ---------------- Job detail (real estimate + line items + invoice) ---------------- */

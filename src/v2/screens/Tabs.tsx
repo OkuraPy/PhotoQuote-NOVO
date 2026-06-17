@@ -1,6 +1,6 @@
 // PhotoQuote v2 — tab roots: Home, Jobs, Clients, Profile
 import React from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useQuery } from '@tanstack/react-query';
 import { Icon } from '../Icon';
@@ -250,8 +250,8 @@ export function ProfileScreen({ go }: NavProp) {
       </View>
       <ScrollView contentContainerStyle={[scroll, { paddingTop: 8 }]} showsVerticalScrollIndicator={false}>
         <Card pad style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-          <View style={{ width: 54, height: 54, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ fontFamily: fonts.extrabold, fontSize: 22, color: '#fff' }}>{(companyName[0] || 'P').toUpperCase()}</Text>
+          <View style={{ width: 54, height: 54, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            {company.logo_url ? <Image source={{ uri: company.logo_url }} style={{ width: 54, height: 54 }} resizeMode="cover" /> : <Text style={{ fontFamily: fonts.extrabold, fontSize: 22, color: '#fff' }}>{(companyName[0] || 'P').toUpperCase()}</Text>}
           </View>
           <View style={{ flex: 1 }}>
             <Text numberOfLines={1} style={{ fontFamily: fonts.extrabold, fontSize: 17, color: colors.ink }}>{companyName}</Text>
@@ -263,16 +263,15 @@ export function ProfileScreen({ go }: NavProp) {
         <SectionTitle title="Company" />
         <SetGroup rows={[
           { ico: 'building', name: 'Business details', val: 'Name, address, license', onPress: () => go('profileCompany') },
-          { ico: 'image', name: 'Logo', val: 'Shown on PDFs' },
+          { ico: 'image', name: 'Logo', val: company.logo_url ? 'Added · shown on PDFs' : 'Add a logo', onPress: () => go('profileCompany') },
           { ico: 'users', name: 'Team', val: '1 owner · invite members' },
         ]} />
 
         <SectionTitle title="Defaults" />
         <SetGroup rows={[
-          { ico: 'globe', name: 'Currency & locale', val: 'USD ($) · English' },
-          { ico: 'percent', name: 'Default tax rate', val: '8.25%' },
-          { ico: 'card', name: 'Payment terms', val: 'Net 15' },
-          { ico: 'wallet', name: 'Default deposit', val: '25%' },
+          { ico: 'percent', name: 'Default tax rate', val: company.default_tax_percent != null ? `${company.default_tax_percent}%` : 'Not set', onPress: () => go('profileCompany') },
+          { ico: 'wallet', name: 'Default deposit', val: company.default_deposit_percent != null ? `${company.default_deposit_percent}%` : 'Not set', onPress: () => go('profileCompany') },
+          { ico: 'trend', name: 'Default margin', val: company.default_margin_percent != null ? `${company.default_margin_percent}%` : 'Not set', onPress: () => go('profileCompany') },
         ]} />
 
         <SectionTitle title="Account" />
