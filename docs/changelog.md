@@ -4,6 +4,11 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 06:15] — chore: v2 Fase J — version 2.0.0 (atualização v2 na App Store)
+- **O que mudou**: bump da version **1.0.0 → 2.0.0** (a grande atualização do redesenho v2) em `app.json` e `package.json`, preparando o build de produção. Mantém a identidade do app (bundle `com.photoquoteai.app`, EAS projectId `08ab6d86…`, ascAppId `6761633213`) → entra como **ATUALIZAÇÃO** do app existente. O `buildNumber` é resolvido pelo EAS (`autoIncrement` no perfil `production`), evitando colisão de versão na Apple.
+- **Arquivos**: `app.json`, `package.json`
+- **Pendência (depende do dono)**: o build/submit roda na nuvem do Expo (conta do dono) + conta Apple. Aguardando o dono passar um token de acesso Expo OU rodar `eas build`/`eas submit` no Mac dele. O H (segurança) foi adiado pelo dono — não bloqueia o envio/teste.
+
 ### [2026-06-17 06:00] — fix: v2 — revisão da Fase G (ui.tsx traduzido: status/abas/envio + ajustes ES/PT)
 - **O que mudou** (fecha a tradução): `ui.tsx` internacionalizado — rótulos de **status** (`StageChip` + Timeline + filtros: Draft/Quoted/Sent/Approved/Invoiced/Paid traduzidos, **valor lógico preservado**), **TabBar** (Início/Trabalhos/Clientes/Perfil), **SendSheet** (título + opções Email/SMS/WhatsApp/PDF, **valor passado a `onSent`/`sendDoc` mantido em EN**), e o "optional" dos campos. Ajustes: "Pipeline" (ES, era "Embudo") e a confirmação de exclusão de cliente virou 2 chaves (singular/plural) com concordância correta em ES/PT.
 - **Arquivos**: `src/v2/ui.tsx`, `src/v2/screens/Job.tsx`, `src/v2/screens/Tabs.tsx`, `src/v2/screens/Misc.tsx`
