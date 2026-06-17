@@ -4,24 +4,34 @@ import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Icon } from '../Icon';
 import { colors, fonts } from '../theme';
-import { Client, CLIENTS, initials, JOBS } from '../data';
-import { Avatar, Between, Btn, Card, Divider, Field, Input, Nav, NavBtn, Row, SectionTitle, useStore } from '../ui';
+import { Client, initials } from '../data';
+import { Avatar, Between, Btn, Card, Divider, Empty, Field, Input, Nav, NavBtn, Row, SectionTitle, useStore } from '../ui';
 import { JobCard } from './Tabs';
 import { useAuth } from '../lib/auth';
-import { countClientProjects, createClient, deleteClient, fetchCompanyProfile, lookupZip, updateClient, updateCompanyProfile } from '../lib/api';
+import { countClientProjects, createClient, deleteClient, fetchCompanyProfile, fetchJobs, lookupZip, updateClient, updateCompanyProfile } from '../lib/api';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
 const actionbar = { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28 };
 
 export function ClientScreen({ go, back, params }: NavProp) {
-  const c: Client = params?.client || CLIENTS[0];
-  const jobs = JOBS.filter((j) => j.client === c.name); // job history wired in Fase 2
+  const c: Client | undefined = params?.client;
+  const { user } = useAuth();
+  const { data: allJobs = [] } = useQuery({ queryKey: ['jobs', user?.id], queryFn: () => fetchJobs(user!.id), enabled: !!user?.id });
+  const jobs = c?.id ? allJobs.filter((j) => j.clientId === c.id) : [];
   const acts: [string, string, string][] = [
     ['phone', 'Call', colors.primary],
     ['msg', 'Text', colors.info],
     ['mail', 'Email', colors.accentInk],
   ];
+  if (!c) {
+    return (
+      <>
+        <Nav title="Client" center onBack={back} />
+        <Empty icon="users" title="Client not found" body="Open a client from the list to see their details." />
+      </>
+    );
+  }
   return (
     <>
       <Nav title="Client" center onBack={back} right={<NavBtn icon="edit" size={17} onPress={() => go('clientEdit', { client: c })} />} />
@@ -29,10 +39,12 @@ export function ClientScreen({ go, back, params }: NavProp) {
         <View style={{ alignItems: 'center', paddingVertical: 8 }}>
           <Avatar text={initials(c.name)} size={72} radius={22} fontSize={26} />
           <Text style={{ fontFamily: fonts.extrabold, fontSize: 22, color: colors.ink, letterSpacing: -0.4, marginTop: 14 }}>{c.name}</Text>
-          <Row style={{ gap: 6, marginTop: 8 }}>
-            <Icon name="mapPin" size={13} color={colors.muted} />
-            <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{c.addr}, {c.city}</Text>
-          </Row>
+          {c.addr || c.city ? (
+            <Row style={{ gap: 6, marginTop: 8 }}>
+              <Icon name="mapPin" size={13} color={colors.muted} />
+              <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{[c.addr, c.city].filter(Boolean).join(', ')}</Text>
+            </Row>
+          ) : null}
         </View>
         <Row style={{ gap: 10, marginTop: 20 }}>
           {acts.map(([ico, l, col]) => (
@@ -44,18 +56,18 @@ export function ClientScreen({ go, back, params }: NavProp) {
         <Card pad style={{ marginTop: 16 }}>
           <Between>
             <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>Phone</Text>
-            <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.ink }}>{c.phone}</Text>
+            <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.ink }}>{c.phone || '—'}</Text>
           </Between>
           <Divider />
           <Between>
             <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>Email</Text>
-            <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.ink }}>{c.email}</Text>
+            <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.ink }}>{c.email || '—'}</Text>
           </Between>
         </Card>
-        <SectionTitle title="Job history" link={`${jobs.length || 0} total`} />
+        <SectionTitle title="Job history" link={`${jobs.length} total`} />
         <View style={{ gap: 10 }}>
           {jobs.length ? (
-            jobs.map((j, i) => <JobCard key={j.id} j={j} i={i} onPress={() => go('job', { id: j.id })} />)
+            jobs.map((j, i) => <JobCard key={j.id} j={j} i={i} onPress={() => go('job', { job: j })} />)
           ) : (
             <Card pad style={{ alignItems: 'center' }}>
               <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>No jobs yet for this client.</Text>

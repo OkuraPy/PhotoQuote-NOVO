@@ -76,12 +76,13 @@ async function uploadProjectPhotos(userId: string, projectId: string, photos: Ph
 
 /* ---------------- Clients ---------------- */
 export async function fetchClients(userId: string): Promise<Client[]> {
-  const { data, error } = await supabase
-    .from('clients')
-    .select('id, full_name, phone, email, address, address_street, address_city, address_state, address_zip, created_at')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false });
+  const [{ data, error }, { data: projs }] = await Promise.all([
+    supabase.from('clients').select('id, full_name, phone, email, address, address_street, address_city, address_state, address_zip, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    supabase.from('projects').select('client_id').eq('user_id', userId),
+  ]);
   if (error) throw error;
+  const counts = new Map<string, number>();
+  (projs || []).forEach((p: any) => { if (p.client_id) counts.set(p.client_id, (counts.get(p.client_id) || 0) + 1); });
   return (data || []).map((c: any) => ({
     id: c.id,
     name: c.full_name || 'Unnamed',
@@ -91,7 +92,7 @@ export async function fetchClients(userId: string): Promise<Client[]> {
     city: [c.address_city, c.address_state].filter(Boolean).join(', '),
     zip: c.address_zip || '',
     state: c.address_state || '',
-    jobs: 0,
+    jobs: counts.get(c.id) || 0,
   }));
 }
 
@@ -371,7 +372,7 @@ export async function createAgreement(userId: string, projectId: string, invoice
 }
 
 /* ---------------- Jobs (project + its estimate/invoice → v2 Job) ---------------- */
-export type RealJob = Job & { projectId: string };
+export type RealJob = Job & { projectId: string; clientId: string | null };
 
 // deriveStage moved to ../data (pure, unit-tested) and re-exported above.
 
@@ -408,6 +409,7 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
     return {
       id: p.id,
       projectId: p.id,
+      clientId: p.client_id || null,
       client: clients.get(p.client_id) || null,
       addr: p.address || p.city || '—',
       title: p.name || 'Untitled',

@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useQuery } from '@tanstack/react-query';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
-import { COMPANY, fmt0, initials, Job, split, STAGES } from '../data';
+import { fmt0, initials, Job, split, STAGES } from '../data';
 import { Avatar, Between, Btn, Card, Empty, NavBtn, Row, SearchBar, SectionTitle, StageChip, Switch, useStore } from '../ui';
 import { useAuth } from '../lib/auth';
 import { fetchClients, fetchCompanyProfile, fetchJobs } from '../lib/api';
@@ -198,7 +198,8 @@ export function ClientsScreen({ go }: NavProp) {
     queryFn: () => fetchClients(user!.id),
     enabled: !!user?.id,
   });
-  const list = clients.filter((c) => c.name.toLowerCase().includes(q.toLowerCase()));
+  const ql = q.toLowerCase();
+  const list = clients.filter((c) => c.name.toLowerCase().includes(ql) || c.phone.toLowerCase().includes(ql) || c.email.toLowerCase().includes(ql) || c.city.toLowerCase().includes(ql));
   return (
     <>
       <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>
