@@ -4,6 +4,11 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 04:55] — feat: v2 Fase F2 — log das chamadas de IA (ai_jobs)
+- **O que mudou**: toda chamada da IA (`ai-estimate`) agora é registrada em `public.ai_jobs` — status (done/rejected/error), modelo, nº de fotos, duração (ms), tokens de saída e mensagem de erro. Resolve a dor original ("a IA quebra e não sei por quê") dando rastro pra diagnosticar. Gravado pela Edge Function via service role (best-effort — nunca afeta a resposta); o dono lê só os próprios (RLS por `auth.uid()`); `user_id` extraído do JWT.
+- **Arquivos**: `supabase/migrations/20260617045000_create_ai_jobs.sql`, `supabase/functions/ai-estimate/index.ts`
+- **Banco**: tabela `ai_jobs` aplicada; Edge Function `ai-estimate` redeployada (v4, `verify_jwt` mantido). **Fase F COMPLETA** (fallback offline + logs).
+
 ### [2026-06-17 04:45] — feat: v2 Fase F1 — orçamento-base offline quando a IA falha
 - **O que mudou**: se a IA não responde (erro/sem internet), o EstimateScreen oferece **"Starter estimate"** — um orçamento-base determinístico montado a partir dos serviços selecionados (catálogo por tipo: Painting/Roofing/Flooring/Drywall/Plumbing/Electrical/Carpentry/Concrete/Landscaping/Demolition) × multiplicador regional, totalmente editável. Acaba a "tela vazia" no erro. `buildStarterEstimate` em `data.ts` (função pura) + 5 testes.
 - **Arquivos**: `src/v2/data.ts`, `src/v2/screens/Flow.tsx`, `src/v2/lib/__tests__/data.test.ts`

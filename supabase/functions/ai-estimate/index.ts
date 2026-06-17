@@ -1,6 +1,7 @@
 // PhotoQuote — ai-estimate Edge Function.
 // Photo(s) -> construction estimate JSON, via OpenAI (gpt-5.2, fast). Key read from app_config
 // (RLS-locked, service-role only). Returns { lineItems, confidence, notes } or { rejected, reason }.
+// Every call is logged to public.ai_jobs (status/model/duration/tokens/error) for diagnostics.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const cors = {
@@ -19,20 +20,51 @@ Otherwise, base the estimate on what you actually SEE. Reply ONLY with valid JSO
 {"lineItems":[{"category":"Labor"|"Materials"|"Service"|"Equipment","description":"<specific item>","quantity":<number>,"unit":"<hr|sq|gal|ls|ea|bag|...>","unitPrice":<number USD>,"taxable":<boolean>}],"confidence":<0-100>,"notes":"<what you saw / assumptions>"}
 Rules: 4-10 line items covering prep, main work, finishing and cleanup. Materials are usually taxable, labor usually not. Add items for visible damage (water, mold, cracks). Use realistic US prices. Output JSON only.`;
 
+// user id from the (already Supabase-verified) JWT, for the ai_jobs log
+function userIdFromJwt(req: Request): string | null {
+  try {
+    const tok = (req.headers.get('Authorization') || '').replace('Bearer ', '');
+    const payload = JSON.parse(atob(tok.split('.')[1] || ''));
+    return payload?.sub || null;
+  } catch {
+    return null;
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
+
+  const started = Date.now();
+  const uid = userIdFromJwt(req);
+  // deno-lint-ignore no-explicit-any
+  let sb: any = null;
+  let photoCount = 0;
+  // best-effort diagnostics log — never let a logging failure affect the response
+  const logJob = async (status: string, extra: Record<string, unknown> = {}) => {
+    if (!sb) return;
+    try {
+      await sb.from('ai_jobs').insert({ user_id: uid, status, model: 'gpt-5.2', photo_count: photoCount, duration_ms: Date.now() - started, ...extra });
+    } catch {
+      /* ignore */
+    }
+  };
+
   try {
     const { imageUrls = [], services = [], description = '' } = await req.json().catch(() => ({}));
     const urls: string[] = Array.isArray(imageUrls) ? imageUrls.filter(Boolean).slice(0, 5) : [];
+    photoCount = urls.length;
     if (urls.length === 0) return json({ error: 'No images provided' }, 400);
 
     const sUrl = Deno.env.get('SUPABASE_URL');
     const sKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || Deno.env.get('SERVICE_ROLE_KEY');
-    const sb = createClient(sUrl!, sKey!);
+    sb = createClient(sUrl!, sKey!);
     const { data: cfg, error: cfgErr } = await sb.from('app_config').select('value').eq('key', 'OPENAI_API_KEY').maybeSingle();
     const apiKey = cfg?.value;
-    if (!apiKey) return json({ error: 'OpenAI key not configured', debug: { hasUrl: !!sUrl, hasServiceKey: !!sKey, cfgErr: cfgErr?.message || null } }, 500);
+    if (!apiKey) {
+      await logJob('error', { error: 'OpenAI key not configured' });
+      return json({ error: 'OpenAI key not configured', debug: { hasUrl: !!sUrl, hasServiceKey: !!sKey, cfgErr: cfgErr?.message || null } }, 500);
+    }
 
     const userText =
       `Services: ${(services as string[]).join(', ') || 'general construction'}. ` +
@@ -68,11 +100,17 @@ Deno.serve(async (req: Request) => {
       });
       d = await r.json();
     } catch (e) {
+      await logJob('error', { error: `OpenAI request failed: ${(e as Error).message}` });
       return json({ error: `OpenAI request failed: ${(e as Error).message}` }, 504);
     } finally {
       clearTimeout(timer);
     }
-    if (d?.error) return json({ error: d.error.message || 'OpenAI error' }, 502);
+    if (d?.error) {
+      await logJob('error', { error: d.error.message || 'OpenAI error' });
+      return json({ error: d.error.message || 'OpenAI error' }, 502);
+    }
+
+    const outTokens = Number(d?.usage?.output_tokens) || null;
 
     const txt: string = (d.output || [])
       .filter((o: any) => o.type === 'message')
@@ -80,7 +118,10 @@ Deno.serve(async (req: Request) => {
       .filter((c: any) => c.type === 'output_text')
       .map((c: any) => c.text)
       .join('');
-    if (!txt) return json({ error: 'Empty AI response' }, 502);
+    if (!txt) {
+      await logJob('error', { error: 'Empty AI response', output_tokens: outTokens });
+      return json({ error: 'Empty AI response' }, 502);
+    }
 
     let parsed: any = null;
     try {
@@ -89,9 +130,15 @@ Deno.serve(async (req: Request) => {
       const m = txt.match(/\{[\s\S]*\}/);
       if (m) try { parsed = JSON.parse(m[0]); } catch { /* ignore */ }
     }
-    if (!parsed) return json({ error: 'AI returned malformed JSON', raw: txt.slice(0, 300) }, 502);
+    if (!parsed) {
+      await logJob('error', { error: 'malformed JSON', output_tokens: outTokens });
+      return json({ error: 'AI returned malformed JSON', raw: txt.slice(0, 300) }, 502);
+    }
 
-    if (parsed.rejected) return json({ rejected: true, reason: parsed.reason || 'Not a construction photo' }, 200);
+    if (parsed.rejected) {
+      await logJob('rejected', { output_tokens: outTokens, error: parsed.reason || null });
+      return json({ rejected: true, reason: parsed.reason || 'Not a construction photo' }, 200);
+    }
 
     // normalize
     const items = Array.isArray(parsed.lineItems) ? parsed.lineItems : [];
@@ -106,12 +153,14 @@ Deno.serve(async (req: Request) => {
       }))
       .filter((it: any) => it.unitPrice > 0 || it.quantity > 0);
 
+    await logJob('done', { output_tokens: outTokens });
     return json({
       lineItems,
       confidence: Math.max(0, Math.min(100, Number(parsed.confidence) || 75)),
       notes: String(parsed.notes || ''),
     });
   } catch (e) {
+    await logJob('error', { error: String((e as Error)?.message || e) });
     return json({ error: String((e as Error)?.message || e) }, 500);
   }
 });
