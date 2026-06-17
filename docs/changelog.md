@@ -4,6 +4,13 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 04:30] — fix: v2 — revisão geral A–E (limpeza de mock no Job + fatura mais recente em fetchJobs)
+- **O que mudou** (revisão holística de todas as fases de hoje, 2 revisores: integração + banco):
+  - Removidos os últimos imports mock `CLIENTS`/`COMPANY` do `Job.tsx` (footgun: um cliente real com nome igual a um mock poderia ligar a dados falsos se a lógica mudasse; hoje o caminho de job existente usa `realClient`).
+  - `fetchJobs` lê a fatura mais RECENTE por projeto (`order created_at desc` + first-wins), batendo com `fetchJobDetail` — evita estágio/valor divergentes entre lista e detalhe caso um projeto tenha 2+ faturas.
+- **Arquivos**: `src/v2/screens/Job.tsx`, `src/v2/lib/api.ts`
+- **Veredito da revisão geral**: NENHUM bug crítico no conjunto. Fluxo foto→orçamento→fatura→contrato→obra→cliente coerente; **depósito idêntico nos 3 documentos**; estágio derivado por uma única função; banco íntegro (0 projetos órfãos, 0 faturas duplicadas, contadores corretos, advisors sem nada novo crítico). `tsc` limpo, `npm test` 10/10.
+
 ### [2026-06-17 04:15] — fix: v2 — revisão da Fase E (default não sobrescreve edição manual)
 - **O que mudou**: revisão adversarial da Fase E (código + banco/RLS). Único bug encontrado: a alimentação do default de alíquota/margem no orçamento novo podia sobrescrever um ajuste manual feito antes do perfil carregar → agora só semeia enquanto os valores estão no inicial (8.25%/0).
 - **Arquivos**: `src/v2/screens/Flow.tsx`

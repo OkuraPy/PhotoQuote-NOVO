@@ -4,7 +4,7 @@ import { ActivityIndicator, Alert, Image, Pressable, Share, ScrollView, Text, Vi
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
-import { calcTotals, CLIENTS, COMPANY, fmt, LineItem, split, STAGES } from '../data';
+import { calcTotals, fmt, LineItem, split, STAGES } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { addPhaseComment, addPhasePhotos, agreementLink, createAgreement, createInvoice, createPhase, deletePhase, deriveStage, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, JobDetail, progressLink, ProgressPhase, PhaseStatus, updateEstimateStatus, updateInvoiceStatus, updatePhase } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -51,7 +51,7 @@ function Timeline({ stage }: { stage: Stage }) {
 export function JobScreen({ go, back, params }: NavProp) {
   const { store, up } = useStore();
   const job = params?.job || null;
-  const client = job ? CLIENTS.find((c) => c.name === job.client) || null : store.aSel || null;
+  const client = job ? null : store.aSel || null; // existing job uses realClient (from detail); new job uses the picked client
   const id = job?.id || (params && params.id) || 'new';
   const tab = store.jobTab || 'quote';
   const setStage = (s: Stage) => up((st) => ({ stageOverride: { ...st.stageOverride, [id]: s } }));

@@ -390,7 +390,7 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
     supabase.from('projects').select('id, name, client_id, address, city, created_at, photo_urls').eq('user_id', userId).order('created_at', { ascending: false }),
     supabase.from('clients').select('id, full_name').eq('user_id', userId),
     supabase.from('estimates').select('project_id, status, total, grand_total, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    supabase.from('invoices').select('project_id, status, total').eq('user_id', userId),
+    supabase.from('invoices').select('project_id, status, total, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
   ]);
   if (proj.error) throw proj.error;
 
@@ -400,7 +400,7 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
     if (!estByProj.has(e.project_id)) estByProj.set(e.project_id, e); // first = newest (ordered desc)
   });
   const invByProj = new Map<string, any>();
-  (inv.data || []).forEach((i: any) => invByProj.set(i.project_id, i));
+  (inv.data || []).forEach((i: any) => { if (!invByProj.has(i.project_id)) invByProj.set(i.project_id, i); }); // newest invoice wins (matches fetchJobDetail)
 
   return (proj.data || []).map((p: any) => {
     const e = estByProj.get(p.id);
