@@ -4,6 +4,12 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 05:20] — feat: v2 Fase G (base) — infraestrutura de i18n + seletor de idioma
+- **O que mudou**: base do multi-idioma (EN/ES/PT). `lib/i18n.tsx`: dicionário com **EN como fonte/fallback** (ES/PT por chave), `t()`/`translate` com interpolação `{var}`, locale persistido (AsyncStorage), `registerStrings` (cada tela co-localiza suas strings), `useT`/`useLocale` (re-render ao trocar idioma). `I18nProvider` no `App`. Tela **Language** no perfil (Profile → Language) com as 3 opções; **inglês ativo por padrão**.
+- **Arquivos**: `src/v2/lib/i18n.tsx` (novo), `src/v2/App.tsx`, `src/v2/screens/Misc.tsx` (LanguageScreen), `src/v2/Navigator.tsx`, `src/v2/screens/Tabs.tsx`
+- **Validação**: `tsc` limpo, `npm test` 15/15.
+- **Próximo (G-telas)**: extrair as strings das telas para chaves `t()` e traduzir ES/PT (EN segue ativo/fallback).
+
 ### [2026-06-17 05:05] — fix: v2 — ajustes da revisão da Fase F (10 serviços na tela + token 0 no log)
 - **O que mudou**: a tela de criar orçamento (CameraScreen) mostra os **10 tipos de serviço** (de `SERVICE_TYPES`), alinhando com o catálogo do orçamento-base (era só 7); removido o chip "Custom" sem ação. Na Edge Function, o log de tokens preserva `0` em vez de virar `null`. `ai-estimate` redeployada (v5).
 - **Arquivos**: `src/v2/screens/Flow.tsx`, `supabase/functions/ai-estimate/index.ts`

@@ -9,6 +9,7 @@ import { fmt0, initials, Job, split, STAGES } from '../data';
 import { Avatar, Between, Btn, Card, Empty, NavBtn, Row, SearchBar, SectionTitle, StageChip, Switch, useStore } from '../ui';
 import { useAuth } from '../lib/auth';
 import { fetchClients, fetchCompanyProfile, fetchJobs } from '../lib/api';
+import { LOCALES, useLocale } from '../lib/i18n';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
@@ -243,6 +244,8 @@ export function ProfileScreen({ go }: NavProp) {
   const { data: profile } = useQuery({ queryKey: ['company', user?.id], queryFn: () => fetchCompanyProfile(user!.id), enabled: !!user?.id });
   const company = (profile as any) || {};
   const companyName = company.company_name || 'Your company';
+  const [locale] = useLocale();
+  const localeLabel = LOCALES.find((l) => l.code === locale)?.label || 'English';
   return (
     <>
       <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>
@@ -269,6 +272,7 @@ export function ProfileScreen({ go }: NavProp) {
 
         <SectionTitle title="Defaults" />
         <SetGroup rows={[
+          { ico: 'globe', name: 'Language', val: localeLabel, onPress: () => go('language') },
           { ico: 'percent', name: 'Default tax rate', val: company.default_tax_percent != null ? `${company.default_tax_percent}%` : 'Not set', onPress: () => go('profileCompany') },
           { ico: 'wallet', name: 'Default deposit', val: company.default_deposit_percent != null ? `${company.default_deposit_percent}%` : 'Not set', onPress: () => go('profileCompany') },
           { ico: 'trend', name: 'Default margin', val: company.default_margin_percent != null ? `${company.default_margin_percent}%` : 'Not set', onPress: () => go('profileCompany') },

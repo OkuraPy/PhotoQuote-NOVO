@@ -10,6 +10,7 @@ import { Avatar, Between, Btn, Card, Divider, Empty, Field, Input, Nav, NavBtn, 
 import { JobCard } from './Tabs';
 import { useAuth } from '../lib/auth';
 import { countClientProjects, createClient, deleteClient, fetchCompanyProfile, fetchJobs, lookupZip, updateClient, updateCompanyProfile, uploadCompanyLogo } from '../lib/api';
+import { LOCALES, useLocale } from '../lib/i18n';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
@@ -301,6 +302,30 @@ export function ChangePasswordScreen({ back }: NavProp) {
       <View style={actionbar}>
         <Btn title={busy ? 'Saving…' : 'Update password'} onPress={save} disabled={busy} />
       </View>
+    </>
+  );
+}
+
+export function LanguageScreen({ back }: NavProp) {
+  const [locale, setLoc] = useLocale();
+  return (
+    <>
+      <Nav title="Language" center onBack={back} />
+      <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false}>
+        <Card style={{ overflow: 'hidden', marginTop: 8 }}>
+          {LOCALES.map((l, i) => (
+            <Pressable
+              key={l.code}
+              onPress={() => setLoc(l.code)}
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 16, paddingHorizontal: 16, borderBottomWidth: i === LOCALES.length - 1 ? 0 : 1, borderBottomColor: colors.border }}
+            >
+              <Text style={{ fontFamily: fonts.bold, fontSize: 15, color: colors.ink }}>{l.label}</Text>
+              {locale === l.code ? <Icon name="check" size={18} color={colors.primary} /> : null}
+            </Pressable>
+          ))}
+        </Card>
+        <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 14, textAlign: 'center', lineHeight: 18 }}>English is fully translated. Spanish & Portuguese are being added.</Text>
+      </ScrollView>
     </>
   );
 }

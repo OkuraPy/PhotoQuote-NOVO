@@ -15,6 +15,7 @@ import { SpaceGrotesk_500Medium, SpaceGrotesk_600SemiBold } from '@expo-google-f
 import { colors } from './theme';
 import { Navigator } from './Navigator';
 import { AuthProvider } from './lib/auth';
+import { I18nProvider } from './lib/i18n';
 import { queryClient } from './lib/query';
 
 function Splash() {
@@ -39,9 +40,11 @@ export default function V2App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <SafeAreaProvider>
-          <Navigator />
-        </SafeAreaProvider>
+        <I18nProvider>
+          <SafeAreaProvider>
+            <Navigator />
+          </SafeAreaProvider>
+        </I18nProvider>
       </AuthProvider>
     </QueryClientProvider>
   );
