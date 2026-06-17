@@ -4,6 +4,11 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 20:25] — fix: v2 — desabilita New Architecture (tentativa p/ tela branca no build)
+- **O que mudou**: `newArchEnabled: false` no `app.json`. Após remover o expo-updates, o build 21 AINDA dava tela branca no TestFlight (dono confirmou que é o 21; sem crash log novo = JS não chega a montar no release), enquanto no Expo Go (dev) o app boota 100%. Tentei reproduzir em modo release via túnel (`--no-dev`/`--minify`), mas o dono não conseguiu escanear (cansaço + timeout do `--minify`). O sintoma — **tela branca em build de produção que funciona no Expo Go** — é classicamente causado pela **New Architecture**: o build EAS compila os módulos nativos do projeto com New Arch e pode quebrar onde o runtime fixo do Expo Go não quebra. Desabilitar volta pra Old Architecture (Paper), suportada por todas as libs do projeto (svg, lucide, camera, audio, location, gradient, screens, safe-area).
+- **Arquivos**: `app.json`
+- **Build 22** disparado. Se não resolver, o próximo passo é o diagnóstico definitivo via túnel em modo release (isola JS-de-produção vs camada nativa).
+
 ### [2026-06-17 15:55] — fix: v2 — REMOVE expo-updates de vez (corrige tela branca no build de release)
 - **O que mudou**: removido o pacote **`expo-updates`** + toda a config (`updates`/`runtimeVersion` no `app.json`, `channel` nos 3 perfis do `eas.json`). **DIAGNÓSTICO definitivo via túnel Expo Go**: montei um túnel (`expo start --tunnel`, SDK 54) e instrumentei o boot com logs `[BOOT]`. Os logs (ao vivo no Metro) provaram que o app **BOOTA 100%**: `index.ts → V2App (colors.primary ok) → fonts loaded=true → Navigator loading=false hasSession=true` → renderiza a HomeScreen logado. Ou seja, **o código está OK e o problema é EXCLUSIVO do build de release** (o dono confirmou: abre no Expo Go, tela branca só no TestFlight). O `expo-updates` (que já causou o crash do build 18; eu só tinha desligado com `enabled:false` nos builds 19/20) continuava impedindo o bundle JS de ser carregado no app instalado → tela branca sem erro. Removê-lo faz o app carregar o `main.jsbundle` embarcado pelo caminho padrão do RN.
 - **Arquivos**: `package.json`, `package-lock.json`, `app.json`, `eas.json`; logs `[BOOT]` temporários em `index.ts`, `src/v2/App.tsx`, `src/v2/Navigator.tsx`.
