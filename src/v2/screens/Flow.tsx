@@ -335,8 +335,9 @@ export function EstimateScreen({ go, back, params }: NavProp) {
     if (needsAI && p && !defaultsRef.current) {
       defaultsRef.current = true;
       const patch: Partial<{ taxRate: number; marginRate: number }> = {};
-      if (p.default_tax_percent != null) patch.taxRate = Number(p.default_tax_percent);
-      if (p.default_margin_percent != null) patch.marginRate = Number(p.default_margin_percent);
+      // only seed while still at the initial defaults — never clobber a manual edit made before the profile loaded
+      if (store.taxRate === 8.25 && p.default_tax_percent != null) patch.taxRate = Number(p.default_tax_percent);
+      if (store.marginRate === 0 && p.default_margin_percent != null) patch.marginRate = Number(p.default_margin_percent);
       if (Object.keys(patch).length) up(patch);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -4,6 +4,11 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 04:15] — fix: v2 — revisão da Fase E (default não sobrescreve edição manual)
+- **O que mudou**: revisão adversarial da Fase E (código + banco/RLS). Único bug encontrado: a alimentação do default de alíquota/margem no orçamento novo podia sobrescrever um ajuste manual feito antes do perfil carregar → agora só semeia enquanto os valores estão no inicial (8.25%/0).
+- **Arquivos**: `src/v2/screens/Flow.tsx`
+- **Validação**: `tsc` limpo, `npm test` 10/10. Verificado em prod: colunas/RLS de `users`, bucket `company-logos` público, storage policies por `auth.uid()`. Demais itens corretos.
+
 ### [2026-06-17 04:05] — feat: v2 Fase E (senha) — trocar senha estando logado
 - **O que mudou**: o "Change password" do perfil saiu do mock — abre uma tela que troca a senha do usuário logado (`supabase.auth.updateUser`, com confirmação e mínimo de 6 caracteres). `auth.tsx` ganhou `updatePassword`; nova `ChangePasswordScreen` + rota `changePassword`.
 - **Arquivos**: `src/v2/lib/auth.tsx`, `src/v2/screens/Misc.tsx`, `src/v2/Navigator.tsx`, `src/v2/screens/Tabs.tsx`
