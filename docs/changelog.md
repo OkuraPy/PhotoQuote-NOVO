@@ -9,6 +9,7 @@ Registro por commit (Regra #0). Mais recente no topo.
 - **Arquivos**: `app.json`
 - **Decisão técnica**: desligar o OTA (expo-updates) estabiliza o boot; o dono não precisa de OTA agora. URL mantida no config pra religar/diagnosticar depois. Antes de concluir, baixei o próprio `.ipa` do build 18 e verifiquei que Supabase (URL+anon key), fontes e o embedded manifest estavam no bundle → descartei essas hipóteses; só os crash logs nativos cravaram a causa (expo-updates).
 - **Bug corrigido**: crash imediato no launch do build 18.
+- **Rebuild**: build **19** (autoIncrement 18→19) disparado com `--auto-submit` → vai pra Apple automaticamente ao terminar de compilar. Build `fac419c0-e120-4e4f-a09a-56fccb60f26f`, submission `c7e80506-663a-4201-ac6b-c14ced53f4ec`.
 
 ### [2026-06-17 06:30] — chore: v2 Fase J — build 18 ENVIADO pra Apple (TestFlight)
 - **O que mudou**: build de produção iOS (**v2.0.0, build 18**) compilado no EAS e **enviado pro App Store Connect / TestFlight** com sucesso. `buildNumber` 17→18 (autoIncrement do EAS, refletido no `app.json`). Apple processando (~5-10 min) antes de liberar no TestFlight.
