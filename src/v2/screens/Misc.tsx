@@ -275,3 +275,32 @@ export function CompanyScreen({ back }: NavProp) {
     </>
   );
 }
+
+export function ChangePasswordScreen({ back }: NavProp) {
+  const { updatePassword } = useAuth();
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    if (pw.length < 6) { Alert.alert('Too short', 'Use at least 6 characters.'); return; }
+    if (pw !== pw2) { Alert.alert("Doesn't match", 'The two passwords are different.'); return; }
+    setBusy(true);
+    const { error } = await updatePassword(pw);
+    setBusy(false);
+    if (error) { Alert.alert('Error', error.message || 'Could not update password.'); return; }
+    Alert.alert('Password updated', 'Your password has been changed.');
+    back();
+  };
+  return (
+    <>
+      <Nav title="Change password" center onBack={back} />
+      <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+        <Field label="New password"><Input value={pw} onChangeText={setPw} secureTextEntry placeholder="At least 6 characters" autoFocus /></Field>
+        <Field label="Confirm new password"><Input value={pw2} onChangeText={setPw2} secureTextEntry placeholder="Repeat the password" /></Field>
+      </ScrollView>
+      <View style={actionbar}>
+        <Btn title={busy ? 'Saving…' : 'Update password'} onPress={save} disabled={busy} />
+      </View>
+    </>
+  );
+}

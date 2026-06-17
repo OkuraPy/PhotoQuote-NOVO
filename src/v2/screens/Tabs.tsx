@@ -277,7 +277,7 @@ export function ProfileScreen({ go }: NavProp) {
         <SectionTitle title="Account" />
         <SetGroup rows={[
           { ico: 'bell', name: 'Notifications', toggle: true },
-          { ico: 'lock', name: 'Change password' },
+          { ico: 'lock', name: 'Change password', onPress: () => go('changePassword') },
           { ico: 'logout', name: 'Log out', danger: true, onPress: () => signOut() },
         ]} />
         <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, textAlign: 'center', marginTop: 20 }}>PhotoQuote v2.0 · Made for the trades</Text>

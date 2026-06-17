@@ -4,6 +4,12 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 04:05] — feat: v2 Fase E (senha) — trocar senha estando logado
+- **O que mudou**: o "Change password" do perfil saiu do mock — abre uma tela que troca a senha do usuário logado (`supabase.auth.updateUser`, com confirmação e mínimo de 6 caracteres). `auth.tsx` ganhou `updatePassword`; nova `ChangePasswordScreen` + rota `changePassword`.
+- **Arquivos**: `src/v2/lib/auth.tsx`, `src/v2/screens/Misc.tsx`, `src/v2/Navigator.tsx`, `src/v2/screens/Tabs.tsx`
+- **Validação**: `tsc` limpo, `npm test` 10/10.
+- **Pendência menor**: o "esqueci a senha" (deslogado) já envia o e-mail; falta o deep-link pro app capturar o link e definir a nova senha (precisa configurar o scheme + testar no device). Idem "payment terms" (sem coluna dedicada — usa pdf_terms_template no futuro).
+
 ### [2026-06-17 03:55] — feat: v2 Fase E (perfil) — logo da empresa + alíquota/margem/depósito configuráveis
 - **O que mudou**:
   - **Logo da empresa**: upload no perfil — `uploadCompanyLogo` (bucket público `company-logos`, resize 512) → `users.logo_url`; aparece no avatar do perfil e o portal já usa no acompanhamento da obra.

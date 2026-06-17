@@ -11,6 +11,7 @@ type AuthCtx = {
   signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
   signUp: (email: string, password: string, name: string) => Promise<{ error: AuthError | null; needsConfirm: boolean }>;
   resetPassword: (email: string) => Promise<{ error: AuthError | null }>;
+  updatePassword: (password: string) => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<void>;
 };
 
@@ -66,6 +67,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error };
   };
 
+  const updatePassword = async (password: string) => {
+    const { error } = await supabase.auth.updateUser({ password });
+    return { error };
+  };
+
   const signOut = async () => {
     setLoading(true);
     await supabase.auth.signOut().catch(() => {});
@@ -73,5 +79,5 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   };
 
-  return <Ctx.Provider value={{ user, session, loading, signIn, signUp, resetPassword, signOut }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ user, session, loading, signIn, signUp, resetPassword, updatePassword, signOut }}>{children}</Ctx.Provider>;
 }

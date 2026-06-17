@@ -10,7 +10,7 @@ import { ForgotScreen, LoginScreen, OnboardScreen, SignupScreen } from './screen
 import { ClientsScreen, HomeScreen, JobsScreen, ProfileScreen } from './screens/Tabs';
 import { AttachScreen, CameraScreen, EstimateScreen } from './screens/Flow';
 import { JobScreen } from './screens/Job';
-import { ClientEditScreen, ClientScreen, CompanyScreen } from './screens/Misc';
+import { ChangePasswordScreen, ClientEditScreen, ClientScreen, CompanyScreen } from './screens/Misc';
 
 const AUTH_SCREENS: Record<string, React.ComponentType<any>> = {
   login: LoginScreen,
@@ -30,6 +30,7 @@ const APP_SCREENS: Record<string, React.ComponentType<any>> = {
   client: ClientScreen,
   clientEdit: ClientEditScreen,
   profileCompany: CompanyScreen,
+  changePassword: ChangePasswordScreen,
 };
 const TAB_ROOTS = ['home', 'jobs', 'clients', 'profile'];
 const FULLBLEED = ['camera'];
