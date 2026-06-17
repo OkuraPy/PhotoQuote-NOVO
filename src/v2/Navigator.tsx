@@ -1,7 +1,7 @@
 // PhotoQuote v2 — auth gate + lightweight navigation stacks + shared store.
 import React, { useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from './theme';
 import { StoreCtx, TabBar, V2Store } from './ui';
@@ -125,8 +125,9 @@ export function Navigator() {
   const { session, loading } = useAuth();
   if (loading) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color={colors.primary} />
+      <View style={{ flex: 1, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color="#fff" />
+        <Text style={{ color: '#fff', marginTop: 14, fontSize: 14 }}>Connecting…</Text>
       </View>
     );
   }

@@ -28,17 +28,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setUser(data.session?.user ?? null);
-      setLoading(false);
-    });
+    let done = false;
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        done = true;
+        setSession(data.session);
+        setUser(data.session?.user ?? null);
+        setLoading(false);
+      })
+      .catch(() => {
+        done = true;
+        setLoading(false);
+      });
     const { data } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
       setUser(s?.user ?? null);
       setLoading(false);
     });
-    return () => data.subscription.unsubscribe();
+    // Safety net: never hang on the loading screen if getSession stalls (e.g. flaky network).
+    const t = setTimeout(() => {
+      if (!done) setLoading(false);
+    }, 6000);
+    return () => {
+      clearTimeout(t);
+      data.subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = async (email: string, password: string) => {

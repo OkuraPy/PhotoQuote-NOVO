@@ -4,6 +4,11 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 07:10] — fix: v2 — instrumenta o boot p/ diagnosticar TELA BRANCA (TestFlight)
+- **O que mudou**: o build 19 (expo-updates off) **parou de crashar** — abre, mas fica em **tela branca estática** (não muda ao esperar/reabrir). Tela branca NÃO gera crash log, então instrumentei o boot pra trocar "branco" por telas COLORIDAS com texto/erro e descobrir onde trava: (1) **ErrorBoundary** global → erro de render vira tela rosa com mensagem+stack; (2) **useFonts com timeout de 4s** → nunca trava no splash por fontes (renderiza mesmo sem elas); (3) loading inicial + loading do Navigator com fundo **esmeralda + texto** ("Starting…"/"Connecting…"), distinguível de branco; (4) `auth.getSession` com `.catch` + timeout de 6s → não trava o loading se a sessão emperrar.
+- **Arquivos**: `src/v2/App.tsx`, `src/v2/lib/auth.tsx`, `src/v2/Navigator.tsx`
+- **Objetivo**: o **build 20** mostra EXATAMENTE o estado (cor/texto) ou o erro → diagnóstico determinístico da tela branca. Hipótese principal: boot preso em fontes/sessão (JS); se ainda assim der branco, é o carregamento nativo do bundle (expo-updates) → próximo passo é remover o pacote.
+
 ### [2026-06-17 06:50] — fix: v2 — desabilita expo-updates (corrige CRASH no boot do TestFlight)
 - **O que mudou**: `updates.enabled: false` no `app.json`. O **build 18 (1º build nativo do v2) crashava no launch** no TestFlight. Diagnóstico via 3 crash logs (.ips) enviados pelo dono: **SIGABRT/abort() na thread da queue `expo.controller.errorRecoveryQueue`** → o **expo-updates** lançava uma NSException não capturada no boot (stack: `NSException raise → PhotoQuoteAI`). O expo-updates fica DESLIGADO no Expo Go (via `EXPO_GO_DEV`) e LIGA só no build de produção → por isso o crash só apareceu no app instalado, nunca no teste rápido.
 - **Arquivos**: `app.json`
