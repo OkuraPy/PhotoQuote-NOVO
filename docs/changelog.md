@@ -4,6 +4,13 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 03:05] — fix: v2 — revisão da Fase D (ordem de fase + avançar status otimista)
+- **O que mudou** (revisão adversarial da Fase D — código + portal):
+  - **Ordem da fase**: nova fase usa `max(order)+1` (era `phases.length`, que colidia ao recriar após excluir uma fase do meio).
+  - **Avançar status otimista**: `cycleStatus` atualiza o cache na hora (toques rápidos não são mais "engolidos") e reverte em falha — consistente com o resto da tela.
+- **Arquivos**: `src/v2/screens/Job.tsx`
+- **Revisão**: nenhum bug crítico; o "Client link" pode criar token extra só numa janela de corrida estreita já coberta pelo `disabled` (aceitável). Consistência com o portal confirmada (status/visibilidade/fotos/activated_at). `tsc` limpo, `npm test` 10/10.
+
 ### [2026-06-17 02:55] — feat: v2 Fase D (núcleo) — acompanhamento da obra real (fases, fotos, link do cliente)
 - **O que mudou**: a aba **Progress** do Trabalho saiu do mock e virou real, ligada ao backend que o portal do cliente já consome.
   - **Fases reais** (`fetchPhases`): lê `project_phases` (status not_started/in_progress/completed, ordem, notas) + as fotos de cada fase.

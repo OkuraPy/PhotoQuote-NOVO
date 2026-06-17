@@ -498,7 +498,8 @@ function ProgressTab({ projectId, estimateId, userId }: { projectId: string | nu
     if (!newName.trim()) return;
     setBusy(true);
     try {
-      await createPhase(userId, projectId, estimateId, newName.trim(), phases.length);
+      const nextOrder = phases.length ? Math.max(...phases.map((p) => p.order)) + 1 : 0;
+      await createPhase(userId, projectId, estimateId, newName.trim(), nextOrder);
       setNewName('');
       setSheet(false);
       refresh();
@@ -510,10 +511,14 @@ function ProgressTab({ projectId, estimateId, userId }: { projectId: string | nu
   };
 
   const cycleStatus = async (p: ProgressPhase) => {
+    const next = NEXT_PHASE_STATUS[p.status];
+    // optimistic: update the cache now so quick taps read the new status (no "swallowed" taps)
+    qc.setQueryData(['phases', projectId], (old?: ProgressPhase[]) => (old || []).map((x) => (x.id === p.id ? { ...x, status: next } : x)));
     try {
-      await updatePhase(p.id, { status: NEXT_PHASE_STATUS[p.status] });
+      await updatePhase(p.id, { status: next });
       refresh();
     } catch (e: any) {
+      refresh(); // revert to the DB truth
       Alert.alert('Could not update', e?.message || 'Try again.');
     }
   };
