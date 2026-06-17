@@ -523,6 +523,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
 const PHASE_BUCKET = 'phase-photos';
 export type PhaseStatus = 'not_started' | 'in_progress' | 'completed';
 export type PhasePhoto = { id: string; url: string; caption: string | null };
+export type PhaseComment = { id: string; authorType: 'contractor' | 'client'; authorName: string; content: string; createdAt: string };
 export type ProgressPhase = {
   id: string;
   name: string;
@@ -531,6 +532,7 @@ export type ProgressPhase = {
   notes: string | null;
   visibleToClient: boolean;
   photos: PhasePhoto[];
+  comments: PhaseComment[];
 };
 
 export async function fetchPhases(projectId: string): Promise<ProgressPhase[]> {
@@ -542,16 +544,27 @@ export async function fetchPhases(projectId: string): Promise<ProgressPhase[]> {
   if (error) throw error;
   const ids = (phases || []).map((p: any) => p.id);
   const byPhase = new Map<string, PhasePhoto[]>();
+  const commentsByPhase = new Map<string, PhaseComment[]>();
   if (ids.length) {
-    const { data: photos } = await supabase
-      .from('phase_photos')
-      .select('id, phase_id, file_url, caption, display_order')
-      .in('phase_id', ids)
-      .order('display_order', { ascending: true });
+    const [{ data: photos }, { data: comments }] = await Promise.all([
+      supabase.from('phase_photos').select('id, phase_id, file_url, caption, display_order').in('phase_id', ids).order('display_order', { ascending: true }),
+      supabase.from('phase_comments').select('id, phase_id, author_type, author_name, content, created_at').in('phase_id', ids).order('created_at', { ascending: true }),
+    ]);
     (photos || []).forEach((ph: any) => {
       const arr = byPhase.get(ph.phase_id) || [];
       arr.push({ id: ph.id, url: ph.file_url, caption: ph.caption ?? null });
       byPhase.set(ph.phase_id, arr);
+    });
+    (comments || []).forEach((cm: any) => {
+      const arr = commentsByPhase.get(cm.phase_id) || [];
+      arr.push({
+        id: cm.id,
+        authorType: cm.author_type === 'client' ? 'client' : 'contractor',
+        authorName: cm.author_name || (cm.author_type === 'client' ? 'Client' : 'You'),
+        content: cm.content || '',
+        createdAt: cm.created_at,
+      });
+      commentsByPhase.set(cm.phase_id, arr);
     });
   }
   return (phases || []).map((p: any) => ({
@@ -562,6 +575,7 @@ export async function fetchPhases(projectId: string): Promise<ProgressPhase[]> {
     notes: p.notes ?? null,
     visibleToClient: p.is_visible_to_client !== false,
     photos: byPhase.get(p.id) || [],
+    comments: commentsByPhase.get(p.id) || [],
   }));
 }
 
@@ -634,4 +648,17 @@ export async function ensureShareToken(userId: string, projectId: string): Promi
   if (error) throw error;
   await supabase.from('projects').update({ activated_at: new Date().toISOString() }).eq('id', projectId).is('activated_at', null);
   return token;
+}
+
+// Contractor reply on a phase (phase_comments has no user_id — RLS is by project ownership).
+// The client's own comments are written by the portal (author_type='client').
+export async function addPhaseComment(projectId: string, phaseId: string, authorName: string, content: string): Promise<void> {
+  const { error } = await supabase.from('phase_comments').insert({
+    project_id: projectId,
+    phase_id: phaseId,
+    author_type: 'contractor',
+    author_name: authorName || 'Contractor',
+    content: content.trim(),
+  });
+  if (error) throw error;
 }

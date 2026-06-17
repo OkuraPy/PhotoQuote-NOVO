@@ -6,7 +6,7 @@ import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
 import { calcTotals, CLIENTS, COMPANY, fmt, LineItem, split, STAGES } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { addPhasePhotos, agreementLink, createAgreement, createInvoice, createPhase, deletePhase, deriveStage, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, JobDetail, progressLink, ProgressPhase, PhaseStatus, updateEstimateStatus, updateInvoiceStatus, updatePhase } from '../lib/api';
+import { addPhaseComment, addPhasePhotos, agreementLink, createAgreement, createInvoice, createPhase, deletePhase, deriveStage, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, JobDetail, progressLink, ProgressPhase, PhaseStatus, updateEstimateStatus, updateInvoiceStatus, updatePhase } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { sendDoc } from '../lib/send';
 import { Between, Btn, Card, CatChip, Divider, Empty, Field, Input, Nav, NavBtn, Row, SectionTitle, SendSheet, Sheet, StageChip, useStore } from '../ui';
@@ -213,7 +213,7 @@ export function JobScreen({ go, back, params }: NavProp) {
         {tab === 'quote' && <QuoteTab items={items} totals={quoteTotals} go={go} photos={detail?.photoUrls || []} />}
         {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} company={company} invoice={inv} genning={genningInv} onGen={generateInvoice} setSheet={(b: boolean) => up({ sheet: b })} />}
         {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={invoiceTotals} depositPercent={inv?.depositPercent ?? 25} company={company} genning={genningContract} onGenerate={generateContract} />}
-        {tab === 'progress' && <ProgressTab projectId={projectId} estimateId={est?.id || null} userId={user?.id || null} />}
+        {tab === 'progress' && <ProgressTab projectId={projectId} estimateId={est?.id || null} userId={user?.id || null} companyName={(company as any)?.company_name || 'You'} />}
       </ScrollView>
 
       <SendSheet
@@ -480,14 +480,32 @@ const PHASE_STAT: Record<PhaseStatus, [string, string, string]> = {
 };
 const NEXT_PHASE_STATUS: Record<PhaseStatus, PhaseStatus> = { not_started: 'in_progress', in_progress: 'completed', completed: 'not_started' };
 
-function ProgressTab({ projectId, estimateId, userId }: { projectId: string | null; estimateId: string | null; userId: string | null }) {
+function ProgressTab({ projectId, estimateId, userId, companyName }: { projectId: string | null; estimateId: string | null; userId: string | null; companyName: string }) {
   const qc = useQueryClient();
   const { data: phases = [], isLoading } = useQuery({ queryKey: ['phases', projectId], queryFn: () => fetchPhases(projectId!), enabled: !!projectId });
   const [sheet, setSheet] = useState(false);
   const [newName, setNewName] = useState('');
   const [busy, setBusy] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [cmPhaseId, setCmPhaseId] = useState<string | null>(null);
+  const [cmText, setCmText] = useState('');
+  const [cmBusy, setCmBusy] = useState(false);
   const refresh = () => qc.invalidateQueries({ queryKey: ['phases', projectId] });
+  const cmPhase = phases.find((p) => p.id === cmPhaseId) || null;
+
+  const addComment = async () => {
+    if (!projectId || !cmPhase || !cmText.trim()) return;
+    setCmBusy(true);
+    try {
+      await addPhaseComment(projectId, cmPhase.id, companyName, cmText.trim());
+      setCmText('');
+      refresh();
+    } catch (e: any) {
+      Alert.alert('Could not send', e?.message || 'Try again.');
+    } finally {
+      setCmBusy(false);
+    }
+  };
 
   if (!projectId) {
     return <View style={{ marginTop: 16 }}><Empty icon="layers" title="Save the job first" body="Create the estimate, then track the work in phases the client can follow." /></View>;
@@ -601,6 +619,13 @@ function ProgressTab({ projectId, estimateId, userId }: { projectId: string | nu
                   </ScrollView>
                 ) : null}
                 <Btn variant="ghost" sm icon="camera" title={p.photos.length ? 'Add more photos' : 'Add progress photos'} onPress={() => addPhotos(p)} style={{ marginTop: 12 }} />
+                <Pressable onPress={() => setCmPhaseId(p.id)} style={{ marginTop: 10 }} hitSlop={6}>
+                  <Row style={{ gap: 6 }}>
+                    <Icon name="msg" size={14} color={colors.muted} />
+                    <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.muted }}>{p.comments.length ? `Comments · ${p.comments.length}` : 'Comments'}</Text>
+                    {p.comments.some((c) => c.authorType === 'client') ? <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.info }} /> : null}
+                  </Row>
+                </Pressable>
               </Card>
             );
           })}
@@ -612,6 +637,28 @@ function ProgressTab({ projectId, estimateId, userId }: { projectId: string | nu
       <Sheet open={sheet} onClose={() => setSheet(false)} title="New phase" sub="e.g. Prep & masking, Priming, Top coat, Final walkthrough.">
         <Field label="Phase name"><Input value={newName} onChangeText={setNewName} placeholder="Phase name" autoFocus /></Field>
         <Btn title={busy ? 'Adding…' : 'Add phase'} disabled={busy} onPress={addPhase} />
+      </Sheet>
+
+      <Sheet open={!!cmPhaseId} onClose={() => { setCmPhaseId(null); setCmText(''); }} title="Comments" sub={cmPhase?.name}>
+        <ScrollView style={{ maxHeight: 320 }} contentContainerStyle={{ gap: 10, paddingBottom: 8 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          {cmPhase && cmPhase.comments.length ? (
+            cmPhase.comments.map((c) => (
+              <View key={c.id} style={{ backgroundColor: c.authorType === 'client' ? colors.bg : colors.primaryTint, borderRadius: 12, padding: 12 }}>
+                <Row style={{ gap: 6, marginBottom: 4 }}>
+                  <Text style={{ fontFamily: fonts.extrabold, fontSize: 12.5, color: c.authorType === 'client' ? colors.ink : colors.primary }}>{c.authorName}</Text>
+                  <Text style={{ fontFamily: fonts.bold, fontSize: 10, letterSpacing: 0.5, color: colors.faint }}>{c.authorType === 'client' ? 'CLIENT' : 'YOU'}</Text>
+                </Row>
+                <Text style={{ fontFamily: fonts.semibold, fontSize: 13.5, color: colors.ink, lineHeight: 19 }}>{c.content}</Text>
+              </View>
+            ))
+          ) : (
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.muted, textAlign: 'center', paddingVertical: 16, lineHeight: 19 }}>No comments yet. Your client can comment from the shared progress link.</Text>
+          )}
+        </ScrollView>
+        <Row style={{ gap: 8, marginTop: 12, alignItems: 'flex-end' }}>
+          <View style={{ flex: 1 }}><Input value={cmText} onChangeText={setCmText} placeholder="Write a reply…" multiline style={{ minHeight: 50, paddingTop: 13 }} /></View>
+          <Btn sm title={cmBusy ? '…' : 'Send'} disabled={cmBusy} onPress={addComment} />
+        </Row>
       </Sheet>
     </View>
   );

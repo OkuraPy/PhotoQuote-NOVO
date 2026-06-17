@@ -4,6 +4,15 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 03:20] — feat: v2 Fase D (parte 2) — comentários por fase (cliente ↔ contractor)
+- **O que mudou**: a aba Progresso agora mostra e responde comentários por fase.
+  - `fetchPhases` traz os `phase_comments` de cada fase (cliente e contractor), em paralelo com as fotos.
+  - **Thread por fase** (sheet): lista os comentários (badge CLIENT/YOU, cores distintas) + campo pro contractor responder; contador na fase + ponto azul quando há comentário do cliente não-lido visualmente.
+  - `addPhaseComment` grava a resposta do contractor (`author_type='contractor'`, nome da empresa); os comentários do cliente vêm do portal (`add_client_comment`).
+- **Arquivos**: `src/v2/lib/api.ts`, `src/v2/screens/Job.tsx`
+- **Validação**: `tsc` limpo, `npm test` 10/10. RLS de `phase_comments` é por dono do projeto (contractor insere; cliente via portal).
+- **Fase D COMPLETA** (núcleo + comentários). Falta editar nome/nota da fase (menor) e provar o fluxo no device.
+
 ### [2026-06-17 03:05] — fix: v2 — revisão da Fase D (ordem de fase + avançar status otimista)
 - **O que mudou** (revisão adversarial da Fase D — código + portal):
   - **Ordem da fase**: nova fase usa `max(order)+1` (era `phases.length`, que colidia ao recriar após excluir uma fase do meio).
