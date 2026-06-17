@@ -4,6 +4,11 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 02:35] — fix: v2 — revisão da Fase C (CHECK de range no depósito)
+- **O que mudou**: revisão adversarial da Fase C (2 revisores: código + banco) não achou bug de correção. Como defesa em profundidade, adicionado CHECK `0–100` em `users.default_deposit_percent` e `invoices.deposit_percent` (a UI já limita; o CHECK garante no banco contra valores absurdos).
+- **Arquivos**: `supabase/migrations/20260617023500_deposit_percent_range_check.sql`
+- **Validação**: migration aplicada em prod (dados atuais NULL passam no CHECK); cobertura de variáveis do template confirmada 23/23 (zero órfãs); portal `get_agreement_by_token` compatível com o novo fluxo.
+
 ### [2026-06-17 02:30] — feat: v2 Fase C — contrato com modelo US genérico, depósito configurável e token seguro
 - **O que mudou**:
   - **Modelo de contrato US genérico** (migration): novo template `contract_templates` (state `US`, `is_default`) válido em qualquer estado — o específico da Flórida virou variante não-default. `createAgreement` usa sempre o template padrão. Cláusulas completas (escopo, preço, pagamento, prazo, change orders, garantia, cancelamento, responsabilidade, lei aplicável, entire agreement) + termos gerais via `terms_blocks` (antes saíam em branco).
