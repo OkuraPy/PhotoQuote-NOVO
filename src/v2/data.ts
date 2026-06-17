@@ -114,3 +114,67 @@ export const SERVICE_TYPES = ['Painting', 'Roofing', 'Flooring', 'Drywall', 'Plu
 
 export const initials = (n: string) =>
   n.split(' ').map((w) => w[0]).slice(0, 2).join('');
+
+/* ---------------- Starter estimate (deterministic fallback when the AI is unavailable) ---------------- */
+type StarterItem = Omit<LineItem, 'id'>;
+const STARTER_CATALOG: Record<string, StarterItem[]> = {
+  Painting: [
+    { cat: 'Labor', desc: 'Surface prep & priming', qty: 16, unit: 'hr', price: 55, taxable: false },
+    { cat: 'Materials', desc: 'Paint & supplies', qty: 12, unit: 'gal', price: 45, taxable: true },
+    { cat: 'Labor', desc: 'Painting (two coats)', qty: 20, unit: 'hr', price: 55, taxable: false },
+  ],
+  Roofing: [
+    { cat: 'Labor', desc: 'Tear-off & disposal', qty: 12, unit: 'hr', price: 65, taxable: false },
+    { cat: 'Materials', desc: 'Shingles & underlayment', qty: 20, unit: 'sq', price: 110, taxable: true },
+    { cat: 'Labor', desc: 'Roof installation', qty: 24, unit: 'hr', price: 65, taxable: false },
+  ],
+  Flooring: [
+    { cat: 'Labor', desc: 'Removal & subfloor prep', qty: 10, unit: 'hr', price: 55, taxable: false },
+    { cat: 'Materials', desc: 'Flooring material', qty: 400, unit: 'sqft', price: 4.5, taxable: true },
+    { cat: 'Labor', desc: 'Flooring installation', qty: 18, unit: 'hr', price: 55, taxable: false },
+  ],
+  Drywall: [
+    { cat: 'Materials', desc: 'Drywall sheets & compound', qty: 20, unit: 'sheet', price: 18, taxable: true },
+    { cat: 'Labor', desc: 'Hang, tape & mud', qty: 20, unit: 'hr', price: 50, taxable: false },
+    { cat: 'Labor', desc: 'Sand & finish', qty: 8, unit: 'hr', price: 50, taxable: false },
+  ],
+  Plumbing: [
+    { cat: 'Labor', desc: 'Plumbing labor', qty: 12, unit: 'hr', price: 85, taxable: false },
+    { cat: 'Materials', desc: 'Fixtures & fittings', qty: 1, unit: 'job', price: 600, taxable: true },
+  ],
+  Electrical: [
+    { cat: 'Labor', desc: 'Electrical labor', qty: 12, unit: 'hr', price: 85, taxable: false },
+    { cat: 'Materials', desc: 'Wiring, devices & panel', qty: 1, unit: 'job', price: 700, taxable: true },
+  ],
+  Carpentry: [
+    { cat: 'Labor', desc: 'Carpentry labor', qty: 16, unit: 'hr', price: 60, taxable: false },
+    { cat: 'Materials', desc: 'Lumber & hardware', qty: 1, unit: 'job', price: 800, taxable: true },
+  ],
+  Concrete: [
+    { cat: 'Labor', desc: 'Forming & pour', qty: 16, unit: 'hr', price: 60, taxable: false },
+    { cat: 'Materials', desc: 'Concrete & rebar', qty: 8, unit: 'yd', price: 160, taxable: true },
+  ],
+  Landscaping: [
+    { cat: 'Labor', desc: 'Site prep & planting', qty: 16, unit: 'hr', price: 45, taxable: false },
+    { cat: 'Materials', desc: 'Plants, soil & materials', qty: 1, unit: 'job', price: 500, taxable: true },
+  ],
+  Demolition: [
+    { cat: 'Labor', desc: 'Demolition labor', qty: 16, unit: 'hr', price: 50, taxable: false },
+    { cat: 'Equipment', desc: 'Dumpster & disposal', qty: 1, unit: 'job', price: 450, taxable: true },
+  ],
+};
+const STARTER_GENERIC: StarterItem[] = [
+  { cat: 'Labor', desc: 'Labor', qty: 16, unit: 'hr', price: 55, taxable: false },
+  { cat: 'Materials', desc: 'Materials', qty: 1, unit: 'job', price: 500, taxable: true },
+];
+
+// Builds an editable base estimate from the selected services × regional multiplier — used when the
+// AI fails/offline so the screen is never a dead end. Unknown services fall back to a generic pair.
+export function buildStarterEstimate(services: string[], regionMult = 1): LineItem[] {
+  const base: StarterItem[] = [];
+  const picked = (services || []).filter((s) => STARTER_CATALOG[s]);
+  if (picked.length) picked.forEach((s) => base.push(...STARTER_CATALOG[s]));
+  else base.push(...STARTER_GENERIC);
+  const m = regionMult > 0 ? regionMult : 1;
+  return base.map((it, i) => ({ id: i + 1, cat: it.cat, desc: it.desc, qty: it.qty, unit: it.unit, price: Math.round(it.price * m * 100) / 100, taxable: it.taxable }));
+}

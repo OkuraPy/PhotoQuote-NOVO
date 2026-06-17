@@ -1,4 +1,4 @@
-import { calcTotals, deriveStage } from '../../data';
+import { buildStarterEstimate, calcTotals, deriveStage } from '../../data';
 import type { LineItem } from '../../data';
 
 const item = (over: Partial<LineItem> = {}): LineItem => ({
@@ -58,5 +58,36 @@ describe('deriveStage', () => {
   it('a paid invoice → Paid (case-insensitive)', () => {
     expect(deriveStage('Approved', 'Paid')).toBe('Paid');
     expect(deriveStage('Approved', 'paid')).toBe('Paid');
+  });
+});
+
+describe('buildStarterEstimate', () => {
+  it('uses the catalog for a known service', () => {
+    const items = buildStarterEstimate(['Painting'], 1);
+    expect(items.length).toBe(3);
+    expect(items.every((i) => i.price > 0)).toBe(true);
+    expect(items.some((i) => i.taxable)).toBe(true);
+  });
+
+  it('combines multiple services with unique ids', () => {
+    const items = buildStarterEstimate(['Painting', 'Roofing'], 1);
+    expect(items.length).toBe(6);
+    expect(new Set(items.map((i) => i.id)).size).toBe(6);
+  });
+
+  it('falls back to a generic pair for empty/unknown services', () => {
+    expect(buildStarterEstimate([], 1).length).toBe(2);
+    expect(buildStarterEstimate(['Nonexistent'], 1).length).toBe(2);
+  });
+
+  it('applies the regional multiplier to prices', () => {
+    const base = buildStarterEstimate(['Painting'], 1);
+    const scaled = buildStarterEstimate(['Painting'], 1.2);
+    expect(scaled[0].price).toBeCloseTo(Math.round(base[0].price * 1.2 * 100) / 100);
+  });
+
+  it('guards against a non-positive multiplier', () => {
+    const base = buildStarterEstimate(['Painting'], 1);
+    expect(buildStarterEstimate(['Painting'], 0)[0].price).toBe(base[0].price);
   });
 });

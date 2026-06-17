@@ -4,6 +4,11 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 04:45] — feat: v2 Fase F1 — orçamento-base offline quando a IA falha
+- **O que mudou**: se a IA não responde (erro/sem internet), o EstimateScreen oferece **"Starter estimate"** — um orçamento-base determinístico montado a partir dos serviços selecionados (catálogo por tipo: Painting/Roofing/Flooring/Drywall/Plumbing/Electrical/Carpentry/Concrete/Landscaping/Demolition) × multiplicador regional, totalmente editável. Acaba a "tela vazia" no erro. `buildStarterEstimate` em `data.ts` (função pura) + 5 testes.
+- **Arquivos**: `src/v2/data.ts`, `src/v2/screens/Flow.tsx`, `src/v2/lib/__tests__/data.test.ts`
+- **Validação**: `tsc` limpo, `npm test` 15/15.
+
 ### [2026-06-17 04:30] — fix: v2 — revisão geral A–E (limpeza de mock no Job + fatura mais recente em fetchJobs)
 - **O que mudou** (revisão holística de todas as fases de hoje, 2 revisores: integração + banco):
   - Removidos os últimos imports mock `CLIENTS`/`COMPANY` do `Job.tsx` (footgun: um cliente real com nome igual a um mock poderia ligar a dados falsos se a lógica mudasse; hoje o caminho de job existente usa `realClient`).

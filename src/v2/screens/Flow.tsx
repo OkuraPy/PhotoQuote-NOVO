@@ -8,7 +8,7 @@ import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } fr
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { calcTotals, fmt, LineItem, split } from '../data';
+import { buildStarterEstimate, calcTotals, fmt, LineItem, split } from '../data';
 import { MAX_AI_PHOTOS, requestEstimate, transcribeAudio } from '../lib/ai';
 import { createClient, createJob, fetchClients, fetchCompanyProfile, getMyLocation, lookupZip, Region } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -413,7 +413,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
               <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 3, lineHeight: 18 }}>{reason}</Text>
               <Row style={{ gap: 10, marginTop: 12 }}>
                 <Btn variant="soft" sm icon="sparkles" title="Try again" onPress={runAI} style={{ paddingHorizontal: 16 }} />
-                <Btn variant="ghost" sm title="Add manually" onPress={() => { up({ items: [], confidence: 0, aiNotes: '' }); setPhase('done'); }} style={{ paddingHorizontal: 16 }} />
+                <Btn variant="ghost" sm title="Starter estimate" onPress={() => { up({ items: buildStarterEstimate(store.svcs, store.regionMult), confidence: 0, aiNotes: 'Starter estimate (AI unavailable) — review and edit the items below.' }); setPhase('done'); }} style={{ paddingHorizontal: 16 }} />
               </Row>
             </View>
           </Card>
