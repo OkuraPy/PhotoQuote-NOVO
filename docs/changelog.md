@@ -4,6 +4,16 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 02:55] — feat: v2 Fase D (núcleo) — acompanhamento da obra real (fases, fotos, link do cliente)
+- **O que mudou**: a aba **Progress** do Trabalho saiu do mock e virou real, ligada ao backend que o portal do cliente já consome.
+  - **Fases reais** (`fetchPhases`): lê `project_phases` (status not_started/in_progress/completed, ordem, notas) + as fotos de cada fase.
+  - **CRUD de fase**: adicionar (bottom sheet), avançar status (toque cicla not_started→in_progress→completed), excluir. `createPhase`/`updatePhase`/`deletePhase` (delete confia no CASCADE das FKs).
+  - **Fotos por fase** (`addPhasePhotos`): galeria → resize/JPEG → upload pro bucket público `phase-photos` → grava `phase_photos`.
+  - **Link do cliente** (`ensureShareToken`): gera/reusa `project_share_tokens` (32 hex via expo-crypto) e carimba `projects.activated_at` (início, usado pelo portal); compartilha `/p/<token>`.
+- **Arquivos**: `src/v2/lib/api.ts`, `src/v2/screens/Job.tsx`
+- **Verificado**: bucket `phase-photos` público existe; RLS das 3 tabelas é `user_id = auth.uid()` (app grava user_id em tudo → passa); FKs dos filhos são ON DELETE CASCADE; `project_phases.estimate_id` NOT NULL (passado do job). `tsc` limpo, `npm test` 10/10.
+- **Falta (Fase D parte 2)**: comentários (ler do cliente + responder); editar nome/nota da fase; provar no device (criar fase → subir foto → abrir o link no portal).
+
 ### [2026-06-17 02:35] — fix: v2 — revisão da Fase C (CHECK de range no depósito)
 - **O que mudou**: revisão adversarial da Fase C (2 revisores: código + banco) não achou bug de correção. Como defesa em profundidade, adicionado CHECK `0–100` em `users.default_deposit_percent` e `invoices.deposit_percent` (a UI já limita; o CHECK garante no banco contra valores absurdos).
 - **Arquivos**: `supabase/migrations/20260617023500_deposit_percent_range_check.sql`

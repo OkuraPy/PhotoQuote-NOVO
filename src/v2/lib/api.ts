@@ -518,3 +518,120 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
     agreement: agr ? { id: agr.id, token: agr.token, status: agr.status, signedName: agr.signed_name, signedDate: agr.signed_date } : null,
   };
 }
+
+/* ---------------- Progress: phases, photos, client share link ---------------- */
+const PHASE_BUCKET = 'phase-photos';
+export type PhaseStatus = 'not_started' | 'in_progress' | 'completed';
+export type PhasePhoto = { id: string; url: string; caption: string | null };
+export type ProgressPhase = {
+  id: string;
+  name: string;
+  status: PhaseStatus;
+  order: number;
+  notes: string | null;
+  visibleToClient: boolean;
+  photos: PhasePhoto[];
+};
+
+export async function fetchPhases(projectId: string): Promise<ProgressPhase[]> {
+  const { data: phases, error } = await supabase
+    .from('project_phases')
+    .select('id, name, status, phase_order, notes, is_visible_to_client')
+    .eq('project_id', projectId)
+    .order('phase_order', { ascending: true });
+  if (error) throw error;
+  const ids = (phases || []).map((p: any) => p.id);
+  const byPhase = new Map<string, PhasePhoto[]>();
+  if (ids.length) {
+    const { data: photos } = await supabase
+      .from('phase_photos')
+      .select('id, phase_id, file_url, caption, display_order')
+      .in('phase_id', ids)
+      .order('display_order', { ascending: true });
+    (photos || []).forEach((ph: any) => {
+      const arr = byPhase.get(ph.phase_id) || [];
+      arr.push({ id: ph.id, url: ph.file_url, caption: ph.caption ?? null });
+      byPhase.set(ph.phase_id, arr);
+    });
+  }
+  return (phases || []).map((p: any) => ({
+    id: p.id,
+    name: p.name || 'Phase',
+    status: (p.status || 'not_started') as PhaseStatus,
+    order: p.phase_order ?? 0,
+    notes: p.notes ?? null,
+    visibleToClient: p.is_visible_to_client !== false,
+    photos: byPhase.get(p.id) || [],
+  }));
+}
+
+// project_phases.estimate_id is NOT NULL — the caller passes the job's estimate id.
+export async function createPhase(userId: string, projectId: string, estimateId: string, name: string, order: number): Promise<void> {
+  const { error } = await supabase.from('project_phases').insert({
+    project_id: projectId,
+    estimate_id: estimateId,
+    user_id: userId,
+    name: name.trim() || 'Phase',
+    phase_order: order,
+    status: 'not_started',
+    is_visible_to_client: true,
+  });
+  if (error) throw error;
+}
+
+export async function updatePhase(id: string, patch: { name?: string; status?: PhaseStatus; notes?: string | null; is_visible_to_client?: boolean }): Promise<void> {
+  const { error } = await supabase.from('project_phases').update(patch).eq('id', id);
+  if (error) throw error;
+}
+
+export async function deletePhase(id: string): Promise<void> {
+  // phase_photos & phase_comments FK to project_phases are ON DELETE CASCADE — deleting the phase
+  // removes them automatically (storage objects are left as harmless orphans, same as elsewhere).
+  const { error } = await supabase.from('project_phases').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// Resize + upload photos to the public `phase-photos` bucket and link them to the phase.
+// Best-effort: a photo that fails is skipped. Returns how many were added.
+export async function addPhasePhotos(userId: string, projectId: string, phaseId: string, photos: Photo[]): Promise<number> {
+  const { count } = await supabase.from('phase_photos').select('id', { count: 'exact', head: true }).eq('phase_id', phaseId);
+  let order = count || 0;
+  let added = 0;
+  for (const photo of photos) {
+    try {
+      const m = await ImageManipulator.manipulateAsync(photo.uri, [{ resize: { width: 1280 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true });
+      if (!m.base64) continue;
+      const path = `${userId}/${projectId}/${phaseId}/${Crypto.randomUUID()}.jpg`;
+      const { error: upErr } = await supabase.storage.from(PHASE_BUCKET).upload(path, decode(m.base64), { contentType: 'image/jpeg', upsert: true });
+      if (upErr) continue;
+      const { data } = supabase.storage.from(PHASE_BUCKET).getPublicUrl(path);
+      if (!data?.publicUrl) continue;
+      const { error: insErr } = await supabase.from('phase_photos').insert({ phase_id: phaseId, project_id: projectId, user_id: userId, file_url: data.publicUrl, display_order: order++ });
+      if (!insErr) added++;
+    } catch {
+      /* skip a photo that fails, never block the others */
+    }
+  }
+  return added;
+}
+
+export const progressLink = (token: string) => `${PORTAL_URL}/p/${token}`;
+
+// Returns the project's active client-progress token, creating one (and stamping activated_at,
+// which the portal uses as the start date) on first use.
+export async function ensureShareToken(userId: string, projectId: string): Promise<string> {
+  const { data: existing } = await supabase
+    .from('project_share_tokens')
+    .select('token')
+    .eq('project_id', projectId)
+    .eq('is_active', true)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existing?.token) return existing.token;
+  const token = Crypto.randomUUID().replace(/-/g, ''); // 32 hex chars
+  const { error } = await supabase.from('project_share_tokens').insert({ project_id: projectId, user_id: userId, token, is_active: true });
+  if (error) throw error;
+  await supabase.from('projects').update({ activated_at: new Date().toISOString() }).eq('id', projectId).is('activated_at', null);
+  return token;
+}

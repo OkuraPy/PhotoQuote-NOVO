@@ -1,14 +1,15 @@
 // PhotoQuote v2 — Job screen: timeline + Quote / Invoice / Contract / Progress tabs
 import React, { useState } from 'react';
-import { Alert, Image, Pressable, Share, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Pressable, Share, ScrollView, Text, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
 import { calcTotals, CLIENTS, COMPANY, fmt, LineItem, split, STAGES } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { agreementLink, createAgreement, createInvoice, deriveStage, fetchCompanyProfile, fetchJobDetail, JobDetail, updateEstimateStatus, updateInvoiceStatus } from '../lib/api';
+import { addPhasePhotos, agreementLink, createAgreement, createInvoice, createPhase, deletePhase, deriveStage, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, JobDetail, progressLink, ProgressPhase, PhaseStatus, updateEstimateStatus, updateInvoiceStatus, updatePhase } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { sendDoc } from '../lib/send';
-import { Between, Btn, Card, CatChip, Divider, Nav, NavBtn, PhotoTile, Row, SectionTitle, SendSheet, StageChip, useStore } from '../ui';
+import { Between, Btn, Card, CatChip, Divider, Empty, Field, Input, Nav, NavBtn, Row, SectionTitle, SendSheet, Sheet, StageChip, useStore } from '../ui';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
@@ -212,7 +213,7 @@ export function JobScreen({ go, back, params }: NavProp) {
         {tab === 'quote' && <QuoteTab items={items} totals={quoteTotals} go={go} photos={detail?.photoUrls || []} />}
         {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} company={company} invoice={inv} genning={genningInv} onGen={generateInvoice} setSheet={(b: boolean) => up({ sheet: b })} />}
         {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={invoiceTotals} depositPercent={inv?.depositPercent ?? 25} company={company} genning={genningContract} onGenerate={generateContract} />}
-        {tab === 'progress' && <ProgressTab />}
+        {tab === 'progress' && <ProgressTab projectId={projectId} estimateId={est?.id || null} userId={user?.id || null} />}
       </ScrollView>
 
       <SendSheet
@@ -472,59 +473,141 @@ function ContractTab({ agreement, hasInvoice, totals, depositPercent, company, g
   );
 }
 
-function ProgressTab() {
-  const phases = [
-    { name: 'Prep & masking', status: 'completed', photos: 4, note: 'Surfaces washed, trim taped.' },
-    { name: 'Priming', status: 'in_progress', photos: 2, note: 'North & east walls primed.' },
-    { name: 'Top coat', status: 'not_started', photos: 0 },
-    { name: 'Final walkthrough', status: 'not_started', photos: 0 },
-  ];
-  const map: Record<string, [string, string, string]> = {
-    completed: [colors.success, colors.successTint, 'Done'],
-    in_progress: [colors.info, colors.infoTint, 'In progress'],
-    not_started: [colors.faint, colors.bg, 'Not started'],
+const PHASE_STAT: Record<PhaseStatus, [string, string, string]> = {
+  completed: [colors.success, colors.successTint, 'Done'],
+  in_progress: [colors.info, colors.infoTint, 'In progress'],
+  not_started: [colors.faint, colors.bg, 'Not started'],
+};
+const NEXT_PHASE_STATUS: Record<PhaseStatus, PhaseStatus> = { not_started: 'in_progress', in_progress: 'completed', completed: 'not_started' };
+
+function ProgressTab({ projectId, estimateId, userId }: { projectId: string | null; estimateId: string | null; userId: string | null }) {
+  const qc = useQueryClient();
+  const { data: phases = [], isLoading } = useQuery({ queryKey: ['phases', projectId], queryFn: () => fetchPhases(projectId!), enabled: !!projectId });
+  const [sheet, setSheet] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const refresh = () => qc.invalidateQueries({ queryKey: ['phases', projectId] });
+
+  if (!projectId) {
+    return <View style={{ marginTop: 16 }}><Empty icon="layers" title="Save the job first" body="Create the estimate, then track the work in phases the client can follow." /></View>;
+  }
+
+  const addPhase = async () => {
+    if (!userId || !estimateId) { Alert.alert('Estimate needed', 'Generate the estimate first, then add phases.'); return; }
+    if (!newName.trim()) return;
+    setBusy(true);
+    try {
+      await createPhase(userId, projectId, estimateId, newName.trim(), phases.length);
+      setNewName('');
+      setSheet(false);
+      refresh();
+    } catch (e: any) {
+      Alert.alert('Could not add phase', e?.message || 'Try again.');
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const cycleStatus = async (p: ProgressPhase) => {
+    try {
+      await updatePhase(p.id, { status: NEXT_PHASE_STATUS[p.status] });
+      refresh();
+    } catch (e: any) {
+      Alert.alert('Could not update', e?.message || 'Try again.');
+    }
+  };
+
+  const removePhase = (p: ProgressPhase) => {
+    Alert.alert('Delete phase?', `Remove "${p.name}" and its photos? This can't be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => { try { await deletePhase(p.id); refresh(); } catch (e: any) { Alert.alert('Error', e?.message || 'Could not delete.'); } } },
+    ]);
+  };
+
+  const addPhotos = async (p: ProgressPhase) => {
+    if (!userId) return;
+    const res = await ImagePicker.launchImageLibraryAsync({ allowsMultipleSelection: true, quality: 0.8, selectionLimit: 10 });
+    if (res.canceled || !res.assets?.length) return;
+    try {
+      const n = await addPhasePhotos(userId, projectId, p.id, res.assets.map((a) => ({ uri: a.uri })));
+      refresh();
+      if (!n) Alert.alert('Upload failed', 'No photos were added. Try again.');
+    } catch (e: any) {
+      Alert.alert('Could not add photos', e?.message || 'Try again.');
+    }
+  };
+
+  const shareWithClient = async () => {
+    if (!userId) return;
+    setSharing(true);
+    try {
+      const token = await ensureShareToken(userId, projectId);
+      await Share.share({ message: `Track your project's progress here:\n${progressLink(token)}` });
+    } catch (e: any) {
+      Alert.alert('Could not create the link', e?.message || 'Try again.');
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const done = phases.filter((p) => p.status === 'completed').length;
+
   return (
     <View style={{ marginTop: 16 }}>
       <Between style={{ marginBottom: 14 }}>
-        <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>2 of 4 phases</Text>
-        <Row style={{ gap: 5 }}>
-          <Icon name="link" size={14} color={colors.primary} />
-          <Text style={{ fontFamily: fonts.bold, fontSize: 13.5, color: colors.primary }}>Client link</Text>
-        </Row>
+        <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{phases.length ? `${done} of ${phases.length} phases` : 'Work phases'}</Text>
+        <Pressable onPress={shareWithClient} disabled={sharing} hitSlop={8}>
+          <Row style={{ gap: 5 }}>
+            <Icon name="link" size={14} color={colors.primary} />
+            <Text style={{ fontFamily: fonts.bold, fontSize: 13.5, color: colors.primary }}>{sharing ? 'Working…' : 'Client link'}</Text>
+          </Row>
+        </Pressable>
       </Between>
-      <View style={{ gap: 12 }}>
-        {phases.map((p, i) => {
-          const [c, bg, lab] = map[p.status];
-          return (
-            <Card key={i} pad>
-              <Between>
-                <Row style={{ gap: 11 }}>
-                  <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: bg, alignItems: 'center', justifyContent: 'center' }}>
-                    {p.status === 'completed' ? <Icon name="check" size={17} sw={3} color={c} /> : <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: c }}>{i + 1}</Text>}
-                  </View>
-                  <View>
-                    <Text style={{ fontFamily: fonts.extrabold, fontSize: 14.5, color: colors.ink }}>{p.name}</Text>
-                    <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: c }}>{lab}</Text>
-                  </View>
-                </Row>
-                {p.photos > 0 ? (
-                  <Row style={{ gap: 5, backgroundColor: colors.chipBg, borderRadius: 7, paddingVertical: 4, paddingHorizontal: 9 }}>
-                    <Icon name="image" size={13} color="#4A5260" />
-                    <Text style={{ fontFamily: fonts.bold, fontSize: 11, color: '#4A5260' }}>{p.photos}</Text>
+
+      {isLoading ? (
+        <View style={{ paddingVertical: 24, alignItems: 'center' }}><ActivityIndicator color={colors.primary} /></View>
+      ) : phases.length === 0 ? (
+        <Card pad style={{ alignItems: 'center', paddingVertical: 22 }}>
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.muted, textAlign: 'center', lineHeight: 19 }}>No phases yet. Add the first one to start tracking the work — your client follows it through the shared link.</Text>
+        </Card>
+      ) : (
+        <View style={{ gap: 12 }}>
+          {phases.map((p, i) => {
+            const [c, bg, lab] = PHASE_STAT[p.status];
+            return (
+              <Card key={p.id} pad>
+                <Between>
+                  <Row style={{ gap: 11, flex: 1 }}>
+                    <Pressable onPress={() => cycleStatus(p)} style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: bg, alignItems: 'center', justifyContent: 'center' }}>
+                      {p.status === 'completed' ? <Icon name="check" size={17} sw={3} color={c} /> : <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: c }}>{i + 1}</Text>}
+                    </Pressable>
+                    <Pressable onPress={() => cycleStatus(p)} style={{ flex: 1 }}>
+                      <Text style={{ fontFamily: fonts.extrabold, fontSize: 14.5, color: colors.ink }}>{p.name}</Text>
+                      <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: c }}>{lab} · tap to advance</Text>
+                    </Pressable>
                   </Row>
+                  <Pressable onPress={() => removePhase(p)} hitSlop={8}><Icon name="trash" size={16} color={colors.faint} /></Pressable>
+                </Between>
+                {p.notes ? <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 8, lineHeight: 19 }}>{p.notes}</Text> : null}
+                {p.photos.length ? (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 12 }}>
+                    {p.photos.map((ph) => <Image key={ph.id} source={{ uri: ph.url }} style={{ width: 64, height: 64, borderRadius: 10, backgroundColor: colors.chipBg }} />)}
+                  </ScrollView>
                 ) : null}
-              </Between>
-              {p.note ? <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 8, lineHeight: 19 }}>{p.note}</Text> : null}
-              {p.photos > 0 ? (
-                <Row style={{ gap: 8, marginTop: 12 }}>
-                  {Array.from({ length: Math.min(p.photos, 4) }).map((_, k) => <PhotoTile key={k} seed={i + k} size={54} radius={10} />)}
-                </Row>
-              ) : null}
-            </Card>
-          );
-        })}
-      </View>
+                <Btn variant="ghost" sm icon="camera" title={p.photos.length ? 'Add more photos' : 'Add progress photos'} onPress={() => addPhotos(p)} style={{ marginTop: 12 }} />
+              </Card>
+            );
+          })}
+        </View>
+      )}
+
+      <Btn icon="plus" title="Add phase" variant="soft" onPress={() => setSheet(true)} style={{ marginTop: 14 }} />
+
+      <Sheet open={sheet} onClose={() => setSheet(false)} title="New phase" sub="e.g. Prep & masking, Priming, Top coat, Final walkthrough.">
+        <Field label="Phase name"><Input value={newName} onChangeText={setNewName} placeholder="Phase name" autoFocus /></Field>
+        <Btn title={busy ? 'Adding…' : 'Add phase'} disabled={busy} onPress={addPhase} />
+      </Sheet>
     </View>
   );
 }
