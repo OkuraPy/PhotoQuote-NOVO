@@ -4,6 +4,12 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 06:50] — fix: v2 — desabilita expo-updates (corrige CRASH no boot do TestFlight)
+- **O que mudou**: `updates.enabled: false` no `app.json`. O **build 18 (1º build nativo do v2) crashava no launch** no TestFlight. Diagnóstico via 3 crash logs (.ips) enviados pelo dono: **SIGABRT/abort() na thread da queue `expo.controller.errorRecoveryQueue`** → o **expo-updates** lançava uma NSException não capturada no boot (stack: `NSException raise → PhotoQuoteAI`). O expo-updates fica DESLIGADO no Expo Go (via `EXPO_GO_DEV`) e LIGA só no build de produção → por isso o crash só apareceu no app instalado, nunca no teste rápido.
+- **Arquivos**: `app.json`
+- **Decisão técnica**: desligar o OTA (expo-updates) estabiliza o boot; o dono não precisa de OTA agora. URL mantida no config pra religar/diagnosticar depois. Antes de concluir, baixei o próprio `.ipa` do build 18 e verifiquei que Supabase (URL+anon key), fontes e o embedded manifest estavam no bundle → descartei essas hipóteses; só os crash logs nativos cravaram a causa (expo-updates).
+- **Bug corrigido**: crash imediato no launch do build 18.
+
 ### [2026-06-17 06:30] — chore: v2 Fase J — build 18 ENVIADO pra Apple (TestFlight)
 - **O que mudou**: build de produção iOS (**v2.0.0, build 18**) compilado no EAS e **enviado pro App Store Connect / TestFlight** com sucesso. `buildNumber` 17→18 (autoIncrement do EAS, refletido no `app.json`). Apple processando (~5-10 min) antes de liberar no TestFlight.
 - **Arquivos**: `app.json` (buildNumber 18)
