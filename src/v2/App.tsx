@@ -54,6 +54,7 @@ function Loading({ label }: { label: string }) {
 }
 
 export default function V2App() {
+  console.log('[BOOT] V2App render; colors.primary=', colors?.primary);
   const [loaded, error] = useFonts({
     Manrope_400Regular,
     Manrope_500Medium,
@@ -63,6 +64,7 @@ export default function V2App() {
     SpaceGrotesk_500Medium,
     SpaceGrotesk_600SemiBold,
   });
+  console.log('[BOOT] fonts loaded=', loaded, 'fontError=', !!error);
   const [timedOut, setTimedOut] = React.useState(false);
   React.useEffect(() => {
     const id = setTimeout(() => setTimedOut(true), 4000);

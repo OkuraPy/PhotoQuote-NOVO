@@ -123,6 +123,7 @@ function AppFlow() {
 
 export function Navigator() {
   const { session, loading } = useAuth();
+  console.log('[BOOT] Navigator render; loading=', loading, 'hasSession=', !!session);
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}>

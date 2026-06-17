@@ -4,6 +4,11 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 15:55] — fix: v2 — REMOVE expo-updates de vez (corrige tela branca no build de release)
+- **O que mudou**: removido o pacote **`expo-updates`** + toda a config (`updates`/`runtimeVersion` no `app.json`, `channel` nos 3 perfis do `eas.json`). **DIAGNÓSTICO definitivo via túnel Expo Go**: montei um túnel (`expo start --tunnel`, SDK 54) e instrumentei o boot com logs `[BOOT]`. Os logs (ao vivo no Metro) provaram que o app **BOOTA 100%**: `index.ts → V2App (colors.primary ok) → fonts loaded=true → Navigator loading=false hasSession=true` → renderiza a HomeScreen logado. Ou seja, **o código está OK e o problema é EXCLUSIVO do build de release** (o dono confirmou: abre no Expo Go, tela branca só no TestFlight). O `expo-updates` (que já causou o crash do build 18; eu só tinha desligado com `enabled:false` nos builds 19/20) continuava impedindo o bundle JS de ser carregado no app instalado → tela branca sem erro. Removê-lo faz o app carregar o `main.jsbundle` embarcado pelo caminho padrão do RN.
+- **Arquivos**: `package.json`, `package-lock.json`, `app.json`, `eas.json`; logs `[BOOT]` temporários em `index.ts`, `src/v2/App.tsx`, `src/v2/Navigator.tsx`.
+- **Bug corrigido**: tela branca no boot do build de release (builds 18–20). Mantidas as melhorias defensivas da instrumentação (ErrorBoundary global, timeout de fontes/sessão).
+
 ### [2026-06-17 07:10] — fix: v2 — instrumenta o boot p/ diagnosticar TELA BRANCA (TestFlight)
 - **O que mudou**: o build 19 (expo-updates off) **parou de crashar** — abre, mas fica em **tela branca estática** (não muda ao esperar/reabrir). Tela branca NÃO gera crash log, então instrumentei o boot pra trocar "branco" por telas COLORIDAS com texto/erro e descobrir onde trava: (1) **ErrorBoundary** global → erro de render vira tela rosa com mensagem+stack; (2) **useFonts com timeout de 4s** → nunca trava no splash por fontes (renderiza mesmo sem elas); (3) loading inicial + loading do Navigator com fundo **esmeralda + texto** ("Starting…"/"Connecting…"), distinguível de branco; (4) `auth.getSession` com `.catch` + timeout de 6s → não trava o loading se a sessão emperrar.
 - **Arquivos**: `src/v2/App.tsx`, `src/v2/lib/auth.tsx`, `src/v2/Navigator.tsx`
