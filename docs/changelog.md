@@ -4,6 +4,12 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 06:00] — fix: v2 — revisão da Fase G (ui.tsx traduzido: status/abas/envio + ajustes ES/PT)
+- **O que mudou** (fecha a tradução): `ui.tsx` internacionalizado — rótulos de **status** (`StageChip` + Timeline + filtros: Draft/Quoted/Sent/Approved/Invoiced/Paid traduzidos, **valor lógico preservado**), **TabBar** (Início/Trabalhos/Clientes/Perfil), **SendSheet** (título + opções Email/SMS/WhatsApp/PDF, **valor passado a `onSent`/`sendDoc` mantido em EN**), e o "optional" dos campos. Ajustes: "Pipeline" (ES, era "Embudo") e a confirmação de exclusão de cliente virou 2 chaves (singular/plural) com concordância correta em ES/PT.
+- **Arquivos**: `src/v2/ui.tsx`, `src/v2/screens/Job.tsx`, `src/v2/screens/Tabs.tsx`, `src/v2/screens/Misc.tsx`
+- **Revisão adversarial**: lógica 100% preservada (Stage/status/author_type/categorias/rotas/query-keys como dado), `t` sem colisão (`tr` no Flow/SendSheet), templates `{var}` conferidos, 0 chaves órfãs. `tsc` limpo, `npm test` 15/15.
+- **Pendência 🟡 menor**: datas ainda formatadas em `en-US` (formato, não tradução). **Fase G COMPLETA.**
+
 ### [2026-06-17 05:40] — feat: v2 Fase G (telas) — strings extraídas e traduzidas (EN/ES/PT)
 - **O que mudou**: as 5 telas principais (Auth, Tabs, Flow, Job, Misc) tiveram as strings de UI extraídas para o i18n e traduzidas para **inglês, espanhol e português** (~330 chaves). Cada tela registra suas strings (`registerStrings`) e lê via `t()`. Trocar o idioma no Perfil → Language muda o app inteiro. Stage/status, ícones, campos do banco e a lógica foram preservados (hooks `t` renomeados onde colidiam: `tr`/`v`/`id`).
 - **Arquivos**: `src/v2/screens/{Auth,Tabs,Flow,Job,Misc}.tsx`

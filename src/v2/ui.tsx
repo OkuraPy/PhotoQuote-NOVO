@@ -16,6 +16,36 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Icon } from './Icon';
 import { colors, fonts, radii, shadow, Stage, stageColors } from './theme';
+import { registerStrings, useT } from './lib/i18n';
+
+registerStrings({
+  'ui.optional': { en: 'optional', es: 'opcional', pt: 'opcional' },
+  // pipeline stage labels (the Stage value stays English in logic; only the label is translated)
+  'stage.Draft': { en: 'Draft', es: 'Borrador', pt: 'Rascunho' },
+  'stage.Quoted': { en: 'Quoted', es: 'Cotizado', pt: 'Orçado' },
+  'stage.Sent': { en: 'Sent', es: 'Enviado', pt: 'Enviado' },
+  'stage.Approved': { en: 'Approved', es: 'Aprobado', pt: 'Aprovado' },
+  'stage.Invoiced': { en: 'Invoiced', es: 'Facturado', pt: 'Faturado' },
+  'stage.Paid': { en: 'Paid', es: 'Pagado', pt: 'Pago' },
+  // bottom tab bar
+  'ui.tab.home': { en: 'Home', es: 'Inicio', pt: 'Início' },
+  'ui.tab.jobs': { en: 'Jobs', es: 'Trabajos', pt: 'Trabalhos' },
+  'ui.tab.clients': { en: 'Clients', es: 'Clientes', pt: 'Clientes' },
+  'ui.tab.profile': { en: 'Profile', es: 'Perfil', pt: 'Perfil' },
+  // send sheet
+  'ui.sendTitle.quote': { en: 'Send quote', es: 'Enviar cotización', pt: 'Enviar orçamento' },
+  'ui.sendTitle.invoice': { en: 'Send invoice', es: 'Enviar factura', pt: 'Enviar fatura' },
+  'ui.sendTitle.contract': { en: 'Send contract', es: 'Enviar contrato', pt: 'Enviar contrato' },
+  'ui.sendSub': { en: 'Pick how you want to deliver it.', es: 'Elige cómo quieres enviarlo.', pt: 'Escolha como quer enviar.' },
+  'ui.send.email': { en: 'Email', es: 'Correo', pt: 'E-mail' },
+  'ui.send.emailDesc': { en: 'Send a link + PDF to the client', es: 'Envía un enlace + PDF al cliente', pt: 'Envie um link + PDF ao cliente' },
+  'ui.send.sms': { en: 'SMS', es: 'SMS', pt: 'SMS' },
+  'ui.send.smsDesc': { en: 'Text a secure link to view & approve', es: 'Envía un enlace seguro por SMS para ver y aprobar', pt: 'Mande um link seguro por SMS para ver e aprovar' },
+  'ui.send.whatsapp': { en: 'WhatsApp', es: 'WhatsApp', pt: 'WhatsApp' },
+  'ui.send.whatsappDesc': { en: 'Share via WhatsApp message', es: 'Comparte por mensaje de WhatsApp', pt: 'Compartilhe por mensagem do WhatsApp' },
+  'ui.send.pdf': { en: 'Save PDF', es: 'Guardar PDF', pt: 'Salvar PDF' },
+  'ui.send.pdfDesc': { en: 'Export a branded PDF document', es: 'Exporta un PDF con tu marca', pt: 'Exporte um PDF com sua marca' },
+});
 
 /* ============================ shared store ============================ */
 export type V2Store = {
@@ -192,6 +222,7 @@ export const CatChip = ({ label }: { label: string }) => (
 );
 
 export function StageChip({ stage, lg }: { stage: Stage; lg?: boolean }) {
+  const t = useT();
   const s = stageColors[stage];
   return (
     <View
@@ -206,19 +237,20 @@ export function StageChip({ stage, lg }: { stage: Stage; lg?: boolean }) {
       }}
     >
       <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: s.c }} />
-      <Text style={{ fontFamily: fonts.extrabold, fontSize: lg ? 12.5 : 11.5, color: s.c }}>{stage}</Text>
+      <Text style={{ fontFamily: fonts.extrabold, fontSize: lg ? 12.5 : 11.5, color: s.c }}>{t('stage.' + stage)}</Text>
     </View>
   );
 }
 
 /* ============================ forms ============================ */
 export function Field({ label, opt, children }: { label?: string; opt?: boolean; children: React.ReactNode }) {
+  const t = useT();
   return (
     <View style={{ marginBottom: 14 }}>
       {label ? (
         <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.ink2, marginBottom: 7 }}>
           {label}
-          {opt ? <Text style={{ fontFamily: fonts.medium, color: colors.faint }}> · optional</Text> : null}
+          {opt ? <Text style={{ fontFamily: fonts.medium, color: colors.faint }}> · {t('ui.optional')}</Text> : null}
         </Text>
       ) : null}
       {children}
@@ -391,11 +423,12 @@ const navStyles = StyleSheet.create({
 
 /* ============================ bottom tab bar ============================ */
 export function TabBar({ active, onNav }: { active: string; onNav: (k: string) => void }) {
-  const tabs: [string, string, string][] = [
-    ['home', 'Home', 'home'],
-    ['jobs', 'Jobs', 'layers'],
-    ['clients', 'Clients', 'users'],
-    ['profile', 'Profile', 'user'],
+  const t = useT();
+  const tabs: [string, string][] = [
+    ['home', 'home'],
+    ['jobs', 'layers'],
+    ['clients', 'users'],
+    ['profile', 'user'],
   ];
   return (
     <View
@@ -411,12 +444,12 @@ export function TabBar({ active, onNav }: { active: string; onNav: (k: string) =
         borderTopColor: colors.border,
       }}
     >
-      {tabs.map(([k, label, ico]) => {
+      {tabs.map(([k, ico]) => {
         const on = active === k;
         return (
           <Pressable key={k} onPress={() => onNav(k)} style={{ alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 14 }}>
             <Icon name={ico} size={23} sw={on ? 2.4 : 2} color={on ? colors.primary : colors.faint} />
-            <Text style={{ fontFamily: fonts.bold, fontSize: 11, color: on ? colors.primary : colors.faint }}>{label}</Text>
+            <Text style={{ fontFamily: fonts.bold, fontSize: 11, color: on ? colors.primary : colors.faint }}>{t('ui.tab.' + k)}</Text>
           </Pressable>
         );
       })}
@@ -450,26 +483,28 @@ export function Sheet({ open, onClose, title, sub, children }: { open: boolean; 
 }
 
 export function SendSheet({ open, onClose, what = 'quote', onSent }: { open: boolean; onClose: () => void; what?: string; onSent?: (t: string) => void }) {
-  const opts: [string, string, string, string, string][] = [
-    ['mail', 'Email', colors.info, colors.infoTint, 'Send a link + PDF to the client'],
-    ['msg', 'SMS', colors.success, colors.successTint, 'Text a secure link to view & approve'],
-    ['whatsapp', 'WhatsApp', colors.success, colors.successTint, 'Share via WhatsApp message'],
-    ['pdf', 'Save PDF', colors.muted, '#EEF1F4', 'Export a branded PDF document'],
+  const tr = useT();
+  // key = the logical value passed to onSent/sendDoc (must stay English); label/desc are translated
+  const opts: { key: string; ico: string; col: string; bg: string; k: string }[] = [
+    { key: 'Email', ico: 'mail', col: colors.info, bg: colors.infoTint, k: 'email' },
+    { key: 'SMS', ico: 'msg', col: colors.success, bg: colors.successTint, k: 'sms' },
+    { key: 'WhatsApp', ico: 'whatsapp', col: colors.success, bg: colors.successTint, k: 'whatsapp' },
+    { key: 'Save PDF', ico: 'pdf', col: colors.muted, bg: '#EEF1F4', k: 'pdf' },
   ];
   return (
-    <Sheet open={open} onClose={onClose} title={`Send ${what}`} sub="Pick how you want to deliver it.">
-      {opts.map(([ico, t, col, bg, s]) => (
+    <Sheet open={open} onClose={onClose} title={tr('ui.sendTitle.' + what)} sub={tr('ui.sendSub')}>
+      {opts.map((o) => (
         <Pressable
-          key={t}
-          onPress={() => onSent && onSent(t)}
+          key={o.key}
+          onPress={() => onSent && onSent(o.key)}
           style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: colors.border, marginBottom: 10 }}
         >
-          <View style={{ width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: bg }}>
-            <Icon name={ico} size={20} color={col} />
+          <View style={{ width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: o.bg }}>
+            <Icon name={o.ico} size={20} color={o.col} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ fontFamily: fonts.bold, fontSize: 14.5, color: colors.ink }}>{t}</Text>
-            <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 1 }}>{s}</Text>
+            <Text style={{ fontFamily: fonts.bold, fontSize: 14.5, color: colors.ink }}>{tr('ui.send.' + o.k)}</Text>
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 1 }}>{tr('ui.send.' + o.k + 'Desc')}</Text>
           </View>
           <Icon name="chevR" size={18} color="#C2C9D2" />
         </Pressable>

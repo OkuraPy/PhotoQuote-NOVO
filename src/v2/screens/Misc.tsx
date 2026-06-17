@@ -52,7 +52,8 @@ registerStrings({
   'misc.error': { en: 'Error', es: 'Error', pt: 'Erro' },
   'misc.couldNotSaveClient': { en: 'Could not save client.', es: 'No se pudo guardar el cliente.', pt: 'Não foi possível salvar o cliente.' },
   'misc.couldNotDelete': { en: 'Could not delete.', es: 'No se pudo eliminar.', pt: 'Não foi possível excluir.' },
-  'misc.deleteClientHasJobs': { en: "{name} has {count} job{plural}. Deleting keeps {them} but unlinks {them} from this client. This can't be undone.", es: '{name} tiene {count} trabajo{plural}. Al eliminarlo se conserva{plural} pero se desvincula{plural} de este cliente. Esto no se puede deshacer.', pt: '{name} tem {count} trabalho{plural}. Ao excluir, ele{plural} é mantido{plural}, mas desvinculado{plural} deste cliente. Isso não pode ser desfeito.' },
+  'misc.deleteOneJob': { en: "{name} has 1 job. Deleting keeps it but unlinks it from this client. This can't be undone.", es: '{name} tiene 1 trabajo. Al eliminarlo se conserva pero se desvincula de este cliente. Esto no se puede deshacer.', pt: '{name} tem 1 trabalho. Ao excluir, ele é mantido, mas desvinculado deste cliente. Isso não pode ser desfeito.' },
+  'misc.deleteManyJobs': { en: "{name} has {count} jobs. Deleting keeps them but unlinks them from this client. This can't be undone.", es: '{name} tiene {count} trabajos. Al eliminarlos se conservan pero se desvinculan de este cliente. Esto no se puede deshacer.', pt: '{name} tem {count} trabalhos. Ao excluir, eles são mantidos, mas desvinculados deste cliente. Isso não pode ser desfeito.' },
   'misc.removeConfirm': { en: "Remove {name}? This can't be undone.", es: '¿Eliminar a {name}? Esto no se puede deshacer.', pt: 'Remover {name}? Isso não pode ser desfeito.' },
   'misc.deleteClientQ': { en: 'Delete client?', es: '¿Eliminar cliente?', pt: 'Excluir cliente?' },
   'misc.cancel': { en: 'Cancel', es: 'Cancelar', pt: 'Cancelar' },
@@ -235,7 +236,7 @@ export function ClientEditScreen({ back, params }: NavProp) {
     // jobs are kept (FK is ON DELETE SET NULL) — warn that they'll just be unlinked
     const n = await countClientProjects(existing.id).catch(() => 0);
     const msg = n > 0
-      ? t('misc.deleteClientHasJobs', { name: existing.name, count: n, plural: n > 1 ? 's' : '', them: n > 1 ? 'them' : 'it' })
+      ? t(n === 1 ? 'misc.deleteOneJob' : 'misc.deleteManyJobs', { name: existing.name, count: n })
       : t('misc.removeConfirm', { name: existing.name });
     Alert.alert(t('misc.deleteClientQ'), msg, [
       { text: t('misc.cancel'), style: 'cancel' },

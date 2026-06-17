@@ -18,7 +18,7 @@ registerStrings({
   // Home
   'tabs.welcomeBack': { en: 'WELCOME BACK', es: 'BIENVENIDO DE NUEVO', pt: 'BEM-VINDO DE VOLTA' },
   'tabs.yourCompany': { en: 'Your company', es: 'Tu empresa', pt: 'Sua empresa' },
-  'tabs.pipeline': { en: 'Pipeline', es: 'Embudo', pt: 'Pipeline' },
+  'tabs.pipeline': { en: 'Pipeline', es: 'Pipeline', pt: 'Pipeline' },
   'tabs.pipelineMeta': {
     en: '{active} active jobs · {openQuotes} open quotes',
     es: '{active} trabajos activos · {openQuotes} presupuestos abiertos',
@@ -252,7 +252,7 @@ export function JobsScreen({ go }: NavProp) {
               onPress={() => up({ jobFilter: f })}
               style={{ paddingVertical: 5, paddingHorizontal: 13, borderRadius: radii.pill, backgroundColor: filter === f ? colors.primary : colors.card, borderWidth: 1, borderColor: filter === f ? colors.primary : colors.border }}
             >
-              <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: filter === f ? '#fff' : colors.ink2 }}>{f === 'All' ? t('tabs.filterAll') : f}</Text>
+              <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: filter === f ? '#fff' : colors.ink2 }}>{f === 'All' ? t('tabs.filterAll') : t('stage.' + f)}</Text>
             </Pressable>
           ))}
         </ScrollView>

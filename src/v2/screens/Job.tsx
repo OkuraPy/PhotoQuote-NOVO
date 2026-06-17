@@ -153,6 +153,7 @@ const NEXT: Record<Stage, { ico: string; act: string }> = {
 };
 
 function Timeline({ stage }: { stage: Stage }) {
+  const t = useT();
   const idx = STAGES.indexOf(stage);
   return (
     <View style={{ flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 4, paddingTop: 6 }}>
@@ -168,7 +169,7 @@ function Timeline({ stage }: { stage: Stage }) {
                 {done ? <Icon name="check" size={13} sw={3} color="#fff" /> : <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: current ? colors.primary : colors.faint }}>{i + 1}</Text>}
               </View>
             </View>
-            <Text style={{ fontFamily: fonts.bold, fontSize: 9.5, color: current ? colors.primary : colors.muted, textAlign: 'center' }}>{s}</Text>
+            <Text style={{ fontFamily: fonts.bold, fontSize: 9.5, color: current ? colors.primary : colors.muted, textAlign: 'center' }}>{t('stage.' + s)}</Text>
           </View>
         );
       })}
