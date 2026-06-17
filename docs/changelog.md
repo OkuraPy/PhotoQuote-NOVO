@@ -4,6 +4,11 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 05:05] — fix: v2 — ajustes da revisão da Fase F (10 serviços na tela + token 0 no log)
+- **O que mudou**: a tela de criar orçamento (CameraScreen) mostra os **10 tipos de serviço** (de `SERVICE_TYPES`), alinhando com o catálogo do orçamento-base (era só 7); removido o chip "Custom" sem ação. Na Edge Function, o log de tokens preserva `0` em vez de virar `null`. `ai-estimate` redeployada (v5).
+- **Arquivos**: `src/v2/screens/Flow.tsx`, `supabase/functions/ai-estimate/index.ts`
+- **Validação**: `tsc` limpo, `npm test` 15/15.
+
 ### [2026-06-17 04:55] — feat: v2 Fase F2 — log das chamadas de IA (ai_jobs)
 - **O que mudou**: toda chamada da IA (`ai-estimate`) agora é registrada em `public.ai_jobs` — status (done/rejected/error), modelo, nº de fotos, duração (ms), tokens de saída e mensagem de erro. Resolve a dor original ("a IA quebra e não sei por quê") dando rastro pra diagnosticar. Gravado pela Edge Function via service role (best-effort — nunca afeta a resposta); o dono lê só os próprios (RLS por `auth.uid()`); `user_id` extraído do JWT.
 - **Arquivos**: `supabase/migrations/20260617045000_create_ai_jobs.sql`, `supabase/functions/ai-estimate/index.ts`

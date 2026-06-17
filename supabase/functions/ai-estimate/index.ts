@@ -110,7 +110,8 @@ Deno.serve(async (req: Request) => {
       return json({ error: d.error.message || 'OpenAI error' }, 502);
     }
 
-    const outTokens = Number(d?.usage?.output_tokens) || null;
+    const ot = Number(d?.usage?.output_tokens);
+    const outTokens = Number.isFinite(ot) ? ot : null;
 
     const txt: string = (d.output || [])
       .filter((o: any) => o.type === 'message')

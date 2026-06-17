@@ -8,7 +8,7 @@ import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } fr
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { buildStarterEstimate, calcTotals, fmt, LineItem, split } from '../data';
+import { buildStarterEstimate, calcTotals, fmt, LineItem, SERVICE_TYPES, split } from '../data';
 import { MAX_AI_PHOTOS, requestEstimate, transcribeAudio } from '../lib/ai';
 import { createClient, createJob, fetchClients, fetchCompanyProfile, getMyLocation, lookupZip, Region } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -17,8 +17,6 @@ import { Avatar, Between, Btn, Card, Chip, CatChip, DecimalInput, Divider, Field
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
 const actionbar = { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28 };
-
-const SERVICE_7 = ['Painting', 'Roofing', 'Flooring', 'Drywall', 'Plumbing', 'Electrical', 'Carpentry'];
 
 /* ---------------- CAMERA (photo-first, dark) ---------------- */
 export function CameraScreen({ go, back }: NavProp) {
@@ -153,10 +151,9 @@ export function CameraScreen({ go, back }: NavProp) {
           <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.muted }}>· helps the AI</Text>
         </Row>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2, marginTop: 12 }}>
-          {SERVICE_7.map((s) => (
+          {SERVICE_TYPES.map((s) => (
             <Chip key={s} label={s} selected={svcs.includes(s)} onPress={() => toggle(s)} />
           ))}
-          <Chip label="Custom" icon="plus" />
         </ScrollView>
         <DescriptionInput />
 
