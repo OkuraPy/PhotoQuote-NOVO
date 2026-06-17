@@ -4,6 +4,13 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 06:30] — chore: v2 Fase J — build 18 ENVIADO pra Apple (TestFlight)
+- **O que mudou**: build de produção iOS (**v2.0.0, build 18**) compilado no EAS e **enviado pro App Store Connect / TestFlight** com sucesso. `buildNumber` 17→18 (autoIncrement do EAS, refletido no `app.json`). Apple processando (~5-10 min) antes de liberar no TestFlight.
+- **Arquivos**: `app.json` (buildNumber 18)
+- **Decisão técnica**: token Expo do dono validado (logado `rodrigosagach`); credenciais iOS (Distribution Cert + Provisioning Profile, válidos até abr/2027, time GUIVI TECNOLOGIA) **e** a App Store Connect API Key (`4988H39952`, do EAS servers) **já existiam** (do v1) → `eas build` + `eas submit` rodaram **não-interativos**, sem login Apple. `ITSAppUsesNonExemptEncryption=false` dispensa a pergunta de export compliance → vai direto pro TestFlight.
+- **IDs**: build `cbb3fe67-e072-4943-931e-2e5d1b0fa6c4`, submission `5ff752b0-9869-402b-ade9-62d57781c2ab`, ASC App `6761633213`, EAS project `08ab6d86…`.
+- **Nota**: o build EAS compilou em ~4 min (bem mais rápido que builds antigos do v1); a sondagem de credencial acabou executando o submit completo, que era justamente o objetivo (dono pediu "manda pra apple"). Segurança verificada antes: chave OpenAI NÃO vai pro bundle v2.
+
 ### [2026-06-17 06:15] — chore: v2 Fase J — version 2.0.0 (atualização v2 na App Store)
 - **O que mudou**: bump da version **1.0.0 → 2.0.0** (a grande atualização do redesenho v2) em `app.json` e `package.json`, preparando o build de produção. Mantém a identidade do app (bundle `com.photoquoteai.app`, EAS projectId `08ab6d86…`, ascAppId `6761633213`) → entra como **ATUALIZAÇÃO** do app existente. O `buildNumber` é resolvido pelo EAS (`autoIncrement` no perfil `production`), evitando colisão de versão na Apple.
 - **Arquivos**: `app.json`, `package.json`
