@@ -9,19 +9,147 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { addPhaseComment, addPhasePhotos, agreementLink, createAgreement, createInvoice, createPhase, deletePhase, deriveStage, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, JobDetail, progressLink, ProgressPhase, PhaseStatus, updateEstimateStatus, updateInvoiceStatus, updatePhase } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { sendDoc } from '../lib/send';
+import { registerStrings, useT } from '../lib/i18n';
 import { Between, Btn, Card, CatChip, Divider, Empty, Field, Input, Nav, NavBtn, Row, SectionTitle, SendSheet, Sheet, StageChip, useStore } from '../ui';
+
+registerStrings({
+  // NEXT STEP labels (keyed by stage action; Stage values themselves are not translated)
+  'job.nextStep': { en: 'NEXT STEP', es: 'SIGUIENTE PASO', pt: 'PRÓXIMO PASSO' },
+  'job.next.send': { en: 'Send quote', es: 'Enviar cotización', pt: 'Enviar orçamento' },
+  'job.next.approve': { en: 'Mark approved', es: 'Marcar aprobada', pt: 'Marcar aprovado' },
+  'job.next.invoice': { en: 'Generate invoice', es: 'Generar factura', pt: 'Gerar fatura' },
+  'job.next.paid': { en: 'Mark paid', es: 'Marcar pagada', pt: 'Marcar pago' },
+  'job.next.done': { en: 'Paid in full', es: 'Pagada por completo', pt: 'Pago integralmente' },
+  // header / labels
+  'job.noClient': { en: 'No client', es: 'Sin cliente', pt: 'Sem cliente' },
+  'job.newEstimate': { en: 'New estimate', es: 'Nueva cotización', pt: 'Novo orçamento' },
+  'job.jobSuffix': { en: '{svc} job', es: 'Trabajo de {svc}', pt: 'Trabalho de {svc}' },
+  'job.noAddress': { en: 'No address yet', es: 'Aún sin dirección', pt: 'Sem endereço ainda' },
+  // tabs
+  'job.tab.quote': { en: 'Quote', es: 'Cotización', pt: 'Orçamento' },
+  'job.tab.invoice': { en: 'Invoice', es: 'Factura', pt: 'Fatura' },
+  'job.tab.contract': { en: 'Contract', es: 'Contrato', pt: 'Contrato' },
+  'job.tab.progress': { en: 'Progress', es: 'Progreso', pt: 'Progresso' },
+  // alerts
+  'job.alert.estimateNeeded': { en: 'Estimate needed', es: 'Se necesita la cotización', pt: 'Orçamento necessário' },
+  'job.alert.saveEstimateFirst': { en: 'Save the estimate first, then generate the invoice.', es: 'Guarda primero la cotización y luego genera la factura.', pt: 'Salve o orçamento primeiro e depois gere a fatura.' },
+  'job.alert.couldNotCreateInvoice': { en: 'Could not create the invoice', es: 'No se pudo crear la factura', pt: 'Não foi possível criar a fatura' },
+  'job.alert.invoiceNeeded': { en: 'Invoice needed', es: 'Se necesita la factura', pt: 'Fatura necessária' },
+  'job.alert.generateInvoiceFirst': { en: 'Generate the invoice first, then the contract.', es: 'Genera primero la factura y luego el contrato.', pt: 'Gere a fatura primeiro e depois o contrato.' },
+  'job.alert.couldNotCreateContract': { en: 'Could not create the contract', es: 'No se pudo crear el contrato', pt: 'Não foi possível criar o contrato' },
+  'job.alert.couldNotUpdate': { en: 'Could not update', es: 'No se pudo actualizar', pt: 'Não foi possível atualizar' },
+  'job.alert.tryAgain': { en: 'Try again.', es: 'Inténtalo de nuevo.', pt: 'Tente novamente.' },
+  // share messages
+  'job.share.contract': { en: 'Please review and sign your service agreement:\n{link}', es: 'Por favor revisa y firma tu contrato de servicio:\n{link}', pt: 'Por favor, revise e assine seu contrato de serviço:\n{link}' },
+  'job.share.progress': { en: "Track your project's progress here:\n{link}", es: 'Sigue el progreso de tu proyecto aquí:\n{link}', pt: 'Acompanhe o progresso do seu projeto aqui:\n{link}' },
+  // send doc labels
+  'job.doc.invoice': { en: 'Invoice', es: 'Factura', pt: 'Fatura' },
+  'job.doc.agreement': { en: 'Agreement', es: 'Contrato', pt: 'Contrato' },
+  'job.doc.quote': { en: 'Quote', es: 'Cotización', pt: 'Orçamento' },
+  'job.yourCompany': { en: 'Your company', es: 'Tu empresa', pt: 'Sua empresa' },
+  // QuoteTab
+  'job.photos': { en: 'Photos · {n}', es: 'Fotos · {n}', pt: 'Fotos · {n}' },
+  'job.lineItems': { en: 'Line items', es: 'Conceptos', pt: 'Itens' },
+  'job.edit': { en: 'Edit', es: 'Editar', pt: 'Editar' },
+  'job.taxable': { en: 'Taxable', es: 'Gravable', pt: 'Tributável' },
+  'job.noTax': { en: 'No tax', es: 'Sin impuesto', pt: 'Sem imposto' },
+  'job.subtotal': { en: 'Subtotal', es: 'Subtotal', pt: 'Subtotal' },
+  'job.tax': { en: 'Tax ({rate}% on {amount})', es: 'Impuesto ({rate}% sobre {amount})', pt: 'Imposto ({rate}% sobre {amount})' },
+  'job.total': { en: 'Total', es: 'Total', pt: 'Total' },
+  // InvoiceTab
+  'job.noInvoiceYet': { en: 'No invoice yet', es: 'Aún no hay factura', pt: 'Nenhuma fatura ainda' },
+  'job.invoiceFromQuote': { en: 'Generate a professional invoice from this quote. Totals stay in sync automatically.', es: 'Genera una factura profesional a partir de esta cotización. Los totales se mantienen sincronizados automáticamente.', pt: 'Gere uma fatura profissional a partir deste orçamento. Os totais permanecem sincronizados automaticamente.' },
+  'job.generating': { en: 'Generating…', es: 'Generando…', pt: 'Gerando…' },
+  'job.generateInvoice': { en: 'Generate invoice', es: 'Generar factura', pt: 'Gerar fatura' },
+  'job.paidBadge': { en: 'PAID', es: 'PAGADA', pt: 'PAGA' },
+  'job.dueBadge': { en: 'DUE', es: 'POR PAGAR', pt: 'A VENCER' },
+  'job.invoiceLabel': { en: 'Invoice', es: 'Factura', pt: 'Fatura' },
+  'job.issuedDue': { en: 'Issued · Due', es: 'Emitida · Vence', pt: 'Emitida · Vence' },
+  'job.from': { en: 'From', es: 'De', pt: 'De' },
+  'job.billTo': { en: 'Bill to', es: 'Facturar a', pt: 'Faturar para' },
+  'job.totalDue': { en: 'Total due', es: 'Total a pagar', pt: 'Total a pagar' },
+  'job.deposit': { en: 'Deposit ({pct}%)', es: 'Depósito ({pct}%)', pt: 'Entrada ({pct}%)' },
+  'job.paid': { en: 'Paid', es: 'Pagado', pt: 'Pago' },
+  'job.balanceDue': { en: 'Balance due', es: 'Saldo pendiente', pt: 'Saldo devedor' },
+  'job.payTerms': { en: 'Pay by card, ACH or check. Terms: Net 15 from issue date.', es: 'Paga con tarjeta, ACH o cheque. Plazo: Neto 15 desde la fecha de emisión.', pt: 'Pague com cartão, ACH ou cheque. Prazo: 15 dias da emissão.' },
+  'job.pdf': { en: 'PDF', es: 'PDF', pt: 'PDF' },
+  'job.sendInvoice': { en: 'Send invoice', es: 'Enviar factura', pt: 'Enviar fatura' },
+  // ContractTab
+  'job.invoiceNeededFirst': { en: 'Invoice needed first', es: 'Primero se necesita la factura', pt: 'Fatura necessária primeiro' },
+  'job.contractIntro': { en: 'Generate the invoice, then create a service agreement for the client to sign.', es: 'Genera la factura y luego crea un contrato de servicio para que el cliente lo firme.', pt: 'Gere a fatura e depois crie um contrato de serviço para o cliente assinar.' },
+  'job.serviceAgreement': { en: 'Service agreement', es: 'Contrato de servicio', pt: 'Contrato de serviço' },
+  'job.statusSigned': { en: 'SIGNED', es: 'FIRMADO', pt: 'ASSINADO' },
+  'job.statusSent': { en: 'SENT', es: 'ENVIADO', pt: 'ENVIADO' },
+  'job.statusDraft': { en: 'DRAFT', es: 'BORRADOR', pt: 'RASCUNHO' },
+  'job.requiredDeposit': { en: 'Required deposit ({pct}%)', es: 'Depósito requerido ({pct}%)', pt: 'Entrada obrigatória ({pct}%)' },
+  'job.signature': { en: 'Signature', es: 'Firma', pt: 'Assinatura' },
+  'job.signedBy': { en: 'Signed by {name}', es: 'Firmado por {name}', pt: 'Assinado por {name}' },
+  'job.client': { en: 'client', es: 'cliente', pt: 'cliente' },
+  'job.awaitingClient': { en: 'Awaiting client', es: 'Esperando al cliente', pt: 'Aguardando o cliente' },
+  'job.notSentYet': { en: 'Not sent yet', es: 'Aún no enviado', pt: 'Ainda não enviado' },
+  'job.signedOn': { en: 'Signed on', es: 'Firmado el', pt: 'Assinado em' },
+  'job.secureEsignature': { en: 'Secure e-signature', es: 'Firma electrónica segura', pt: 'Assinatura eletrônica segura' },
+  'job.esignSigned': { en: 'The client signed the agreement online — recorded with date and IP.', es: 'El cliente firmó el contrato en línea, registrado con fecha e IP.', pt: 'O cliente assinou o contrato online — registrado com data e IP.' },
+  'job.esignPending': { en: 'The client gets a secure link to review and sign on their phone — legally binding under the ESIGN Act.', es: 'El cliente recibe un enlace seguro para revisar y firmar desde su teléfono, con validez legal bajo la Ley ESIGN.', pt: 'O cliente recebe um link seguro para revisar e assinar pelo celular — com validade legal sob a Lei ESIGN.' },
+  'job.working': { en: 'Working…', es: 'Procesando…', pt: 'Processando…' },
+  'job.resendSigningLink': { en: 'Resend signing link', es: 'Reenviar enlace de firma', pt: 'Reenviar link de assinatura' },
+  'job.generateSendContract': { en: 'Generate & send contract', es: 'Generar y enviar contrato', pt: 'Gerar e enviar contrato' },
+  'job.shareSignedLink': { en: 'Share signed link', es: 'Compartir enlace firmado', pt: 'Compartilhar link assinado' },
+  // ProgressTab — phase statuses
+  'job.phase.done': { en: 'Done', es: 'Hecho', pt: 'Concluído' },
+  'job.phase.inProgress': { en: 'In progress', es: 'En curso', pt: 'Em andamento' },
+  'job.phase.notStarted': { en: 'Not started', es: 'No iniciado', pt: 'Não iniciado' },
+  // ProgressTab — alerts & empties
+  'job.alert.couldNotSend': { en: 'Could not send', es: 'No se pudo enviar', pt: 'Não foi possível enviar' },
+  'job.empty.saveJobTitle': { en: 'Save the job first', es: 'Guarda primero el trabajo', pt: 'Salve o trabalho primeiro' },
+  'job.empty.saveJobBody': { en: 'Create the estimate, then track the work in phases the client can follow.', es: 'Crea la cotización y luego haz seguimiento del trabajo en fases que el cliente pueda seguir.', pt: 'Crie o orçamento e depois acompanhe o trabalho em fases que o cliente pode seguir.' },
+  'job.alert.generateEstimateFirst': { en: 'Generate the estimate first, then add phases.', es: 'Genera primero la cotización y luego agrega fases.', pt: 'Gere o orçamento primeiro e depois adicione fases.' },
+  'job.alert.couldNotAddPhase': { en: 'Could not add phase', es: 'No se pudo agregar la fase', pt: 'Não foi possível adicionar a fase' },
+  'job.alert.deletePhaseTitle': { en: 'Delete phase?', es: '¿Eliminar fase?', pt: 'Excluir fase?' },
+  'job.alert.deletePhaseBody': { en: 'Remove "{name}" and its photos? This can\'t be undone.', es: '¿Eliminar "{name}" y sus fotos? Esto no se puede deshacer.', pt: 'Remover "{name}" e suas fotos? Isso não pode ser desfeito.' },
+  'job.cancel': { en: 'Cancel', es: 'Cancelar', pt: 'Cancelar' },
+  'job.delete': { en: 'Delete', es: 'Eliminar', pt: 'Excluir' },
+  'job.error': { en: 'Error', es: 'Error', pt: 'Erro' },
+  'job.couldNotDelete': { en: 'Could not delete.', es: 'No se pudo eliminar.', pt: 'Não foi possível excluir.' },
+  'job.alert.uploadFailed': { en: 'Upload failed', es: 'Error al subir', pt: 'Falha no envio' },
+  'job.alert.noPhotosAdded': { en: 'No photos were added. Try again.', es: 'No se agregaron fotos. Inténtalo de nuevo.', pt: 'Nenhuma foto foi adicionada. Tente novamente.' },
+  'job.alert.couldNotAddPhotos': { en: 'Could not add photos', es: 'No se pudieron agregar las fotos', pt: 'Não foi possível adicionar as fotos' },
+  'job.alert.couldNotCreateLink': { en: 'Could not create the link', es: 'No se pudo crear el enlace', pt: 'Não foi possível criar o link' },
+  // ProgressTab — UI
+  'job.phasesCount': { en: '{done} of {total} phases', es: '{done} de {total} fases', pt: '{done} de {total} fases' },
+  'job.workPhases': { en: 'Work phases', es: 'Fases del trabajo', pt: 'Fases do trabalho' },
+  'job.clientLink': { en: 'Client link', es: 'Enlace del cliente', pt: 'Link do cliente' },
+  'job.noPhasesYet': { en: 'No phases yet. Add the first one to start tracking the work — your client follows it through the shared link.', es: 'Aún no hay fases. Agrega la primera para empezar a hacer seguimiento del trabajo; tu cliente la sigue a través del enlace compartido.', pt: 'Nenhuma fase ainda. Adicione a primeira para começar a acompanhar o trabalho — seu cliente acompanha pelo link compartilhado.' },
+  'job.tapToAdvance': { en: '{label} · tap to advance', es: '{label} · toca para avanzar', pt: '{label} · toque para avançar' },
+  'job.addMorePhotos': { en: 'Add more photos', es: 'Agregar más fotos', pt: 'Adicionar mais fotos' },
+  'job.addProgressPhotos': { en: 'Add progress photos', es: 'Agregar fotos de progreso', pt: 'Adicionar fotos de progresso' },
+  'job.commentsCount': { en: 'Comments · {n}', es: 'Comentarios · {n}', pt: 'Comentários · {n}' },
+  'job.comments': { en: 'Comments', es: 'Comentarios', pt: 'Comentários' },
+  'job.adding': { en: 'Adding…', es: 'Agregando…', pt: 'Adicionando…' },
+  'job.addPhase': { en: 'Add phase', es: 'Agregar fase', pt: 'Adicionar fase' },
+  'job.newPhase': { en: 'New phase', es: 'Nueva fase', pt: 'Nova fase' },
+  'job.newPhaseSub': { en: 'e.g. Prep & masking, Priming, Top coat, Final walkthrough.', es: 'p. ej. Preparación y enmascarado, Imprimación, Capa final, Revisión final.', pt: 'ex.: Preparação e mascaramento, Primer, Demão final, Vistoria final.' },
+  'job.phaseName': { en: 'Phase name', es: 'Nombre de la fase', pt: 'Nome da fase' },
+  'job.commentClient': { en: 'CLIENT', es: 'CLIENTE', pt: 'CLIENTE' },
+  'job.commentYou': { en: 'YOU', es: 'TÚ', pt: 'VOCÊ' },
+  'job.noCommentsYet': { en: 'No comments yet. Your client can comment from the shared progress link.', es: 'Aún no hay comentarios. Tu cliente puede comentar desde el enlace de progreso compartido.', pt: 'Nenhum comentário ainda. Seu cliente pode comentar pelo link de progresso compartilhado.' },
+  'job.writeReply': { en: 'Write a reply…', es: 'Escribe una respuesta…', pt: 'Escreva uma resposta…' },
+  'job.send': { en: 'Send', es: 'Enviar', pt: 'Enviar' },
+  'job.companyFallback': { en: 'You', es: 'Tú', pt: 'Você' },
+});
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
 type Totals = { subtotal: number; taxableSubtotal: number; tax: number; total: number; taxRate: number };
 
-const NEXT: Record<Stage, { label: string; ico: string; act: string }> = {
-  Draft: { label: 'Send quote', ico: 'send', act: 'send' },
-  Quoted: { label: 'Send quote', ico: 'send', act: 'send' },
-  Sent: { label: 'Mark approved', ico: 'check', act: 'approve' },
-  Approved: { label: 'Generate invoice', ico: 'receipt', act: 'invoice' },
-  Invoiced: { label: 'Mark paid', ico: 'wallet', act: 'paid' },
-  Paid: { label: 'Paid in full', ico: 'checkCircle', act: 'done' },
+// NEXT maps each stage to its action + icon; the label is resolved at render via t('job.next.<act>').
+const NEXT: Record<Stage, { ico: string; act: string }> = {
+  Draft: { ico: 'send', act: 'send' },
+  Quoted: { ico: 'send', act: 'send' },
+  Sent: { ico: 'check', act: 'approve' },
+  Approved: { ico: 'receipt', act: 'invoice' },
+  Invoiced: { ico: 'wallet', act: 'paid' },
+  Paid: { ico: 'checkCircle', act: 'done' },
 };
 
 function Timeline({ stage }: { stage: Stage }) {
@@ -49,6 +177,7 @@ function Timeline({ stage }: { stage: Stage }) {
 }
 
 export function JobScreen({ go, back, params }: NavProp) {
+  const t = useT();
   const { store, up } = useStore();
   const job = params?.job || null;
   const client = job ? null : store.aSel || null; // existing job uses realClient (from detail); new job uses the picked client
@@ -79,9 +208,9 @@ export function JobScreen({ go, back, params }: NavProp) {
     ? { subtotal: inv.subtotal, taxableSubtotal: computed.taxableSubtotal, tax: inv.tax, total: inv.total, taxRate: inv.taxRate }
     : quoteTotals;
   const [vd, vc] = split(job ? job.value : quoteTotals.total);
-  const name = job ? job.title : store.svcs[0] ? `${store.svcs[0]} job` : 'New estimate';
-  const cName = job ? job.client || 'No client' : client?.name || 'No client';
-  const addr = job ? job.addr : client?.addr || store.aLoc?.city || 'No address yet';
+  const name = job ? job.title : store.svcs[0] ? t('job.jobSuffix', { svc: store.svcs[0] }) : t('job.newEstimate');
+  const cName = job ? job.client || t('job.noClient') : client?.name || t('job.noClient');
+  const addr = job ? job.addr : client?.addr || store.aLoc?.city || t('job.noAddress');
   const next = NEXT[stage];
   const queryClient = useQueryClient();
   const [genningInv, setGenningInv] = useState(false);
@@ -89,7 +218,7 @@ export function JobScreen({ go, back, params }: NavProp) {
   // generate a real invoice from the saved estimate (copies its totals; sequential number)
   const generateInvoice = async () => {
     if (inv) { clearStage(); setTab('invoice'); return; }
-    if (!user?.id || !est?.id || !projectId) { Alert.alert('Estimate needed', 'Save the estimate first, then generate the invoice.'); return; }
+    if (!user?.id || !est?.id || !projectId) { Alert.alert(t('job.alert.estimateNeeded'), t('job.alert.saveEstimateFirst')); return; }
     setGenningInv(true);
     try {
       await createInvoice(user.id, est.id, projectId);
@@ -98,7 +227,7 @@ export function JobScreen({ go, back, params }: NavProp) {
       clearStage(); // invoice now exists → DB-derived stage becomes "Invoiced"
       setTab('invoice');
     } catch (e: any) {
-      Alert.alert('Could not create the invoice', e?.message || 'Try again.');
+      Alert.alert(t('job.alert.couldNotCreateInvoice'), e?.message || t('job.alert.tryAgain'));
     } finally {
       setGenningInv(false);
     }
@@ -108,14 +237,14 @@ export function JobScreen({ go, back, params }: NavProp) {
   const [genningContract, setGenningContract] = useState(false);
   const shareContract = async (token: string) => {
     try {
-      await Share.share({ message: `Please review and sign your service agreement:\n${agreementLink(token)}` });
+      await Share.share({ message: t('job.share.contract', { link: agreementLink(token) }) });
     } catch {
       /* user dismissed the share sheet */
     }
   };
   const generateContract = async () => {
     if (detail?.agreement) return shareContract(detail.agreement.token);
-    if (!inv) { Alert.alert('Invoice needed', 'Generate the invoice first, then the contract.'); return; }
+    if (!inv) { Alert.alert(t('job.alert.invoiceNeeded'), t('job.alert.generateInvoiceFirst')); return; }
     if (!user?.id || !projectId) return;
     setGenningContract(true);
     try {
@@ -123,7 +252,7 @@ export function JobScreen({ go, back, params }: NavProp) {
       await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
       await shareContract(token);
     } catch (e: any) {
-      Alert.alert('Could not create the contract', e?.message || 'Try again.');
+      Alert.alert(t('job.alert.couldNotCreateContract'), e?.message || t('job.alert.tryAgain'));
     } finally {
       setGenningContract(false);
     }
@@ -142,7 +271,7 @@ export function JobScreen({ go, back, params }: NavProp) {
       clearStage();
     } catch (e: any) {
       clearStage();
-      Alert.alert('Could not update', e?.message || 'Try again.');
+      Alert.alert(t('job.alert.couldNotUpdate'), e?.message || t('job.alert.tryAgain'));
     }
   };
   const setInvoiceStatus = async (status: string, optimistic?: Stage) => {
@@ -155,7 +284,7 @@ export function JobScreen({ go, back, params }: NavProp) {
       if (optimistic) clearStage();
     } catch (e: any) {
       if (optimistic) clearStage();
-      Alert.alert('Could not update', e?.message || 'Try again.');
+      Alert.alert(t('job.alert.couldNotUpdate'), e?.message || t('job.alert.tryAgain'));
     }
   };
 
@@ -168,7 +297,7 @@ export function JobScreen({ go, back, params }: NavProp) {
 
   return (
     <>
-      <Nav title={cName || 'No client'} sub={name} center onBack={back} right={<NavBtn icon="more" size={18} />} />
+      <Nav title={cName || t('job.noClient')} sub={name} center onBack={back} right={<NavBtn icon="more" size={18} />} />
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false}>
         <View style={{ backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: radii.xl, padding: 18, ...shadow.sm }}>
           <Between style={{ alignItems: 'flex-start' }}>
@@ -194,18 +323,18 @@ export function JobScreen({ go, back, params }: NavProp) {
               <Icon name={next.ico} size={19} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, letterSpacing: 0.6, color: colors.primary }}>NEXT STEP</Text>
-              <Text style={{ fontFamily: fonts.bold, fontSize: 14, color: colors.ink, marginTop: 2 }}>{next.label}</Text>
+              <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, letterSpacing: 0.6, color: colors.primary }}>{t('job.nextStep')}</Text>
+              <Text style={{ fontFamily: fonts.bold, fontSize: 14, color: colors.ink, marginTop: 2 }}>{t('job.next.' + next.act)}</Text>
             </View>
-            <Btn title={next.label} sm onPress={doNext} />
+            <Btn title={t('job.next.' + next.act)} sm onPress={doNext} />
           </View>
         ) : null}
 
         {/* internal tabs */}
         <View style={{ flexDirection: 'row', gap: 4, padding: 4, backgroundColor: '#EEF1F4', borderRadius: 14, marginTop: 16 }}>
-          {[['quote', 'Quote'], ['invoice', 'Invoice'], ['contract', 'Contract'], ['progress', 'Progress']].map(([k, l]) => (
+          {['quote', 'invoice', 'contract', 'progress'].map((k) => (
             <Pressable key={k} onPress={() => setTab(k)} style={[{ flex: 1, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, tab === k && { backgroundColor: colors.card, ...shadow.sm }]}>
-              <Text style={{ fontFamily: fonts.bold, fontSize: 13.5, color: tab === k ? colors.ink : colors.muted }}>{l}</Text>
+              <Text style={{ fontFamily: fonts.bold, fontSize: 13.5, color: tab === k ? colors.ink : colors.muted }}>{t('job.tab.' + k)}</Text>
             </Pressable>
           ))}
         </View>
@@ -213,7 +342,7 @@ export function JobScreen({ go, back, params }: NavProp) {
         {tab === 'quote' && <QuoteTab items={items} totals={quoteTotals} go={go} photos={detail?.photoUrls || []} />}
         {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} company={company} invoice={inv} genning={genningInv} onGen={generateInvoice} setSheet={(b: boolean) => up({ sheet: b })} />}
         {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={invoiceTotals} depositPercent={inv?.depositPercent ?? 25} company={company} genning={genningContract} onGenerate={generateContract} />}
-        {tab === 'progress' && <ProgressTab projectId={projectId} estimateId={est?.id || null} userId={user?.id || null} companyName={(company as any)?.company_name || 'You'} />}
+        {tab === 'progress' && <ProgressTab projectId={projectId} estimateId={est?.id || null} userId={user?.id || null} companyName={(company as any)?.company_name || t('job.companyFallback')} />}
       </ScrollView>
 
       <SendSheet
@@ -227,9 +356,9 @@ export function JobScreen({ go, back, params }: NavProp) {
           const co = (company as any) || {};
           sendDoc(option, {
             kind,
-            docLabel: kind === 'invoice' ? 'Invoice' : kind === 'contract' ? 'Agreement' : 'Quote',
+            docLabel: kind === 'invoice' ? t('job.doc.invoice') : kind === 'contract' ? t('job.doc.agreement') : t('job.doc.quote'),
             number: kind === 'invoice' ? inv?.number : undefined,
-            company: { name: co.company_name || 'Your company', license: co.company_license, address: co.company_address, phone: co.company_phone, email: co.company_email },
+            company: { name: co.company_name || t('job.yourCompany'), license: co.company_license, address: co.company_address, phone: co.company_phone, email: co.company_email },
             client: realClient,
             items,
             totals: tt,
@@ -252,11 +381,12 @@ function TotRow({ label, value, bold, color }: { label: string; value: string; b
 }
 
 function QuoteTab({ items, totals, go, photos }: { items: LineItem[]; totals: Totals; go: NavProp['go']; photos: string[] }) {
+  const t = useT();
   return (
     <View style={{ marginTop: 16 }}>
       {photos.length ? (
         <>
-          <SectionTitle title={`Photos · ${photos.length}`} />
+          <SectionTitle title={t('job.photos', { n: photos.length })} />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingVertical: 2 }}>
             {photos.map((u, i) => (
               <Image key={i} source={{ uri: u }} style={{ width: 96, height: 96, borderRadius: 14, backgroundColor: colors.chipBg }} />
@@ -264,7 +394,7 @@ function QuoteTab({ items, totals, go, photos }: { items: LineItem[]; totals: To
           </ScrollView>
         </>
       ) : null}
-      <SectionTitle title="Line items" link="Edit" onLink={() => go('estimate', {})} />
+      <SectionTitle title={t('job.lineItems')} link={t('job.edit')} onLink={() => go('estimate', {})} />
       <View style={{ gap: 10 }}>
         {items.map((it) => (
           <Card key={it.id} style={{ padding: 14 }}>
@@ -276,17 +406,17 @@ function QuoteTab({ items, totals, go, photos }: { items: LineItem[]; totals: To
             <Between style={{ marginTop: 7 }}>
               <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{it.qty} {it.unit} × {fmt(it.price)}</Text>
               <View style={{ paddingVertical: 4, paddingHorizontal: 9, borderRadius: radii.pill, backgroundColor: it.taxable ? colors.primaryTint : '#EEF1F4' }}>
-                <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: it.taxable ? colors.primary : colors.faint }}>{it.taxable ? 'Taxable' : 'No tax'}</Text>
+                <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: it.taxable ? colors.primary : colors.faint }}>{it.taxable ? t('job.taxable') : t('job.noTax')}</Text>
               </View>
             </Between>
           </Card>
         ))}
       </View>
       <Card style={{ padding: 16, marginTop: 16 }}>
-        <TotRow label="Subtotal" value={fmt(totals.subtotal)} />
-        <TotRow label={`Tax (${totals.taxRate}% on ${fmt(totals.taxableSubtotal)})`} value={fmt(totals.tax)} />
+        <TotRow label={t('job.subtotal')} value={fmt(totals.subtotal)} />
+        <TotRow label={t('job.tax', { rate: totals.taxRate, amount: fmt(totals.taxableSubtotal) })} value={fmt(totals.tax)} />
         <Between style={{ paddingTop: 11, marginTop: 7, borderTopWidth: 1.5, borderTopColor: colors.borderStrong }}>
-          <Text style={{ fontFamily: fonts.extrabold, fontSize: 13, color: colors.ink }}>Total</Text>
+          <Text style={{ fontFamily: fonts.extrabold, fontSize: 13, color: colors.ink }}>{t('job.total')}</Text>
           <Text style={{ fontFamily: fonts.num, fontSize: 24, color: colors.ink, letterSpacing: -0.5 }}>{fmt(totals.total)}</Text>
         </Between>
       </Card>
@@ -295,10 +425,11 @@ function QuoteTab({ items, totals, go, photos }: { items: LineItem[]; totals: To
 }
 
 function InvoiceTab({ stage, items, totals, client, company, invoice, genning, onGen, setSheet }: { stage: Stage; items: LineItem[]; totals: Totals; client: JobDetail['client']; company?: any; invoice?: JobDetail['invoice']; genning: boolean; onGen: () => void; setSheet: (b: boolean) => void }) {
+  const t = useT();
   const has = !!invoice || ['Invoiced', 'Paid'].includes(stage);
   const deposit = invoice?.depositPercent ?? 25;
   const co = company || {};
-  const coName = co.company_name || 'Your company';
+  const coName = co.company_name || t('job.yourCompany');
   // real issued / due dates (Net 15 from issue)
   const issued = invoice?.created ? new Date(invoice.created) : new Date();
   const due = new Date(issued);
@@ -310,9 +441,9 @@ function InvoiceTab({ stage, items, totals, client, company, invoice, genning, o
         <View style={{ width: 72, height: 72, borderRadius: 22, backgroundColor: colors.primaryTint, alignItems: 'center', justifyContent: 'center', marginBottom: 18 }}>
           <Icon name="receipt" size={30} color={colors.primary} />
         </View>
-        <Text style={{ fontFamily: fonts.extrabold, fontSize: 19, color: colors.ink }}>No invoice yet</Text>
-        <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.muted, marginTop: 8, textAlign: 'center', lineHeight: 21 }}>Generate a professional invoice from this quote. Totals stay in sync automatically.</Text>
-        <Btn title={genning ? 'Generating…' : 'Generate invoice'} icon={genning ? undefined : 'receipt'} disabled={genning} onPress={onGen} style={{ marginTop: 20, maxWidth: 240 }} />
+        <Text style={{ fontFamily: fonts.extrabold, fontSize: 19, color: colors.ink }}>{t('job.noInvoiceYet')}</Text>
+        <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.muted, marginTop: 8, textAlign: 'center', lineHeight: 21 }}>{t('job.invoiceFromQuote')}</Text>
+        <Btn title={genning ? t('job.generating') : t('job.generateInvoice')} icon={genning ? undefined : 'receipt'} disabled={genning} onPress={onGen} style={{ marginTop: 20, maxWidth: 240 }} />
       </View>
     );
   }
@@ -335,24 +466,24 @@ function InvoiceTab({ stage, items, totals, client, company, invoice, genning, o
               </View>
             </Row>
             <View style={{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: radii.pill, backgroundColor: paid ? colors.successTint : colors.warningTint }}>
-              <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: paid ? colors.success : colors.warning }}>{paid ? 'PAID' : 'DUE'}</Text>
+              <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: paid ? colors.success : colors.warning }}>{paid ? t('job.paidBadge') : t('job.dueBadge')}</Text>
             </View>
           </Between>
           <Between style={{ marginTop: 16, alignItems: 'flex-start' }}>
-            <View><DpLab text="Invoice" /><Text style={{ fontFamily: fonts.num, fontSize: 14, color: colors.muted, marginTop: 3 }}>{invoice?.number || 'INV-2026-0001'}</Text></View>
-            <View style={{ alignItems: 'flex-end' }}><DpLab text="Issued · Due" /><Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.ink, marginTop: 3 }}>{md(issued)} · {md(due)}</Text></View>
+            <View><DpLab text={t('job.invoiceLabel')} /><Text style={{ fontFamily: fonts.num, fontSize: 14, color: colors.muted, marginTop: 3 }}>{invoice?.number || 'INV-2026-0001'}</Text></View>
+            <View style={{ alignItems: 'flex-end' }}><DpLab text={t('job.issuedDue')} /><Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.ink, marginTop: 3 }}>{md(issued)} · {md(due)}</Text></View>
           </Between>
         </View>
         {/* parties */}
         <View style={{ flexDirection: 'row', gap: 14, padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border }}>
           <View style={{ flex: 1 }}>
-            <DpLab text="From" />
+            <DpLab text={t('job.from')} />
             <Text style={{ fontFamily: fonts.extrabold, fontSize: 13.5, color: colors.ink, marginTop: 5 }}>{coName}</Text>
             <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 2, lineHeight: 17 }}>{[co.company_address, [co.default_city, co.default_state].filter(Boolean).join(', '), co.company_phone].filter(Boolean).join('\n')}</Text>
           </View>
           <View style={{ flex: 1 }}>
-            <DpLab text="Bill to" />
-            <Text style={{ fontFamily: fonts.extrabold, fontSize: 13.5, color: colors.ink, marginTop: 5 }}>{client?.name || 'No client'}</Text>
+            <DpLab text={t('job.billTo')} />
+            <Text style={{ fontFamily: fonts.extrabold, fontSize: 13.5, color: colors.ink, marginTop: 5 }}>{client?.name || t('job.noClient')}</Text>
             <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 2, lineHeight: 17 }}>{[client?.addr, client?.city, client?.email].filter(Boolean).join('\n')}</Text>
           </View>
         </View>
@@ -370,25 +501,25 @@ function InvoiceTab({ stage, items, totals, client, company, invoice, genning, o
         </View>
         {/* totals */}
         <View style={{ padding: 20, backgroundColor: colors.card2, borderTopWidth: 1, borderTopColor: colors.border }}>
-          <TotRow label="Subtotal" value={fmt(totals.subtotal)} />
-          <TotRow label={`Tax (${totals.taxRate}% on ${fmt(totals.taxableSubtotal)})`} value={fmt(totals.tax)} />
+          <TotRow label={t('job.subtotal')} value={fmt(totals.subtotal)} />
+          <TotRow label={t('job.tax', { rate: totals.taxRate, amount: fmt(totals.taxableSubtotal) })} value={fmt(totals.tax)} />
           <Between style={{ paddingTop: 11, marginTop: 7, borderTopWidth: 1.5, borderTopColor: colors.borderStrong }}>
-            <Text style={{ fontFamily: fonts.extrabold, fontSize: 13, color: colors.ink }}>Total due</Text>
+            <Text style={{ fontFamily: fonts.extrabold, fontSize: 13, color: colors.ink }}>{t('job.totalDue')}</Text>
             <Text style={{ fontFamily: fonts.num, fontSize: 24, color: colors.ink, letterSpacing: -0.5 }}>{fmt(totals.total)}</Text>
           </Between>
           <View style={{ marginTop: 10 }}>
-            <TotRow label={`Deposit (${deposit}%)`} value={fmt(depAmt)} />
-            <TotRow label={paid ? 'Paid' : 'Balance due'} value={paid ? fmt(totals.total) : fmt(balance)} color={paid ? colors.success : colors.ink} />
+            <TotRow label={t('job.deposit', { pct: deposit })} value={fmt(depAmt)} />
+            <TotRow label={paid ? t('job.paid') : t('job.balanceDue')} value={paid ? fmt(totals.total) : fmt(balance)} color={paid ? colors.success : colors.ink} />
           </View>
         </View>
       </Card>
       <Row style={{ gap: 6, marginTop: 12, paddingHorizontal: 4 }}>
         <Icon name="card" size={13} color={colors.muted} />
-        <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, flex: 1, lineHeight: 18 }}>Pay by card, ACH or check. Terms: Net 15 from issue date.</Text>
+        <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, flex: 1, lineHeight: 18 }}>{t('job.payTerms')}</Text>
       </Row>
       <Row style={{ gap: 10, marginTop: 16 }}>
-        <Btn variant="ghost" icon="pdf" title="PDF" onPress={() => setSheet(true)} style={{ flex: 0.4 }} />
-        <Btn title="Send invoice" icon="send" onPress={() => setSheet(true)} style={{ flex: 1 }} />
+        <Btn variant="ghost" icon="pdf" title={t('job.pdf')} onPress={() => setSheet(true)} style={{ flex: 0.4 }} />
+        <Btn title={t('job.sendInvoice')} icon="send" onPress={() => setSheet(true)} style={{ flex: 1 }} />
       </Row>
     </View>
   );
@@ -396,11 +527,12 @@ function InvoiceTab({ stage, items, totals, client, company, invoice, genning, o
 const DpLab = ({ text }: { text: string }) => <Text style={{ fontFamily: fonts.extrabold, fontSize: 10, letterSpacing: 1, color: colors.faint }}>{text.toUpperCase()}</Text>;
 
 function ContractTab({ agreement, hasInvoice, totals, depositPercent, company, genning, onGenerate }: { agreement: JobDetail['agreement']; hasInvoice: boolean; totals: Totals; depositPercent: number; company?: any; genning: boolean; onGenerate: () => void }) {
-  const coName = company?.company_name || 'Your company';
+  const t = useT();
+  const coName = company?.company_name || t('job.yourCompany');
   const signed = agreement?.status === 'signed';
   const sent = !!agreement && !signed;
   const deposit = totals.total * (depositPercent / 100);
-  const statusLabel = signed ? 'SIGNED' : sent ? 'SENT' : 'DRAFT';
+  const statusLabel = signed ? t('job.statusSigned') : sent ? t('job.statusSent') : t('job.statusDraft');
   const statusColor = signed ? colors.success : sent ? colors.accentInk : '#8A93A3';
   const statusBg = signed ? colors.successTint : sent ? colors.accentTint : '#EEF0F3';
 
@@ -410,8 +542,8 @@ function ContractTab({ agreement, hasInvoice, totals, depositPercent, company, g
         <View style={{ width: 72, height: 72, borderRadius: 22, backgroundColor: colors.primaryTint, alignItems: 'center', justifyContent: 'center', marginBottom: 18 }}>
           <Icon name="signature" size={30} color={colors.primary} />
         </View>
-        <Text style={{ fontFamily: fonts.extrabold, fontSize: 19, color: colors.ink }}>Invoice needed first</Text>
-        <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.muted, marginTop: 8, textAlign: 'center', lineHeight: 21 }}>Generate the invoice, then create a service agreement for the client to sign.</Text>
+        <Text style={{ fontFamily: fonts.extrabold, fontSize: 19, color: colors.ink }}>{t('job.invoiceNeededFirst')}</Text>
+        <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.muted, marginTop: 8, textAlign: 'center', lineHeight: 21 }}>{t('job.contractIntro')}</Text>
       </View>
     );
   }
@@ -425,7 +557,7 @@ function ContractTab({ agreement, hasInvoice, totals, depositPercent, company, g
               <Icon name="signature" size={18} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: fonts.extrabold, fontSize: 15, color: colors.ink }}>Service agreement</Text>
+              <Text style={{ fontFamily: fonts.extrabold, fontSize: 15, color: colors.ink }}>{t('job.serviceAgreement')}</Text>
               <Text numberOfLines={1} style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{coName}</Text>
             </View>
           </Row>
@@ -435,18 +567,18 @@ function ContractTab({ agreement, hasInvoice, totals, depositPercent, company, g
         </Between>
         <Divider />
         <Between>
-          <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>Required deposit ({depositPercent}%)</Text>
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{t('job.requiredDeposit', { pct: depositPercent })}</Text>
           <Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.ink }}>{fmt(deposit)}</Text>
         </Between>
         <Between style={{ marginTop: 12 }}>
-          <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>Signature</Text>
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{t('job.signature')}</Text>
           <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: signed ? colors.success : colors.ink }}>
-            {signed ? `Signed by ${agreement?.signedName || 'client'}` : sent ? 'Awaiting client' : 'Not sent yet'}
+            {signed ? t('job.signedBy', { name: agreement?.signedName || t('job.client') }) : sent ? t('job.awaitingClient') : t('job.notSentYet')}
           </Text>
         </Between>
         {signed && agreement?.signedDate ? (
           <Between style={{ marginTop: 12 }}>
-            <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>Signed on</Text>
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{t('job.signedOn')}</Text>
             <Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.ink }}>{new Date(agreement.signedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
           </Between>
         ) : null}
@@ -455,32 +587,34 @@ function ContractTab({ agreement, hasInvoice, totals, depositPercent, company, g
       <Card pad style={{ marginTop: 12, backgroundColor: colors.card2 }}>
         <Row style={{ gap: 6 }}>
           <Icon name="shield" size={14} color={colors.accentInk} />
-          <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.ink }}>Secure e-signature</Text>
+          <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.ink }}>{t('job.secureEsignature')}</Text>
         </Row>
         <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 8, lineHeight: 19 }}>
           {signed
-            ? 'The client signed the agreement online — recorded with date and IP.'
-            : 'The client gets a secure link to review and sign on their phone — legally binding under the ESIGN Act.'}
+            ? t('job.esignSigned')
+            : t('job.esignPending')}
         </Text>
       </Card>
 
       {!signed ? (
-        <Btn title={genning ? 'Working…' : sent ? 'Resend signing link' : 'Generate & send contract'} icon={genning ? undefined : 'send'} disabled={genning} onPress={onGenerate} style={{ marginTop: 16 }} />
+        <Btn title={genning ? t('job.working') : sent ? t('job.resendSigningLink') : t('job.generateSendContract')} icon={genning ? undefined : 'send'} disabled={genning} onPress={onGenerate} style={{ marginTop: 16 }} />
       ) : (
-        <Btn variant="ghost" title="Share signed link" icon="share" onPress={onGenerate} style={{ marginTop: 16 }} />
+        <Btn variant="ghost" title={t('job.shareSignedLink')} icon="share" onPress={onGenerate} style={{ marginTop: 16 }} />
       )}
     </View>
   );
 }
 
+// [color, background, label-key] — the label is resolved at render via t(labelKey)
 const PHASE_STAT: Record<PhaseStatus, [string, string, string]> = {
-  completed: [colors.success, colors.successTint, 'Done'],
-  in_progress: [colors.info, colors.infoTint, 'In progress'],
-  not_started: [colors.faint, colors.bg, 'Not started'],
+  completed: [colors.success, colors.successTint, 'job.phase.done'],
+  in_progress: [colors.info, colors.infoTint, 'job.phase.inProgress'],
+  not_started: [colors.faint, colors.bg, 'job.phase.notStarted'],
 };
 const NEXT_PHASE_STATUS: Record<PhaseStatus, PhaseStatus> = { not_started: 'in_progress', in_progress: 'completed', completed: 'not_started' };
 
 function ProgressTab({ projectId, estimateId, userId, companyName }: { projectId: string | null; estimateId: string | null; userId: string | null; companyName: string }) {
+  const t = useT();
   const qc = useQueryClient();
   const { data: phases = [], isLoading } = useQuery({ queryKey: ['phases', projectId], queryFn: () => fetchPhases(projectId!), enabled: !!projectId });
   const [sheet, setSheet] = useState(false);
@@ -501,18 +635,18 @@ function ProgressTab({ projectId, estimateId, userId, companyName }: { projectId
       setCmText('');
       refresh();
     } catch (e: any) {
-      Alert.alert('Could not send', e?.message || 'Try again.');
+      Alert.alert(t('job.alert.couldNotSend'), e?.message || t('job.alert.tryAgain'));
     } finally {
       setCmBusy(false);
     }
   };
 
   if (!projectId) {
-    return <View style={{ marginTop: 16 }}><Empty icon="layers" title="Save the job first" body="Create the estimate, then track the work in phases the client can follow." /></View>;
+    return <View style={{ marginTop: 16 }}><Empty icon="layers" title={t('job.empty.saveJobTitle')} body={t('job.empty.saveJobBody')} /></View>;
   }
 
   const addPhase = async () => {
-    if (!userId || !estimateId) { Alert.alert('Estimate needed', 'Generate the estimate first, then add phases.'); return; }
+    if (!userId || !estimateId) { Alert.alert(t('job.alert.estimateNeeded'), t('job.alert.generateEstimateFirst')); return; }
     if (!newName.trim()) return;
     setBusy(true);
     try {
@@ -522,7 +656,7 @@ function ProgressTab({ projectId, estimateId, userId, companyName }: { projectId
       setSheet(false);
       refresh();
     } catch (e: any) {
-      Alert.alert('Could not add phase', e?.message || 'Try again.');
+      Alert.alert(t('job.alert.couldNotAddPhase'), e?.message || t('job.alert.tryAgain'));
     } finally {
       setBusy(false);
     }
@@ -537,14 +671,14 @@ function ProgressTab({ projectId, estimateId, userId, companyName }: { projectId
       refresh();
     } catch (e: any) {
       refresh(); // revert to the DB truth
-      Alert.alert('Could not update', e?.message || 'Try again.');
+      Alert.alert(t('job.alert.couldNotUpdate'), e?.message || t('job.alert.tryAgain'));
     }
   };
 
   const removePhase = (p: ProgressPhase) => {
-    Alert.alert('Delete phase?', `Remove "${p.name}" and its photos? This can't be undone.`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => { try { await deletePhase(p.id); refresh(); } catch (e: any) { Alert.alert('Error', e?.message || 'Could not delete.'); } } },
+    Alert.alert(t('job.alert.deletePhaseTitle'), t('job.alert.deletePhaseBody', { name: p.name }), [
+      { text: t('job.cancel'), style: 'cancel' },
+      { text: t('job.delete'), style: 'destructive', onPress: async () => { try { await deletePhase(p.id); refresh(); } catch (e: any) { Alert.alert(t('job.error'), e?.message || t('job.couldNotDelete')); } } },
     ]);
   };
 
@@ -555,9 +689,9 @@ function ProgressTab({ projectId, estimateId, userId, companyName }: { projectId
     try {
       const n = await addPhasePhotos(userId, projectId, p.id, res.assets.map((a) => ({ uri: a.uri })));
       refresh();
-      if (!n) Alert.alert('Upload failed', 'No photos were added. Try again.');
+      if (!n) Alert.alert(t('job.alert.uploadFailed'), t('job.alert.noPhotosAdded'));
     } catch (e: any) {
-      Alert.alert('Could not add photos', e?.message || 'Try again.');
+      Alert.alert(t('job.alert.couldNotAddPhotos'), e?.message || t('job.alert.tryAgain'));
     }
   };
 
@@ -566,9 +700,9 @@ function ProgressTab({ projectId, estimateId, userId, companyName }: { projectId
     setSharing(true);
     try {
       const token = await ensureShareToken(userId, projectId);
-      await Share.share({ message: `Track your project's progress here:\n${progressLink(token)}` });
+      await Share.share({ message: t('job.share.progress', { link: progressLink(token) }) });
     } catch (e: any) {
-      Alert.alert('Could not create the link', e?.message || 'Try again.');
+      Alert.alert(t('job.alert.couldNotCreateLink'), e?.message || t('job.alert.tryAgain'));
     } finally {
       setSharing(false);
     }
@@ -579,11 +713,11 @@ function ProgressTab({ projectId, estimateId, userId, companyName }: { projectId
   return (
     <View style={{ marginTop: 16 }}>
       <Between style={{ marginBottom: 14 }}>
-        <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{phases.length ? `${done} of ${phases.length} phases` : 'Work phases'}</Text>
+        <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{phases.length ? t('job.phasesCount', { done, total: phases.length }) : t('job.workPhases')}</Text>
         <Pressable onPress={shareWithClient} disabled={sharing} hitSlop={8}>
           <Row style={{ gap: 5 }}>
             <Icon name="link" size={14} color={colors.primary} />
-            <Text style={{ fontFamily: fonts.bold, fontSize: 13.5, color: colors.primary }}>{sharing ? 'Working…' : 'Client link'}</Text>
+            <Text style={{ fontFamily: fonts.bold, fontSize: 13.5, color: colors.primary }}>{sharing ? t('job.working') : t('job.clientLink')}</Text>
           </Row>
         </Pressable>
       </Between>
@@ -592,12 +726,12 @@ function ProgressTab({ projectId, estimateId, userId, companyName }: { projectId
         <View style={{ paddingVertical: 24, alignItems: 'center' }}><ActivityIndicator color={colors.primary} /></View>
       ) : phases.length === 0 ? (
         <Card pad style={{ alignItems: 'center', paddingVertical: 22 }}>
-          <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.muted, textAlign: 'center', lineHeight: 19 }}>No phases yet. Add the first one to start tracking the work — your client follows it through the shared link.</Text>
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.muted, textAlign: 'center', lineHeight: 19 }}>{t('job.noPhasesYet')}</Text>
         </Card>
       ) : (
         <View style={{ gap: 12 }}>
           {phases.map((p, i) => {
-            const [c, bg, lab] = PHASE_STAT[p.status];
+            const [c, bg, labKey] = PHASE_STAT[p.status];
             return (
               <Card key={p.id} pad>
                 <Between>
@@ -607,7 +741,7 @@ function ProgressTab({ projectId, estimateId, userId, companyName }: { projectId
                     </Pressable>
                     <Pressable onPress={() => cycleStatus(p)} style={{ flex: 1 }}>
                       <Text style={{ fontFamily: fonts.extrabold, fontSize: 14.5, color: colors.ink }}>{p.name}</Text>
-                      <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: c }}>{lab} · tap to advance</Text>
+                      <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: c }}>{t('job.tapToAdvance', { label: t(labKey) })}</Text>
                     </Pressable>
                   </Row>
                   <Pressable onPress={() => removePhase(p)} hitSlop={8}><Icon name="trash" size={16} color={colors.faint} /></Pressable>
@@ -618,11 +752,11 @@ function ProgressTab({ projectId, estimateId, userId, companyName }: { projectId
                     {p.photos.map((ph) => <Image key={ph.id} source={{ uri: ph.url }} style={{ width: 64, height: 64, borderRadius: 10, backgroundColor: colors.chipBg }} />)}
                   </ScrollView>
                 ) : null}
-                <Btn variant="ghost" sm icon="camera" title={p.photos.length ? 'Add more photos' : 'Add progress photos'} onPress={() => addPhotos(p)} style={{ marginTop: 12 }} />
+                <Btn variant="ghost" sm icon="camera" title={p.photos.length ? t('job.addMorePhotos') : t('job.addProgressPhotos')} onPress={() => addPhotos(p)} style={{ marginTop: 12 }} />
                 <Pressable onPress={() => setCmPhaseId(p.id)} style={{ marginTop: 10 }} hitSlop={6}>
                   <Row style={{ gap: 6 }}>
                     <Icon name="msg" size={14} color={colors.muted} />
-                    <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.muted }}>{p.comments.length ? `Comments · ${p.comments.length}` : 'Comments'}</Text>
+                    <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.muted }}>{p.comments.length ? t('job.commentsCount', { n: p.comments.length }) : t('job.comments')}</Text>
                     {p.comments.some((c) => c.authorType === 'client') ? <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.info }} /> : null}
                   </Row>
                 </Pressable>
@@ -632,32 +766,32 @@ function ProgressTab({ projectId, estimateId, userId, companyName }: { projectId
         </View>
       )}
 
-      <Btn icon="plus" title="Add phase" variant="soft" onPress={() => setSheet(true)} style={{ marginTop: 14 }} />
+      <Btn icon="plus" title={t('job.addPhase')} variant="soft" onPress={() => setSheet(true)} style={{ marginTop: 14 }} />
 
-      <Sheet open={sheet} onClose={() => setSheet(false)} title="New phase" sub="e.g. Prep & masking, Priming, Top coat, Final walkthrough.">
-        <Field label="Phase name"><Input value={newName} onChangeText={setNewName} placeholder="Phase name" autoFocus /></Field>
-        <Btn title={busy ? 'Adding…' : 'Add phase'} disabled={busy} onPress={addPhase} />
+      <Sheet open={sheet} onClose={() => setSheet(false)} title={t('job.newPhase')} sub={t('job.newPhaseSub')}>
+        <Field label={t('job.phaseName')}><Input value={newName} onChangeText={setNewName} placeholder={t('job.phaseName')} autoFocus /></Field>
+        <Btn title={busy ? t('job.adding') : t('job.addPhase')} disabled={busy} onPress={addPhase} />
       </Sheet>
 
-      <Sheet open={!!cmPhaseId} onClose={() => { setCmPhaseId(null); setCmText(''); }} title="Comments" sub={cmPhase?.name}>
+      <Sheet open={!!cmPhaseId} onClose={() => { setCmPhaseId(null); setCmText(''); }} title={t('job.comments')} sub={cmPhase?.name}>
         <ScrollView style={{ maxHeight: 320 }} contentContainerStyle={{ gap: 10, paddingBottom: 8 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           {cmPhase && cmPhase.comments.length ? (
             cmPhase.comments.map((c) => (
               <View key={c.id} style={{ backgroundColor: c.authorType === 'client' ? colors.bg : colors.primaryTint, borderRadius: 12, padding: 12 }}>
                 <Row style={{ gap: 6, marginBottom: 4 }}>
                   <Text style={{ fontFamily: fonts.extrabold, fontSize: 12.5, color: c.authorType === 'client' ? colors.ink : colors.primary }}>{c.authorName}</Text>
-                  <Text style={{ fontFamily: fonts.bold, fontSize: 10, letterSpacing: 0.5, color: colors.faint }}>{c.authorType === 'client' ? 'CLIENT' : 'YOU'}</Text>
+                  <Text style={{ fontFamily: fonts.bold, fontSize: 10, letterSpacing: 0.5, color: colors.faint }}>{c.authorType === 'client' ? t('job.commentClient') : t('job.commentYou')}</Text>
                 </Row>
                 <Text style={{ fontFamily: fonts.semibold, fontSize: 13.5, color: colors.ink, lineHeight: 19 }}>{c.content}</Text>
               </View>
             ))
           ) : (
-            <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.muted, textAlign: 'center', paddingVertical: 16, lineHeight: 19 }}>No comments yet. Your client can comment from the shared progress link.</Text>
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.muted, textAlign: 'center', paddingVertical: 16, lineHeight: 19 }}>{t('job.noCommentsYet')}</Text>
           )}
         </ScrollView>
         <Row style={{ gap: 8, marginTop: 12, alignItems: 'flex-end' }}>
-          <View style={{ flex: 1 }}><Input value={cmText} onChangeText={setCmText} placeholder="Write a reply…" multiline style={{ minHeight: 50, paddingTop: 13 }} /></View>
-          <Btn sm title={cmBusy ? '…' : 'Send'} disabled={cmBusy} onPress={addComment} />
+          <View style={{ flex: 1 }}><Input value={cmText} onChangeText={setCmText} placeholder={t('job.writeReply')} multiline style={{ minHeight: 50, paddingTop: 13 }} /></View>
+          <Btn sm title={cmBusy ? '…' : t('job.send')} disabled={cmBusy} onPress={addComment} />
         </Row>
       </Sheet>
     </View>

@@ -4,6 +4,12 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-17 05:40] — feat: v2 Fase G (telas) — strings extraídas e traduzidas (EN/ES/PT)
+- **O que mudou**: as 5 telas principais (Auth, Tabs, Flow, Job, Misc) tiveram as strings de UI extraídas para o i18n e traduzidas para **inglês, espanhol e português** (~330 chaves). Cada tela registra suas strings (`registerStrings`) e lê via `t()`. Trocar o idioma no Perfil → Language muda o app inteiro. Stage/status, ícones, campos do banco e a lógica foram preservados (hooks `t` renomeados onde colidiam: `tr`/`v`/`id`).
+- **Arquivos**: `src/v2/screens/{Auth,Tabs,Flow,Job,Misc}.tsx`
+- **Validação**: `tsc` limpo, `npm test` 15/15. Check de chaves: **0 órfãs** (toda chave usada está registrada), **0 mortas**.
+- **Pendência menor**: TabBar (rótulos das abas, `ui.tsx`) e poucas strings de `ui.tsx`/`SendSheet` ainda em EN — próximo incremento.
+
 ### [2026-06-17 05:20] — feat: v2 Fase G (base) — infraestrutura de i18n + seletor de idioma
 - **O que mudou**: base do multi-idioma (EN/ES/PT). `lib/i18n.tsx`: dicionário com **EN como fonte/fallback** (ES/PT por chave), `t()`/`translate` com interpolação `{var}`, locale persistido (AsyncStorage), `registerStrings` (cada tela co-localiza suas strings), `useT`/`useLocale` (re-render ao trocar idioma). `I18nProvider` no `App`. Tela **Language** no perfil (Profile → Language) com as 3 opções; **inglês ativo por padrão**.
 - **Arquivos**: `src/v2/lib/i18n.tsx` (novo), `src/v2/App.tsx`, `src/v2/screens/Misc.tsx` (LanguageScreen), `src/v2/Navigator.tsx`, `src/v2/screens/Tabs.tsx`
