@@ -4,6 +4,11 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-06-18 01:10] — fix: v2 — desabilita minificação (exceção JS no build de release)
+- **O que mudou**: criado `metro.config.js` com `minifierConfig: { compress: false, mangle: false, keep_classnames/keep_fnames: true }`. O build 22 (New Arch off) PAROU a tela branca e passou a **crashar com exceção JS** (crash logs `.ips` 22:02: thread `com.facebook.react.ExceptionsManagerQueue` → SIGABRT/abort, exceção JS não tratada; a Apple não inclui a mensagem no log). **Diagnóstico por triangulação:** build 21 (NewArch+minify)=tela branca, build 22 (OldArch+minify)=exceção JS, **túnel Expo Go em modo release SEM minify = app abre PERFEITO** (foto da Home). A **minificação** é a variável comum nas duas falhas; sem ela funciona. Desabilitar minify confirma/corrige a causa.
+- **Arquivos**: `metro.config.js` (novo)
+- **Build 23** disparado (New Arch off + minify off). Se resolver, refinar depois (achar o offender exato e re-habilitar minify parcial); se não, é Old Arch ou módulo nativo.
+
 ### [2026-06-17 20:25] — fix: v2 — desabilita New Architecture (tentativa p/ tela branca no build)
 - **O que mudou**: `newArchEnabled: false` no `app.json`. Após remover o expo-updates, o build 21 AINDA dava tela branca no TestFlight (dono confirmou que é o 21; sem crash log novo = JS não chega a montar no release), enquanto no Expo Go (dev) o app boota 100%. Tentei reproduzir em modo release via túnel (`--no-dev`/`--minify`), mas o dono não conseguiu escanear (cansaço + timeout do `--minify`). O sintoma — **tela branca em build de produção que funciona no Expo Go** — é classicamente causado pela **New Architecture**: o build EAS compila os módulos nativos do projeto com New Arch e pode quebrar onde o runtime fixo do Expo Go não quebra. Desabilitar volta pra Old Architecture (Paper), suportada por todas as libs do projeto (svg, lucide, camera, audio, location, gradient, screens, safe-area).
 - **Arquivos**: `app.json`
