@@ -4,6 +4,11 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-04 18:00] — chore: v2 — plano V2_100 (diagnóstico completo 04/07) + script do túnel da VPS
+- **O que mudou**: adicionado `docs/V2_100_PLAN.md` — diagnóstico completo pedido pelo dono (áudio 04/07: teclado, telas lentas, "sessões que empilham") com causa-raiz por arquivo:linha e plano de execução F1–F9. Inclui bug PROVADO ao vivo: `ai_jobs` nunca logou (service_role sem GRANT INSERT — insert da Edge Function falha em silêncio). Também versionado o `start-tunnel.sh` (túnel permanente cloudflared na VPS de extração, porta 8082, tmux `pquote`).
+- **Arquivos**: `docs/V2_100_PLAN.md` (novo), `start-tunnel.sh` (novo)
+- **Decisão técnica**: ordem de execução F1 teclado → F2 navegação/estado → F3 velocidade (o que o dono sente) → F4 IA observável → F5 acabamento → F6 build → F7 segurança → F8 testes → F9 faxina. Método por fase: fazer → revisão adversarial → testar no túnel → commit.
+
 ### [2026-07-04 17:55] — fix: v2 — câmera fullbleed + teclado na captura (iOS) + TabBar com inset real + gravação animada
 - **O que mudou**: (1) `CameraView` em `position:absolute` cobrindo a tela toda (fim do preview "filetinha" no Expo Go), com controles/ficha sobrepostos na base; (2) esses controles agora sobem com o teclado (`KeyboardAvoidingView` iOS) e o bottom-sheet encolheu 380→300 com `keyboardDismissMode="on-drag"`; (3) TabBar usa `useSafeAreaInsets` (paddingBottom dinâmico) e o `SafeAreaView` das abas libera a borda inferior; (4) indicador de gravação de voz virou animação viva (bolinha pulsando + waveform em loop, `useNativeDriver`) — cosmética, não reflete amplitude do mic.
 - **Arquivos**: `src/v2/screens/Flow.tsx`, `src/v2/Navigator.tsx`, `src/v2/ui.tsx`
