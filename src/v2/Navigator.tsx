@@ -111,7 +111,7 @@ function AppFlow() {
   return (
     <StoreCtx.Provider value={{ store, up }}>
       <StatusBar style={fullbleed ? 'light' : 'dark'} />
-      <SafeAreaView style={{ flex: 1, backgroundColor: fullbleed ? '#0C1116' : colors.bg }} edges={fullbleed ? ['bottom'] : ['top', 'bottom']}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: fullbleed ? '#0C1116' : colors.bg }} edges={fullbleed ? ['bottom'] : showTabs ? ['top'] : ['top', 'bottom']}>
         <View style={{ flex: 1 }}>
           <Comp go={go} back={back} params={top.params} />
           {showTabs ? <TabBar active={top.name} onNav={(k) => go(k, {}, 'tab')} /> : null}

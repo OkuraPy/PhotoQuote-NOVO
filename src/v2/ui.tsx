@@ -1,5 +1,6 @@
 // PhotoQuote v2 — shared UI primitives (ported from handoff app/ui.jsx + styles/app.css) for React Native.
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Modal,
   Pressable,
@@ -424,6 +425,7 @@ const navStyles = StyleSheet.create({
 /* ============================ bottom tab bar ============================ */
 export function TabBar({ active, onNav }: { active: string; onNav: (k: string) => void }) {
   const t = useT();
+  const insets = useSafeAreaInsets();
   const tabs: [string, string][] = [
     ['home', 'home'],
     ['jobs', 'layers'],
@@ -437,7 +439,7 @@ export function TabBar({ active, onNav }: { active: string; onNav: (k: string) =
         justifyContent: 'space-around',
         alignItems: 'flex-start',
         paddingTop: 8,
-        paddingBottom: 26,
+        paddingBottom: Math.max(insets.bottom, 12),
         paddingHorizontal: 22,
         backgroundColor: 'rgba(255,255,255,0.96)',
         borderTopWidth: 1,

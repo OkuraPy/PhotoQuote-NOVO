@@ -4,6 +4,11 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-04 17:55] — fix: v2 — câmera fullbleed + teclado na captura (iOS) + TabBar com inset real + gravação animada
+- **O que mudou**: (1) `CameraView` em `position:absolute` cobrindo a tela toda (fim do preview "filetinha" no Expo Go), com controles/ficha sobrepostos na base; (2) esses controles agora sobem com o teclado (`KeyboardAvoidingView` iOS) e o bottom-sheet encolheu 380→300 com `keyboardDismissMode="on-drag"`; (3) TabBar usa `useSafeAreaInsets` (paddingBottom dinâmico) e o `SafeAreaView` das abas libera a borda inferior; (4) indicador de gravação de voz virou animação viva (bolinha pulsando + waveform em loop, `useNativeDriver`) — cosmética, não reflete amplitude do mic.
+- **Arquivos**: `src/v2/screens/Flow.tsx`, `src/v2/Navigator.tsx`, `src/v2/ui.tsx`
+- **Contexto**: mudanças feitas em 20/06 via hot-reload no túnel da VPS (testadas pelo dono no Expo Go) e que estavam sem commit desde então. Commit de backup antes de iniciar o V2_100_PLAN.
+
 ### [2026-06-18 01:10] — fix: v2 — desabilita minificação (exceção JS no build de release)
 - **O que mudou**: criado `metro.config.js` com `minifierConfig: { compress: false, mangle: false, keep_classnames/keep_fnames: true }`. O build 22 (New Arch off) PAROU a tela branca e passou a **crashar com exceção JS** (crash logs `.ips` 22:02: thread `com.facebook.react.ExceptionsManagerQueue` → SIGABRT/abort, exceção JS não tratada; a Apple não inclui a mensagem no log). **Diagnóstico por triangulação:** build 21 (NewArch+minify)=tela branca, build 22 (OldArch+minify)=exceção JS, **túnel Expo Go em modo release SEM minify = app abre PERFEITO** (foto da Home). A **minificação** é a variável comum nas duas falhas; sem ela funciona. Desabilitar minify confirma/corrige a causa.
 - **Arquivos**: `metro.config.js` (novo)

@@ -1,6 +1,6 @@
 // PhotoQuote v2 — priority flow: Camera (photo-first + voice), Estimate (AI + editing), Attach client
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
@@ -178,12 +178,11 @@ export function CameraScreen({ go, back }: NavProp) {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#0C1116' }}>
-      {/* live camera view */}
-      <View style={{ flex: 1 }}>
-        {camPerm?.granted ? (
-          <CameraView ref={camRef} style={{ flex: 1 }} facing={facing} />
-        ) : (
-          <LinearGradient colors={['#2A3340', '#0C1116']} start={{ x: 0.5, y: 0.1 }} end={{ x: 0.5, y: 1 }} style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
+      {/* CÂMERA fullbleed — preenche a tela inteira (atrás dos controles) */}
+      {camPerm?.granted ? (
+        <CameraView ref={camRef} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} facing={facing} />
+      ) : (
+        <LinearGradient colors={['#2A3340', '#0C1116']} start={{ x: 0.5, y: 0.1 }} end={{ x: 0.5, y: 1 }} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
             <View style={{ width: 66, height: 66, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
               <Icon name="camera" size={28} color="rgba(255,255,255,0.55)" />
             </View>
@@ -197,16 +196,17 @@ export function CameraScreen({ go, back }: NavProp) {
                 <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: 'rgba(255,255,255,0.4)', marginTop: 8, textAlign: 'center' }}>{t('flow.enableInSettings')}</Text>
               )
             ) : null}
-          </LinearGradient>
-        )}
-        {/* close button overlay */}
-        <View style={{ position: 'absolute', top: 50, left: 0, right: 0, paddingHorizontal: 18, flexDirection: 'row', justifyContent: 'space-between' }}>
-          <CamSide icon="x" onPress={back} />
-        </View>
+        </LinearGradient>
+      )}
+      {/* close button overlay */}
+      <View style={{ position: 'absolute', top: 50, left: 0, right: 0, paddingHorizontal: 18, flexDirection: 'row', justifyContent: 'space-between' }}>
+        <CamSide icon="x" onPress={back} />
       </View>
 
+      {/* controles + ficha sobrepostos na base — sobem junto com o teclado */}
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }} pointerEvents="box-none">
       {/* photo strip */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 20, paddingVertical: 14 }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, flexShrink: 0 }} contentContainerStyle={{ gap: 8, paddingHorizontal: 20, paddingVertical: 14, alignItems: 'center' }}>
         {photos.map((p, i) => (
           <View key={`${p.uri}-${i}`}>
             <Image source={{ uri: p.uri }} style={{ width: 56, height: 56, borderRadius: 12, borderWidth: 2, borderColor: 'rgba(255,255,255,0.18)' }} />
@@ -237,7 +237,7 @@ export function CameraScreen({ go, back }: NavProp) {
       </View>
 
       {/* bottom sheet card */}
-      <ScrollView style={{ backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: 380 }} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 26 }} keyboardShouldPersistTaps="handled">
+      <ScrollView style={{ backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: 300 }} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 26 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <Row style={{ gap: 6 }}>
           <Text style={{ fontFamily: fonts.extrabold, fontSize: 13, color: colors.ink, letterSpacing: 0.5 }}>{t('flow.serviceTypes')}</Text>
           <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.muted }}>{t('flow.helpsTheAi')}</Text>
@@ -272,6 +272,7 @@ export function CameraScreen({ go, back }: NavProp) {
 
         <Btn title={t('flow.generateEstimate')} icon="sparkles" disabled={!photos.length} onPress={() => go('estimate', { fresh: true })} style={{ marginTop: 16 }} />
       </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -299,7 +300,6 @@ export function DescriptionInput() {
     }
   }, [mode]);
   const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-  const bars = [...Array(28)].map((_, i) => 7 + ((i * 11 + 9) % 21));
 
   const startRec = async () => {
     try {
@@ -338,10 +338,10 @@ export function DescriptionInput() {
   if (mode === 'recording') {
     return (
       <View style={{ marginTop: 16 }}>
-        <View style={[voicebar, { backgroundColor: colors.errorTint, borderColor: 'transparent' }]}>
-          <View style={{ width: 11, height: 11, borderRadius: 6, backgroundColor: colors.error }} />
-          <Wave bars={bars} color={colors.error} />
-          <Text style={{ fontFamily: fonts.num, fontSize: 12.5, color: colors.error }}>{mmss(secs)}</Text>
+        <View style={[voicebar, { backgroundColor: colors.errorTint, borderColor: 'transparent', gap: 11 }]}>
+          <RecDot />
+          <Wave color={colors.error} />
+          <Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.error, minWidth: 40, textAlign: 'right' }}>{mmss(secs)}</Text>
           <Pressable onPress={stopRec} style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: colors.error, alignItems: 'center', justifyContent: 'center' }}>
             <View style={{ width: 15, height: 15, borderRadius: 4, backgroundColor: '#fff' }} />
           </Pressable>
@@ -386,11 +386,63 @@ export function DescriptionInput() {
 }
 const voicebar = { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 14, paddingVertical: 11, paddingHorizontal: 13, ...shadow.sm };
 const mic = { width: 50, height: 50, borderRadius: 25, backgroundColor: colors.primaryTint, alignItems: 'center' as const, justifyContent: 'center' as const };
-function Wave({ bars, color }: { bars: number[]; color: string }) {
+// Gravando — bolinha com pulso suave.
+function RecDot() {
+  const p = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const l = Animated.loop(
+      Animated.sequence([
+        Animated.timing(p, { toValue: 1, duration: 650, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(p, { toValue: 0, duration: 650, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ])
+    );
+    l.start();
+    return () => l.stop();
+  }, [p]);
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, height: 34, flex: 1 }}>
-      {bars.map((h, i) => (
-        <View key={i} style={{ width: 3, height: h, borderRadius: 3, backgroundColor: color }} />
+    <Animated.View
+      style={{
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        backgroundColor: colors.error,
+        opacity: p.interpolate({ inputRange: [0, 1], outputRange: [1, 0.35] }),
+        transform: [{ scale: p.interpolate({ inputRange: [0, 1], outputRange: [1, 1.3] }) }],
+      }}
+    />
+  );
+}
+
+// Waveform animada — as barras pulsam continuamente; usa flex pra preencher a largura (qualquer tela).
+function Wave({ color }: { color: string }) {
+  const N = 28;
+  const anims = useRef([...Array(N)].map((_, i) => new Animated.Value(((i * 37) % 100) / 100))).current;
+  useEffect(() => {
+    const loops = anims.map((a, i) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(a, { toValue: 1, duration: 360 + (i % 7) * 85, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+          Animated.timing(a, { toValue: 0.1, duration: 360 + (i % 7) * 85, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        ])
+      )
+    );
+    loops.forEach((l) => l.start());
+    return () => loops.forEach((l) => l.stop());
+  }, [anims]);
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, height: 36, flex: 1 }}>
+      {anims.map((a, i) => (
+        <Animated.View
+          key={i}
+          style={{
+            flex: 1,
+            height: 32,
+            borderRadius: 99,
+            backgroundColor: color,
+            opacity: a.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }),
+            transform: [{ scaleY: a.interpolate({ inputRange: [0, 1], outputRange: [0.16, 1] }) }],
+          }}
+        />
       ))}
     </View>
   );
