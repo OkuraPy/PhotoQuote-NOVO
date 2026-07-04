@@ -114,11 +114,14 @@ export function JobCard({ j, i, onPress }: { j: Job; i: number; onPress: () => v
     <Pressable onPress={onPress}>
       <Card style={{ flexDirection: 'row', gap: 13, padding: 13, alignItems: 'center' }}>
         <View>
-          <View style={{ width: 58, height: 58, borderRadius: 13, overflow: 'hidden' }}>
-            {/* photo placeholder */}
-            <LinearGradient colors={['#DCE2E0', '#EEF1F0']} style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="image" size={20} color="#A6AEB8" />
-            </LinearGradient>
+          <View style={{ width: 58, height: 58, borderRadius: 13, overflow: 'hidden', backgroundColor: colors.chipBg }}>
+            {j.thumb ? (
+              <Image source={{ uri: j.thumb }} style={{ flex: 1 }} resizeMode="cover" />
+            ) : (
+              <LinearGradient colors={['#DCE2E0', '#EEF1F0']} style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="image" size={20} color="#A6AEB8" />
+              </LinearGradient>
+            )}
           </View>
           <View style={{ position: 'absolute', right: 4, bottom: 4, backgroundColor: 'rgba(12,17,22,0.62)', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 7 }}>
             <Text style={{ fontFamily: fonts.extrabold, fontSize: 10, color: '#fff' }}>{j.photos}</Text>
@@ -165,10 +168,7 @@ export function HomeScreen({ go }: NavProp) {
           <Text style={{ fontFamily: fonts.bold, fontSize: 12, letterSpacing: 1.5, color: colors.muted }}>{t('tabs.welcomeBack')}</Text>
           <Text numberOfLines={1} style={{ fontFamily: fonts.extrabold, fontSize: 28, color: colors.ink, letterSpacing: -0.7, marginTop: 4 }}>{companyName}</Text>
         </View>
-        <Row style={{ gap: 8 }}>
-          <NavBtn icon="bell" />
-          <Avatar text={initials(companyName)} size={40} radius={13} />
-        </Row>
+        <Avatar text={initials(companyName)} size={40} radius={13} />
       </Between>
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false}>
         <View style={{ gap: 12, marginTop: 16 }}>
@@ -239,10 +239,9 @@ export function JobsScreen({ go }: NavProp) {
   if (q) list = list.filter((j) => (j.client || 'no client').toLowerCase().includes(q.toLowerCase()) || j.addr.toLowerCase().includes(q.toLowerCase()) || j.title.toLowerCase().includes(q.toLowerCase()));
   return (
     <>
-      <Between style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>
+      <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>
         <Text style={{ fontFamily: fonts.extrabold, fontSize: 30, color: colors.ink, letterSpacing: -0.7 }}>{t('tabs.jobs')}</Text>
-        <NavBtn icon="filter" size={18} />
-      </Between>
+      </View>
       <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
         <SearchBar placeholder={t('tabs.searchClientOrAddress')} value={q} onChangeText={(v) => up({ jobQ: v })} />
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }} style={{ marginTop: 12 }}>
@@ -368,7 +367,6 @@ export function ProfileScreen({ go }: NavProp) {
         <SetGroup rows={[
           { ico: 'building', name: t('tabs.businessDetails'), val: t('tabs.businessDetailsVal'), onPress: () => go('profileCompany') },
           { ico: 'image', name: t('tabs.logo'), val: company.logo_url ? t('tabs.logoAdded') : t('tabs.logoAdd'), onPress: () => go('profileCompany') },
-          { ico: 'users', name: t('tabs.team'), val: t('tabs.teamVal') },
         ]} />
 
         <SectionTitle title={t('tabs.defaults')} />
@@ -381,7 +379,6 @@ export function ProfileScreen({ go }: NavProp) {
 
         <SectionTitle title={t('tabs.account')} />
         <SetGroup rows={[
-          { ico: 'bell', name: t('tabs.notifications'), toggle: true },
           { ico: 'lock', name: t('tabs.changePassword'), onPress: () => go('changePassword') },
           { ico: 'logout', name: t('tabs.logOut'), danger: true, onPress: () => signOut() },
         ]} />

@@ -10,7 +10,7 @@ import { addPhaseComment, addPhasePhotos, agreementLink, createAgreement, create
 import { useAuth } from '../lib/auth';
 import { sendDoc } from '../lib/send';
 import { registerStrings, useT } from '../lib/i18n';
-import { Between, Btn, Card, CatChip, Divider, Empty, Field, Input, Nav, NavBtn, Row, SectionTitle, SendSheet, Sheet, StageChip, useStore } from '../ui';
+import { Between, Btn, Card, CatChip, Divider, Empty, Field, Input, Nav, Row, SectionTitle, SendSheet, Sheet, StageChip, useStore } from '../ui';
 
 registerStrings({
   // NEXT STEP labels (keyed by stage action; Stage values themselves are not translated)
@@ -300,7 +300,7 @@ export function JobScreen({ go, back, params }: NavProp) {
 
   return (
     <>
-      <Nav title={cName || t('job.noClient')} sub={name} center onBack={back} right={<NavBtn icon="more" size={18} />} />
+      <Nav title={cName || t('job.noClient')} sub={name} center onBack={back} />
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false}>
         <View style={{ backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: radii.xl, padding: 18, ...shadow.sm }}>
           <Between style={{ alignItems: 'flex-start' }}>

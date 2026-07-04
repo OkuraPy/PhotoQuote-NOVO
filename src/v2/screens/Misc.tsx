@@ -1,6 +1,6 @@
 // PhotoQuote v2 — Client detail, Client edit, Company edit
 import React, { useEffect, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Image, Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Icon } from '../Icon';
@@ -103,10 +103,12 @@ export function ClientScreen({ go, back, params }: NavProp) {
   const { user } = useAuth();
   const { data: allJobs = [] } = useQuery({ queryKey: ['jobs', user?.id], queryFn: () => fetchJobs(user!.id), enabled: !!user?.id });
   const jobs = c?.id ? allJobs.filter((j) => j.clientId === c.id) : [];
-  const acts: [string, string, string][] = [
-    ['phone', t('misc.call'), colors.primary],
-    ['msg', t('misc.text'), colors.info],
-    ['mail', t('misc.email'), colors.accentInk],
+  // real actions via deep links; disabled when the client has no phone/email on file
+  const tel = (c?.phone || '').replace(/[^\d+]/g, ''); // dialers reject "(305) 555-0142" raw
+  const acts: [string, string, string | null][] = [
+    ['phone', t('misc.call'), tel ? `tel:${tel}` : null],
+    ['msg', t('misc.text'), tel ? `sms:${tel}` : null],
+    ['mail', t('misc.email'), c?.email ? `mailto:${c.email}` : null],
   ];
   if (!c) {
     return (
@@ -131,9 +133,16 @@ export function ClientScreen({ go, back, params }: NavProp) {
           ) : null}
         </View>
         <Row style={{ gap: 10, marginTop: 20 }}>
-          {acts.map(([ico, l, col]) => (
+          {acts.map(([ico, l, url]) => (
             <View key={l} style={{ flex: 1 }}>
-              <Btn variant="ghost" style={{ height: 64, flexDirection: 'column', gap: 5 }} title={l} icon={ico} />
+              <Btn
+                variant="ghost"
+                style={{ height: 64, flexDirection: 'column', gap: 5 }}
+                title={l}
+                icon={ico}
+                disabled={!url}
+                onPress={url ? () => Linking.openURL(url).catch(() => {}) : undefined}
+              />
             </View>
           ))}
         </Row>
@@ -160,7 +169,7 @@ export function ClientScreen({ go, back, params }: NavProp) {
         </View>
       </ScrollView>
       <View style={actionbar}>
-        <Btn title={t('misc.newQuoteFor', { name: c.name.split(' ')[0] })} icon="camera" onPress={() => go('camera')} />
+        <Btn title={t('misc.newQuoteFor', { name: c.name.split(' ')[0] })} icon="camera" onPress={() => go('camera', { client: c })} />
       </View>
     </>
   );

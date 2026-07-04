@@ -79,6 +79,7 @@ export type Job = {
   value: number;
   photos: number;
   date: string;
+  thumb?: string | null; // first project photo, for the card thumbnail
 };
 
 export const JOBS: Job[] = [

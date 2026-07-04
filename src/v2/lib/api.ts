@@ -448,6 +448,7 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
       stage: deriveStage(e?.status, iv?.status),
       value,
       photos: Array.isArray(p.photo_urls) ? p.photo_urls.length : 0,
+      thumb: Array.isArray(p.photo_urls) && p.photo_urls[0] ? String(p.photo_urls[0]) : null,
       date: monthDay(p.created_at),
     };
   });

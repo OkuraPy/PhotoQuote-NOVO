@@ -123,7 +123,7 @@ const shrink = async (uri: string) => {
 };
 
 /* ---------------- CAMERA (photo-first, dark) ---------------- */
-export function CameraScreen({ go, back }: NavProp) {
+export function CameraScreen({ go, back, params }: NavProp) {
   const t = useT();
   const { store, up } = useStore();
   const photos = store.photos || [];
@@ -138,6 +138,15 @@ export function CameraScreen({ go, back }: NavProp) {
   const [capturing, setCapturing] = useState(false);
   useEffect(() => {
     (async () => { await requestCamPerm(); await requestMicPerm(); })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // arriving from a client card ("New quote for X") — pre-select that client for the Attach step.
+  // Only at the true start of the flow (no photos, no selection yet): the Navigator REMOUNTS this
+  // screen on back-nav with the same params, and re-applying would silently undo a client swap
+  // the user made on the Attach step.
+  useEffect(() => {
+    if (params?.client && !store.aSel && (store.photos || []).length === 0) up({ aSel: params.client });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -579,7 +588,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
 
   return (
     <>
-      <Nav title={tr('flow.estimate')} center onBack={back} right={<NavBtn icon="share" size={17} />} />
+      <Nav title={tr('flow.estimate')} center onBack={back} />
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false}>
         {/* AI status banner (hidden while editing an existing job — no AI run there) */}
         {editJob ? null : analyzing ? (
