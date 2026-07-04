@@ -1,10 +1,10 @@
 // PhotoQuote v2 — auth gate + lightweight navigation stacks + shared store.
-import React, { useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from './theme';
-import { StoreCtx, TabBar, V2Store } from './ui';
+import { FLOW_RESET, StoreCtx, TabBar, V2Store } from './ui';
 import { useAuth } from './lib/auth';
 import { ForgotScreen, LoginScreen, OnboardScreen, SignupScreen } from './screens/Auth';
 import { ClientsScreen, HomeScreen, JobsScreen, ProfileScreen } from './screens/Tabs';
@@ -37,22 +37,7 @@ const TAB_ROOTS = ['home', 'jobs', 'clients', 'profile'];
 const FULLBLEED = ['camera'];
 
 const initStore = (): V2Store => ({
-  photos: [],
-  svcs: [],
-  descText: '',
-  voice: null,
-  items: [],
-  confidence: 0,
-  aiNotes: '',
-  taxRate: 8.25,
-  marginRate: 0,
-  editing: null,
-  aQ: '',
-  aSel: null,
-  aZip: '',
-  aLoc: null,
-  regionMult: 1,
-  regionState: '',
+  ...FLOW_RESET,
   jobTab: 'quote',
   sheet: false,
   stageOverride: {},
@@ -91,25 +76,31 @@ function AuthFlow() {
 function AppFlow() {
   const { stack, setStack, top, back } = useStack('home');
   const [store, setStore] = useState<V2Store>(initStore);
-  const up = (patch: Partial<V2Store> | ((s: V2Store) => Partial<V2Store>)) =>
-    setStore((s) => ({ ...s, ...(typeof patch === 'function' ? patch(s) : patch) }));
+  // stable `up` + memoized context value: a store write re-renders the top screen once, and
+  // nav-only re-renders don't churn the context identity (typing used to re-render everything)
+  const up = useCallback(
+    (patch: Partial<V2Store> | ((s: V2Store) => Partial<V2Store>)) =>
+      setStore((s) => ({ ...s, ...(typeof patch === 'function' ? patch(s) : patch) })),
+    []
+  );
 
   const go = (name: string, params: any = {}, mode?: string) => {
-    if (name === 'camera') {
-      // fresh capture session — clear any prior photos / AI estimate / client / location
-      up({ photos: [], svcs: [], descText: '', voice: null, items: [], confidence: 0, aiNotes: '', taxRate: 8.25, marginRate: 0, aSel: null, aQ: '', aZip: '', aLoc: null, regionMult: 1, regionState: '' });
-    }
+    // fresh capture session — clear any prior photos / AI estimate / client / location
+    if (name === 'camera') up(FLOW_RESET);
     if (name === 'job') up({ jobTab: (params && params.tab) || 'quote', sheet: false });
     if (mode === 'tab') setStack([{ name, params }]);
+    // 'reset': job saved — stack becomes [home, job] so back never re-enters the finished flow
+    else if (mode === 'reset') setStack([{ name: 'home', params: {} }, { name, params }]);
     else setStack((s) => [...s, { name, params }]);
   };
 
   const Comp = APP_SCREENS[top.name] || HomeScreen;
   const showTabs = stack.length === 1 && TAB_ROOTS.includes(top.name);
   const fullbleed = FULLBLEED.includes(top.name);
+  const ctx = useMemo(() => ({ store, up }), [store, up]);
 
   return (
-    <StoreCtx.Provider value={{ store, up }}>
+    <StoreCtx.Provider value={ctx}>
       <StatusBar style={fullbleed ? 'light' : 'dark'} />
       <SafeAreaView style={{ flex: 1, backgroundColor: fullbleed ? '#0C1116' : colors.bg }} edges={fullbleed ? ['bottom'] : showTabs ? ['top'] : ['top', 'bottom']}>
         <View style={{ flex: 1 }}>
@@ -123,7 +114,6 @@ function AppFlow() {
 
 export function Navigator() {
   const { session, loading } = useAuth();
-  console.log('[BOOT] Navigator render; loading=', loading, 'hasSession=', !!session);
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}>

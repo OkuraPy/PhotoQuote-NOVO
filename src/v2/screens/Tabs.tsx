@@ -1,6 +1,6 @@
 // PhotoQuote v2 — tab roots: Home, Jobs, Clients, Profile
 import React from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useQuery } from '@tanstack/react-query';
 import { Icon } from '../Icon';
@@ -257,19 +257,22 @@ export function JobsScreen({ go }: NavProp) {
           ))}
         </ScrollView>
       </View>
-      <ScrollView contentContainerStyle={[scroll, { paddingTop: 14 }]} showsVerticalScrollIndicator={false}>
-        {isLoading ? (
-          <View style={{ paddingTop: 40, alignItems: 'center' }}><ActivityIndicator color={colors.primary} /></View>
-        ) : list.length === 0 ? (
-          <Empty icon="layers" title={jobs.length === 0 ? t('tabs.noJobsYet') : t('tabs.noMatches')} body={jobs.length === 0 ? t('tabs.noJobsBody') : t('tabs.noMatchesJobsBody')} />
-        ) : (
-          <View style={{ gap: 10 }}>
-            {list.map((j, i) => (
-              <JobCard key={j.id} j={j} i={i} onPress={() => go('job', { job: j })} />
-            ))}
-          </View>
-        )}
-      </ScrollView>
+      <FlatList
+        data={isLoading ? [] : list}
+        keyExtractor={(j) => j.id}
+        renderItem={({ item: j, index: i }) => <JobCard j={j} i={i} onPress={() => go('job', { job: j })} />}
+        contentContainerStyle={[scroll, { paddingTop: 14, gap: 10 }]}
+        showsVerticalScrollIndicator={false}
+        initialNumToRender={8}
+        windowSize={7}
+        ListEmptyComponent={
+          isLoading ? (
+            <View style={{ paddingTop: 40, alignItems: 'center' }}><ActivityIndicator color={colors.primary} /></View>
+          ) : (
+            <Empty icon="layers" title={jobs.length === 0 ? t('tabs.noJobsYet') : t('tabs.noMatches')} body={jobs.length === 0 ? t('tabs.noJobsBody') : t('tabs.noMatchesJobsBody')} />
+          )
+        }
+      />
       <Fab onPress={() => go('camera')} />
     </>
   );

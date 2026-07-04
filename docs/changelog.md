@@ -4,6 +4,15 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-04 19:30] — fix: v2 — V2_100 F1 (teclado em TODAS as telas) + F2 (navegação/estado) + F3 (velocidade)
+- **O que mudou**:
+  - **F1 TECLADO**: novo `Kav` (KeyboardAvoidingView `padding` nas 2 plataformas) aplicado no `Sheet` central — conserta de uma vez comentário da obra, nova fase e editor de item — e nos formulários ClientEdit/Company/ChangePassword/Attach/Login/Forgot/Signup; Login agora rola (ScrollView). Decisão: NÃO setar `android.softwareKeyboardLayoutMode` (é ignorado com `edgeToEdgeEnabled:true`); com edge-to-edge o Android não redimensiona sozinho → o KAV `padding` compensa nas duas plataformas.
+  - **F2 NAVEGAÇÃO/ESTADO**: pós-save reseta a pilha para `[home, job]` e limpa o fluxo (`FLOW_RESET`; acaba o "voltar atravessando o fluxo morto" e o vazamento de fotos/itens entre cotações). "Edit" do orçamento num job salvo agora HIDRATA os itens reais do job e salva de volta no MESMO estimate (`updateEstimateItems`; o trigger do banco recalcula os totais — antes mostrava os itens do último fluxo de captura e o Continue criaria um job DUPLICADO). A IA re-roda quando o conjunto de fotos muda (`aiSig`), preservando edições quando as fotos são as mesmas.
+  - **F3 VELOCIDADE**: `up` estável (useCallback) + contexto memoizado (era re-render da tela inteira por tecla), lista de Trabalhos virtualizada (FlatList), fotos encolhidas para 1280px NA ORIGEM (o strip parava de decodificar 12MP por thumbnail; importação da galeria serializada com spinner pra não estourar memória), logs `[BOOT]` removidos (mantidos ErrorBoundary e timeouts).
+- **Arquivos**: `src/v2/ui.tsx`, `src/v2/Navigator.tsx`, `src/v2/screens/{Flow,Job,Misc,Auth,Tabs}.tsx`, `src/v2/lib/api.ts`, `src/v2/App.tsx`, `index.ts`
+- **Revisão**: 3 revisores adversariais (1 por fase), todos "aprovado com ressalvas" — ressalvas CORRIGIDAS: behavior Android `height`→`padding`; `paddingBottom` do Login engolido pelo KAV (movido pro ScrollView interno); cabeçalho do job recém-salvo dizia "Sem cliente"/"Sem endereço"/título genérico porque o store já estava resetado (agora prioriza `realClient` do banco + `title` via params); galeria com `Promise.all` de 30 decodes → serializada.
+- **Pendências anotadas**: editar orçamento já FATURADO não re-sincroniza a fatura (decidir na F5); datas ainda `en-US`; `go`/`back` não memoizados (ganho marginal). `tsc` limpo, `npm test` 15/15.
+
 ### [2026-07-04 18:00] — chore: v2 — plano V2_100 (diagnóstico completo 04/07) + script do túnel da VPS
 - **O que mudou**: adicionado `docs/V2_100_PLAN.md` — diagnóstico completo pedido pelo dono (áudio 04/07: teclado, telas lentas, "sessões que empilham") com causa-raiz por arquivo:linha e plano de execução F1–F9. Inclui bug PROVADO ao vivo: `ai_jobs` nunca logou (service_role sem GRANT INSERT — insert da Edge Function falha em silêncio). Também versionado o `start-tunnel.sh` (túnel permanente cloudflared na VPS de extração, porta 8082, tmux `pquote`).
 - **Arquivos**: `docs/V2_100_PLAN.md` (novo), `start-tunnel.sh` (novo)

@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Icon } from '../Icon';
 import { colors, fonts } from '../theme';
 import { Client, initials } from '../data';
-import { Avatar, Between, Btn, Card, Divider, Empty, Field, Input, Nav, NavBtn, Row, SectionTitle, useStore } from '../ui';
+import { Avatar, Between, Btn, Card, Divider, Empty, Field, Input, Kav, Nav, NavBtn, Row, SectionTitle, useStore } from '../ui';
 import { JobCard } from './Tabs';
 import { useAuth } from '../lib/auth';
 import { countClientProjects, createClient, deleteClient, fetchCompanyProfile, fetchJobs, lookupZip, updateClient, updateCompanyProfile, uploadCompanyLogo } from '../lib/api';
@@ -245,7 +245,7 @@ export function ClientEditScreen({ back, params }: NavProp) {
   };
 
   return (
-    <>
+    <Kav>
       <Nav title={editing ? t('misc.editClient') : t('misc.newClient')} center onBack={back} />
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <Field label={t('misc.name')}><Input value={name} onChangeText={setName} placeholder={t('misc.namePlaceholder')} autoFocus={!editing} /></Field>
@@ -266,7 +266,7 @@ export function ClientEditScreen({ back, params }: NavProp) {
       <View style={actionbar}>
         <Btn title={busy ? t('misc.saving') : editing ? t('misc.saveChanges') : t('misc.createClient')} onPress={save} disabled={busy} />
       </View>
-    </>
+    </Kav>
   );
 }
 
@@ -332,7 +332,7 @@ export function CompanyScreen({ back }: NavProp) {
     }
   };
   return (
-    <>
+    <Kav>
       <Nav title={t('misc.businessDetails')} center onBack={back} />
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <View style={{ alignItems: 'center', marginBottom: 18 }}>
@@ -357,7 +357,7 @@ export function CompanyScreen({ back }: NavProp) {
       <View style={actionbar}>
         <Btn title={busy ? t('misc.saving') : t('misc.save')} onPress={save} disabled={busy} />
       </View>
-    </>
+    </Kav>
   );
 }
 
@@ -378,7 +378,7 @@ export function ChangePasswordScreen({ back }: NavProp) {
     back();
   };
   return (
-    <>
+    <Kav>
       <Nav title={t('misc.changePassword')} center onBack={back} />
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <Field label={t('misc.newPassword')}><Input value={pw} onChangeText={setPw} secureTextEntry placeholder={t('misc.atLeast6')} autoFocus /></Field>
@@ -387,7 +387,7 @@ export function ChangePasswordScreen({ back }: NavProp) {
       <View style={actionbar}>
         <Btn title={busy ? t('misc.saving') : t('misc.updatePassword')} onPress={save} disabled={busy} />
       </View>
-    </>
+    </Kav>
   );
 }
 

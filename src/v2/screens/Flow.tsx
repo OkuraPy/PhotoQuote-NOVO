@@ -1,8 +1,9 @@
 // PhotoQuote v2 — priority flow: Camera (photo-first + voice), Estimate (AI + editing), Attach client
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Easing, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, Image, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
 import { Icon } from '../Icon';
@@ -10,9 +11,9 @@ import { colors, fonts, radii, shadow } from '../theme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { buildStarterEstimate, calcTotals, fmt, LineItem, SERVICE_TYPES, split } from '../data';
 import { MAX_AI_PHOTOS, requestEstimate, transcribeAudio } from '../lib/ai';
-import { createClient, createJob, fetchClients, fetchCompanyProfile, getMyLocation, lookupZip, Region } from '../lib/api';
+import { createClient, createJob, fetchClients, fetchCompanyProfile, getMyLocation, lookupZip, Region, updateEstimateItems } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { Avatar, Between, Btn, Card, Chip, CatChip, DecimalInput, Divider, Field, Input, Nav, NavBtn, Row, SearchBar, SectionTitle, Sheet, Switch, useStore } from '../ui';
+import { Avatar, Between, Btn, Card, Chip, CatChip, DecimalInput, Divider, Field, FLOW_RESET, Input, Kav, Nav, NavBtn, Row, SearchBar, SectionTitle, Sheet, Switch, useStore } from '../ui';
 import { registerStrings, useT } from '../lib/i18n';
 
 registerStrings({
@@ -68,6 +69,7 @@ registerStrings({
   'flow.internalMarkup': { en: 'Internal markup', es: 'Margen interno', pt: 'Margem interna' },
   'flow.hiddenFromClient': { en: 'Hidden from client', es: 'Oculto para el cliente', pt: 'Oculto do cliente' },
   'flow.continue': { en: 'Continue', es: 'Continuar', pt: 'Continuar' },
+  'flow.saveChanges': { en: 'Save changes', es: 'Guardar cambios', pt: 'Salvar alterações' },
   'flow.newLineItem': { en: 'New line item', es: 'Nuevo elemento', pt: 'Novo item' },
 
   // Item editor
@@ -108,6 +110,17 @@ registerStrings({
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
 const actionbar = { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28 };
+
+// Downscale a capture/pick once at the source (~1280px, same size the upload uses): the photo
+// strip stops decoding full-res 12MP shots, and the AI/upload resizes downstream get cheap.
+const shrink = async (uri: string) => {
+  try {
+    const m = await ImageManipulator.manipulateAsync(uri, [{ resize: { width: 1280 } }], { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG });
+    return m.uri;
+  } catch {
+    return uri; // keep the original rather than losing the shot
+  }
+};
 
 /* ---------------- CAMERA (photo-first, dark) ---------------- */
 export function CameraScreen({ go, back }: NavProp) {
@@ -163,7 +176,7 @@ export function CameraScreen({ go, back }: NavProp) {
     try {
       setCapturing(true);
       const p = await camRef.current.takePictureAsync({ quality: 0.8 });
-      if (p?.uri) addAssets([{ uri: p.uri }]);
+      if (p?.uri) addAssets([{ uri: await shrink(p.uri) }]);
     } catch (e: any) {
       Alert.alert(t('flow.couldNotTakePhotoTitle'), e?.message || t('flow.tryAgainPeriod'));
     } finally {
@@ -173,7 +186,17 @@ export function CameraScreen({ go, back }: NavProp) {
 
   const pickLibrary = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: 30, quality: 0.8 });
-    if (!res.canceled) addAssets(res.assets);
+    if (res.canceled || !res.assets?.length) return;
+    setCapturing(true); // reuse the shutter spinner while the picked photos are downscaled
+    try {
+      const room = Math.max(0, 30 - photos.length); // don't shrink photos the 30-cap would discard
+      const out: { uri: string }[] = [];
+      // serial on purpose: each shrink decodes a full-res bitmap — 30 in flight at once can OOM the phone
+      for (const a of res.assets.slice(0, room)) out.push({ uri: await shrink(a.uri) });
+      if (out.length) addAssets(out);
+    } finally {
+      setCapturing(false);
+    }
   };
 
   return (
@@ -204,7 +227,7 @@ export function CameraScreen({ go, back }: NavProp) {
       </View>
 
       {/* controles + ficha sobrepostos na base — sobem junto com o teclado */}
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }} pointerEvents="box-none">
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1, justifyContent: 'flex-end' }} pointerEvents="box-none">
       {/* photo strip */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, flexShrink: 0 }} contentContainerStyle={{ gap: 8, paddingHorizontal: 20, paddingVertical: 14, alignItems: 'center' }}>
         {photos.map((p, i) => (
@@ -270,7 +293,18 @@ export function CameraScreen({ go, back }: NavProp) {
           </Row>
         ) : null}
 
-        <Btn title={t('flow.generateEstimate')} icon="sparkles" disabled={!photos.length} onPress={() => go('estimate', { fresh: true })} style={{ marginTop: 16 }} />
+        <Btn
+          title={t('flow.generateEstimate')}
+          icon="sparkles"
+          disabled={!photos.length}
+          onPress={() => {
+            // photos changed since the last AI run → drop the old estimate so the AI re-runs
+            const sig = photos.map((p) => p.uri).join('|');
+            if (sig !== store.aiSig) up({ items: [], confidence: 0, aiNotes: '' });
+            go('estimate', { fresh: true });
+          }}
+          style={{ marginTop: 16 }}
+        />
       </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -454,6 +488,9 @@ type EstPhase = 'analyzing' | 'done' | 'rejected' | 'error';
 export function EstimateScreen({ go, back, params }: NavProp) {
   const tr = useT();
   const { store, up } = useStore();
+  // edit mode: opened from an existing job ("Edit" on the QuoteTab hydrates the store first);
+  // saving updates THAT estimate instead of continuing the capture flow (which would duplicate the job)
+  const editJob = (params && params.editJob) as { projectId: string; estimateId: string } | undefined;
   const items = store.items || [];
   const taxRate = store.taxRate ?? 8.25;
   const marginRate = store.marginRate ?? 0;
@@ -491,7 +528,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
     setReason('');
     const r = await requestEstimate({ photos: store.photos, services: store.svcs, description: store.descText, regionMult: store.regionMult });
     if (r.ok) {
-      up({ items: r.items, confidence: r.confidence, aiNotes: r.notes });
+      up((st) => ({ items: r.items, confidence: r.confidence, aiNotes: r.notes, aiSig: (st.photos || []).map((p) => p.uri).join('|') }));
       setPhase('done');
     } else if ('error' in r) {
       setReason(r.error);
@@ -515,6 +552,24 @@ export function EstimateScreen({ go, back, params }: NavProp) {
   const showEstimate = phase === 'done' || analyzing;
   const t = calcTotals(items, taxRate, marginRate);
   const [d, c] = split(t.total);
+  // edit mode: persist the edited items back into the SAME estimate (trigger recomputes totals)
+  const queryClient = useQueryClient();
+  const [savingEdit, setSavingEdit] = useState(false);
+  const saveEdit = async () => {
+    if (!editJob) return;
+    setSavingEdit(true);
+    try {
+      await updateEstimateItems(editJob.estimateId, store.items, taxRate, marginRate);
+      await queryClient.invalidateQueries({ queryKey: ['jobDetail', editJob.projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      back();
+    } catch (e: any) {
+      Alert.alert(tr('flow.couldNotSave'), e?.message || tr('flow.tryAgainPeriod'));
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const updateItem = (id: number, patch: Partial<LineItem>) => up((st) => ({ items: st.items.map((it) => (it.id === id ? { ...it, ...patch } : it)) }));
   const removeItem = (id: number) => up((st) => ({ items: st.items.filter((it) => it.id !== id), editing: null }));
   const addItem = () => {
@@ -526,8 +581,8 @@ export function EstimateScreen({ go, back, params }: NavProp) {
     <>
       <Nav title={tr('flow.estimate')} center onBack={back} right={<NavBtn icon="share" size={17} />} />
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false}>
-        {/* AI status banner */}
-        {analyzing ? (
+        {/* AI status banner (hidden while editing an existing job — no AI run there) */}
+        {editJob ? null : analyzing ? (
           <LinearGradient colors={[colors.primaryTint, colors.card]} style={{ flexDirection: 'row', alignItems: 'center', gap: 13, borderRadius: radii.lg, padding: 16, borderWidth: 1, borderColor: colors.primaryTint2 }}>
             <ActivityIndicator color={colors.primary} />
             <View style={{ flex: 1 }}>
@@ -556,7 +611,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
               <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 3, lineHeight: 18 }}>{reason}</Text>
               <Row style={{ gap: 10, marginTop: 12 }}>
                 <Btn variant="soft" sm icon="sparkles" title={tr('flow.tryAgain')} onPress={runAI} style={{ paddingHorizontal: 16 }} />
-                <Btn variant="ghost" sm title={tr('flow.starterEstimate')} onPress={() => { up({ items: buildStarterEstimate(store.svcs, store.regionMult), confidence: 0, aiNotes: tr('flow.starterEstimateNote') }); setPhase('done'); }} style={{ paddingHorizontal: 16 }} />
+                <Btn variant="ghost" sm title={tr('flow.starterEstimate')} onPress={() => { up((st) => ({ items: buildStarterEstimate(st.svcs, st.regionMult), confidence: 0, aiNotes: tr('flow.starterEstimateNote'), aiSig: (st.photos || []).map((p) => p.uri).join('|') })); setPhase('done'); }} style={{ paddingHorizontal: 16 }} />
               </Row>
             </View>
           </Card>
@@ -595,7 +650,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
               {tr('flow.subtotal')} <Text style={{ fontFamily: fonts.bold, color: colors.ink }}>{fmt(t.subtotal)}</Text> · {tr('flow.taxLabel')} ({taxRate}%) <Text style={{ fontFamily: fonts.bold, color: colors.ink }}>{fmt(t.tax)}</Text>
             </Text>
           ) : null}
-          {!analyzing && store.regionMult !== 1 && store.aLoc ? (
+          {!analyzing && !editJob && store.regionMult !== 1 && store.aLoc ? (
             <Row style={{ gap: 6, marginTop: 8 }}>
               <Icon name="mapPin" size={13} color={colors.accentInk} />
               <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>
@@ -660,7 +715,11 @@ export function EstimateScreen({ go, back, params }: NavProp) {
         ) : null}
       </ScrollView>
       <View style={actionbar}>
-        <Btn title={tr('flow.continue')} icon="arrowRight" disabled={phase !== 'done'} onPress={() => go('attach', {})} />
+        {editJob ? (
+          <Btn title={savingEdit ? tr('flow.saving') : tr('flow.saveChanges')} icon={savingEdit ? undefined : 'check'} disabled={savingEdit} onPress={saveEdit} />
+        ) : (
+          <Btn title={tr('flow.continue')} icon="arrowRight" disabled={phase !== 'done'} onPress={() => go('attach', {})} />
+        )}
       </View>
 
       <Sheet open={!!editing} onClose={() => up({ editing: null })} title={tr('flow.editItem')}>
@@ -750,10 +809,11 @@ export function AttachScreen({ go, back }: NavProp) {
     try {
       const clientId = skipClient ? null : await resolveClientId(); // client is optional
       const client = skipClient ? null : sel; // for address/city autofill
+      const jobTitle = store.svcs[0] ? t('flow.jobSuffix', { service: store.svcs[0] }) : t('flow.newEstimate');
       const { projectId } = await createJob({
         userId: user.id,
         clientId,
-        name: store.svcs[0] ? t('flow.jobSuffix', { service: store.svcs[0] }) : t('flow.newEstimate'),
+        name: jobTitle,
         address: client?.addr || undefined,
         city: client?.city || loc?.city || undefined,
         taxRate: store.taxRate ?? 8.25,
@@ -768,7 +828,9 @@ export function AttachScreen({ go, back }: NavProp) {
       });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
       await queryClient.invalidateQueries({ queryKey: ['clients'] });
-      go('job', { id: projectId });
+      up(FLOW_RESET); // the flow is over — clear it so nothing leaks into the next quote
+      // pass the saved title along: the store is already reset, so the job header can't derive it
+      go('job', { id: projectId, title: jobTitle }, 'reset'); // stack → [home, job]: back never re-enters the dead flow
     } catch (e: any) {
       Alert.alert(t('flow.couldNotSave'), e?.message || t('flow.tryAgainPeriod'));
     } finally {
@@ -777,7 +839,7 @@ export function AttachScreen({ go, back }: NavProp) {
   }
 
   return (
-    <>
+    <Kav>
       <Nav title={t('flow.addClient')} sub={t('flow.optionalDoLater')} center onBack={back} />
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <SectionTitle title={t('flow.client')} />
@@ -857,6 +919,6 @@ export function AttachScreen({ go, back }: NavProp) {
           <Btn title={saving ? t('flow.saving') : t('flow.saveJob')} icon={saving ? undefined : 'arrowRight'} disabled={saving} onPress={() => onSave(false)} style={{ flex: 1 }} />
         </Row>
       </View>
-    </>
+    </Kav>
   );
 }

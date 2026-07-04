@@ -229,6 +229,38 @@ export async function createJob(input: {
   return { projectId: proj.id, estimateId: est.id };
 }
 
+/* ---------------- Update an existing estimate (Edit from the job screen) ---------------- */
+// Rates first, then replace the line items — the totals trigger fires on the item writes and
+// recomputes subtotal/tax/margin/total server-side (incl. the all-items-deleted case).
+// Not transactional (PostgREST): if the insert fails after the delete the estimate is left
+// empty on the server, but the app still holds the items in memory so Save can be retried.
+export async function updateEstimateItems(estimateId: string, items: LineItem[], taxRate: number, marginRate: number): Promise<void> {
+  const { error: rErr } = await supabase
+    .from('estimates')
+    .update({ tax_rate: taxRate, tax_percent: taxRate, margin_rate: marginRate, margin_percent: marginRate })
+    .eq('id', estimateId);
+  if (rErr) throw rErr;
+  const { error: dErr } = await supabase.from('line_items').delete().eq('estimate_id', estimateId);
+  if (dErr) throw dErr;
+  if (items.length) {
+    const rows = items.map((it, i) => ({
+      estimate_id: estimateId,
+      category: it.cat || 'Item',
+      description: it.desc || '',
+      unit: it.unit || 'ea',
+      quantity: it.qty || 0,
+      unit_price: it.price || 0,
+      taxable: !!it.taxable,
+      is_labor: (it.cat || '').toLowerCase() === 'labor',
+      ai_generated: false,
+      display_order: i,
+      item_order: i,
+    }));
+    const { error: iErr } = await supabase.from('line_items').insert(rows);
+    if (iErr) throw iErr;
+  }
+}
+
 /* ---------------- Invoice (generated from an approved estimate) ---------------- */
 // Copies the estimate's totals (the DB trigger keeps those correct) and assigns a sequential
 // per-user invoice number INV-YYYY-NNNN. No invoice-number trigger exists, so we mint it here.

@@ -209,9 +209,11 @@ export function JobScreen({ go, back, params }: NavProp) {
     ? { subtotal: inv.subtotal, taxableSubtotal: computed.taxableSubtotal, tax: inv.tax, total: inv.total, taxRate: inv.taxRate }
     : quoteTotals;
   const [vd, vc] = split(job ? job.value : quoteTotals.total);
-  const name = job ? job.title : store.svcs[0] ? t('job.jobSuffix', { svc: store.svcs[0] }) : t('job.newEstimate');
-  const cName = job ? job.client || t('job.noClient') : client?.name || t('job.noClient');
-  const addr = job ? job.addr : client?.addr || store.aLoc?.city || t('job.noAddress');
+  const name = job ? job.title : params?.title || (store.svcs[0] ? t('job.jobSuffix', { svc: store.svcs[0] }) : t('job.newEstimate'));
+  // header prefers the REAL client from the DB — right after save the flow store is already
+  // reset (aSel/aLoc cleared), so deriving from the store showed "No client" on a fresh job
+  const cName = realClient?.name || (job ? job.client : client?.name) || t('job.noClient');
+  const addr = realClient?.addr || (job ? job.addr : client?.addr || store.aLoc?.city) || t('job.noAddress');
   const next = NEXT[stage];
   const queryClient = useQueryClient();
   const [genningInv, setGenningInv] = useState(false);
@@ -340,7 +342,23 @@ export function JobScreen({ go, back, params }: NavProp) {
           ))}
         </View>
 
-        {tab === 'quote' && <QuoteTab items={items} totals={quoteTotals} go={go} photos={detail?.photoUrls || []} />}
+        {tab === 'quote' && (
+          <QuoteTab
+            items={items}
+            totals={quoteTotals}
+            go={go}
+            photos={detail?.photoUrls || []}
+            onEdit={
+              est && projectId
+                ? () => {
+                    // hydrate the flow store with THIS job's items — the editor must never show a stale capture
+                    up({ items: detail!.items, taxRate: quoteTotals.taxRate, marginRate: est.marginRate ?? 0, editing: null });
+                    go('estimate', { editJob: { projectId, estimateId: est.id } });
+                  }
+                : undefined
+            }
+          />
+        )}
         {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} company={company} invoice={inv} genning={genningInv} onGen={generateInvoice} setSheet={(b: boolean) => up({ sheet: b })} />}
         {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={invoiceTotals} depositPercent={inv?.depositPercent ?? 25} company={company} genning={genningContract} onGenerate={generateContract} />}
         {tab === 'progress' && <ProgressTab projectId={projectId} estimateId={est?.id || null} userId={user?.id || null} companyName={(company as any)?.company_name || t('job.companyFallback')} />}
@@ -381,7 +399,7 @@ function TotRow({ label, value, bold, color }: { label: string; value: string; b
   );
 }
 
-function QuoteTab({ items, totals, go, photos }: { items: LineItem[]; totals: Totals; go: NavProp['go']; photos: string[] }) {
+function QuoteTab({ items, totals, go, photos, onEdit }: { items: LineItem[]; totals: Totals; go: NavProp['go']; photos: string[]; onEdit?: () => void }) {
   const t = useT();
   return (
     <View style={{ marginTop: 16 }}>
@@ -395,7 +413,7 @@ function QuoteTab({ items, totals, go, photos }: { items: LineItem[]; totals: To
           </ScrollView>
         </>
       ) : null}
-      <SectionTitle title={t('job.lineItems')} link={t('job.edit')} onLink={() => go('estimate', {})} />
+      <SectionTitle title={t('job.lineItems')} link={t('job.edit')} onLink={onEdit || (() => go('estimate', {}))} />
       <View style={{ gap: 10 }}>
         {items.map((it) => (
           <Card key={it.id} style={{ padding: 14 }}>

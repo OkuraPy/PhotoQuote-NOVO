@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
+  KeyboardAvoidingView,
   Modal,
   Pressable,
   ScrollView,
@@ -57,6 +58,7 @@ export type V2Store = {
   items: import('./data').LineItem[];
   confidence: number; // AI confidence 0-100 for the current estimate
   aiNotes: string; // AI's "what I saw / assumptions" note
+  aiSig: string; // photo-set signature of the last AI run — changing the photos re-runs the AI
   taxRate: number;
   marginRate: number;
   editing: import('./data').LineItem | null;
@@ -76,6 +78,28 @@ export type V2Store = {
 type Ctx = { store: V2Store; up: (patch: Partial<V2Store> | ((s: V2Store) => Partial<V2Store>)) => void };
 export const StoreCtx = createContext<Ctx>({ store: {} as V2Store, up: () => {} });
 export const useStore = () => useContext(StoreCtx);
+
+// Everything the capture flow touches — applied when a new flow starts (camera) and after a job
+// is saved, so an abandoned/finished flow never leaks photos/items/client into the next one.
+export const FLOW_RESET = {
+  photos: [] as import('./data').Photo[],
+  svcs: [] as string[],
+  descText: '',
+  voice: null,
+  items: [] as import('./data').LineItem[],
+  confidence: 0,
+  aiNotes: '',
+  aiSig: '',
+  taxRate: 8.25,
+  marginRate: 0,
+  editing: null,
+  aQ: '',
+  aSel: null,
+  aZip: '',
+  aLoc: null,
+  regionMult: 1,
+  regionState: '',
+} satisfies Partial<V2Store>;
 
 /* ============================ text helpers ============================ */
 export function T(props: { style?: StyleProp<TextStyle>; children: React.ReactNode; numberOfLines?: number }) {
@@ -459,10 +483,25 @@ export function TabBar({ active, onNav }: { active: string; onNav: (k: string) =
   );
 }
 
+/* ============================ keyboard-safe wrapper ============================ */
+// Lifts the content above the keyboard (screens/sheets with inputs near the bottom).
+// 'padding' on BOTH platforms: with edge-to-edge Android the window never auto-resizes
+// (softwareKeyboardLayoutMode is ignored), so the KAV must compensate — and 'padding'
+// shifts content smoothly where 'height' re-lays-out the whole subtree.
+// NOTE: 'padding' overrides the style's own paddingBottom — keep spacing on an inner view.
+export function Kav({ children, style }: { children: React.ReactNode; style?: StyleProp<ViewStyle> }) {
+  return (
+    <KeyboardAvoidingView behavior="padding" style={[{ flex: 1 }, style]}>
+      {children}
+    </KeyboardAvoidingView>
+  );
+}
+
 /* ============================ bottom sheet ============================ */
 export function Sheet({ open, onClose, title, sub, children }: { open: boolean; onClose: () => void; title?: string; sub?: string; children: React.ReactNode }) {
   return (
     <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
+      <Kav>
       <Pressable style={{ flex: 1, backgroundColor: 'rgba(12,17,22,0.42)' }} onPress={onClose} />
       <View
         style={{
@@ -480,6 +519,7 @@ export function Sheet({ open, onClose, title, sub, children }: { open: boolean; 
         {sub ? <Text style={{ fontFamily: fonts.semibold, fontSize: 13.5, color: colors.muted, marginBottom: 16 }}>{sub}</Text> : null}
         {children}
       </View>
+      </Kav>
     </Modal>
   );
 }

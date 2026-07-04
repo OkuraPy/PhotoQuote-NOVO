@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { Icon } from '../Icon';
 import { colors, fonts } from '../theme';
-import { Btn, Field, Input, Nav, Row } from '../ui';
+import { Btn, Field, Input, Kav, Nav, Row } from '../ui';
 import { useAuth } from '../lib/auth';
 import { registerStrings, useT } from '../lib/i18n';
 
@@ -146,7 +146,8 @@ export function LoginScreen({ go }: NavProp) {
   };
 
   return (
-    <View style={{ flex: 1, paddingHorizontal: 20, paddingBottom: 30 }}>
+    <Kav>
+      <ScrollView contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 20, paddingBottom: 30 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
       <View style={{ marginTop: 48, marginBottom: 36 }}>
         <View style={{ width: 54, height: 54, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}>
           <Icon name="camera" size={26} color="#fff" />
@@ -176,7 +177,8 @@ export function LoginScreen({ go }: NavProp) {
           <Text style={{ fontFamily: fonts.bold, fontSize: 14, color: colors.primary }}>{t('auth.createAnAccount')}</Text>
         </Pressable>
       </Row>
-    </View>
+      </ScrollView>
+    </Kav>
   );
 }
 
@@ -194,7 +196,7 @@ export function ForgotScreen({ back }: NavProp) {
     else { Alert.alert(t('auth.checkEmailTitle'), t('auth.resetLinkSent')); back(); }
   };
   return (
-    <>
+    <Kav>
       <Nav title={t('auth.resetPassword')} onBack={back} />
       <View style={pad}>
         <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.muted, marginTop: 8, lineHeight: 22 }}>
@@ -206,7 +208,7 @@ export function ForgotScreen({ back }: NavProp) {
         </Field>
         <Btn title={busy ? t('auth.sending') : t('auth.sendResetLink')} onPress={submit} disabled={busy} style={{ marginTop: 12 }} />
       </View>
-    </>
+    </Kav>
   );
 }
 
@@ -229,7 +231,7 @@ export function SignupScreen({ back }: NavProp) {
     // else: session created → app swaps automatically.
   };
   return (
-    <>
+    <Kav>
       <Nav title={t('auth.createAccount')} onBack={back} />
       <ScrollView style={pad} contentContainerStyle={{ paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
         <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.muted, marginTop: 4, lineHeight: 22 }}>
@@ -245,7 +247,7 @@ export function SignupScreen({ back }: NavProp) {
           {t('auth.termsNotice')}
         </Text>
       </ScrollView>
-    </>
+    </Kav>
   );
 }
 
