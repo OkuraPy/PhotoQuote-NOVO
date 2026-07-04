@@ -4,6 +4,11 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-04 19:45] — fix: v2 — V2_100 F4: log da IA FINALMENTE grava (GRANT ai_jobs) + transcribe-audio com log
+- **O que mudou**: descoberto e corrigido o motivo de a `ai_jobs` estar VAZIA desde 17/06: o `service_role` não tinha GRANT de INSERT na tabela — todo log das Edge Functions falhava com "permission denied" engolido pelo catch best-effort (mesma classe do bug do GRANT do `app_config` da Fase 1; provado ao vivo forçando um erro e vendo que nenhuma linha aparecia). Migration **`fix_ai_jobs_service_role_grants`**: `GRANT select, insert ON ai_jobs TO service_role` + higiene (anon fora da `ai_jobs`; TRUNCATE fora dos roles web; `app_config` sem NENHUM grant client-side — a chave OpenAI mora lá). **`transcribe-audio` v2 deployada**: agora loga em `ai_jobs` (model `gpt-4o-mini-transcribe`, duração, erro) como a `ai-estimate` — a voz também ganha rastro.
+- **Banco/Funções**: migration aplicada em produção e versionada; função redeployada (`verify_jwt` mantido). **Testado AO VIVO**: 1 erro forçado em cada função → 2 linhas na `ai_jobs` (gpt-5.2 com photo_count e transcribe com duração). O diagnóstico da IA ("quebra e não sei por quê") está operacional pela primeira vez.
+- **Arquivos**: `supabase/migrations/20260704190000_fix_ai_jobs_service_role_grants.sql` (novo), `supabase/functions/transcribe-audio/index.ts`
+
 ### [2026-07-04 19:30] — fix: v2 — V2_100 F1 (teclado em TODAS as telas) + F2 (navegação/estado) + F3 (velocidade)
 - **O que mudou**:
   - **F1 TECLADO**: novo `Kav` (KeyboardAvoidingView `padding` nas 2 plataformas) aplicado no `Sheet` central — conserta de uma vez comentário da obra, nova fase e editor de item — e nos formulários ClientEdit/Company/ChangePassword/Attach/Login/Forgot/Signup; Login agora rola (ScrollView). Decisão: NÃO setar `android.softwareKeyboardLayoutMode` (é ignorado com `edgeToEdgeEnabled:true`); com edge-to-edge o Android não redimensiona sozinho → o KAV `padding` compensa nas duas plataformas.
