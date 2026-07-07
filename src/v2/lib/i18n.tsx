@@ -2,6 +2,8 @@
 // per-key. Screens register their strings co-located (registerStrings) and read via useT()/t().
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getLocales } from 'expo-localization';
+import { pickLocale } from './locale';
 
 export type Locale = 'en' | 'es' | 'pt';
 export const LOCALES: { code: Locale; label: string }[] = [
@@ -23,7 +25,19 @@ export function registerStrings(strings: Record<string, { en: string; es?: strin
 }
 
 const STORAGE_KEY = '@photoquote_locale_v2';
-let current: Locale = 'en';
+// Default to the device language, synchronously — so the very first frame (incl. Login) is
+// already localized. A manual choice persisted via setLocale() overrides it once the provider
+// reads AsyncStorage below; with no saved choice we keep following the device each cold start.
+let current: Locale = (() => {
+  try {
+    return pickLocale(getLocales().map((l) => l.languageCode));
+  } catch {
+    // covers getLocales() failing at CALL time only — the expo-localization import above already
+    // requires the native module (bundled in Expo Go SDK 54; compiled into EAS builds), so a
+    // binary without it throws at import, before this line (the index.ts boot visor would show it).
+    return 'en';
+  }
+})();
 const listeners = new Set<() => void>();
 
 export function getLocale(): Locale {

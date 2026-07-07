@@ -4,6 +4,34 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-07 17:15] — feat: v2 — ONDA 3: fluxo real (lost/archive, aprovar direto, auto-idioma, guards) + ressalvas F12
+- **O que mudou**: (1) **Perdido/Arquivar** — menu "…" no Job marca Lost (confirmação) ou Archived e reabre;
+  eixo ORTOGONAL ao pipeline (projects.status, coluna que o v2 não usava; deriveStage intocado): fechado sai da
+  Home/pipeline (lost sai até do "collected"; arquivado pago continua contando), some dos filtros normais e ganha
+  filtros próprios + chip LOST/ARCHIVED; NEXT some e vira banner com Reopen. (2) **Aprovar direto** — "cliente já
+  aprovou? Marcar aprovado" sob o card NEXT (telefone/pessoalmente, sem fingir envio). (3) **Guard "Your company"**
+  — enviar quote/fatura ou gerar contrato com perfil sem nome agora bloqueia com CTA pro perfil (fim do PDF
+  "Your company"). (4) **Auto-idioma** — primeira execução segue o idioma do celular (expo-localization, bundled
+  no Expo Go SDK 54); escolha manual na tela Language segue vencendo. (5) **Jargões** — "estimate"→"quote" (EN),
+  "presupuesto"→"cotización" (ES), pipeline es/pt leigo, Skip→"Save without client", "{pct}% confident" no badge
+  da IA. (6) **Topo do Job não fica mais velho** pós-edição (headerTotal deriva do detail; params só como
+  fallback). (7) **Ressalvas do F12**: downgrade de parcelamento agora AVISA; parcela vencida mostra "N days
+  overdue" (sem re-datar full/installments no re-save); fatura $0 bloqueada; stepper N× preserva parcelas
+  editadas (resizeDraftRows); parcela $0 não é salvável (trava + aviso).
+- **Arquivos**: data.ts (closedFromStatus/homeMetrics/daysFromToday/resizeDraftRows), api.ts, Job.tsx, Tabs.tsx,
+  i18n.tsx + locale.ts NOVO (pickLocale), Flow/Misc/Auth (strings), package.json (+expo-localization ~17.0.9),
+  testes: data/payments ampliados + locale.test.ts novo.
+- **Decisão técnica**: fechado = projects.status ('Lost'/'Archived'/'Active'), SEM migration (coluna varchar sem
+  CHECK, verificado em prod; zero valores legados conflitantes) e sem tocar em deriveStage/Stage (testes pinam
+  equivalência bit a bit da Home sem fechados). Client-facing SEMPRE inglês reforçado: docLabel do PDF/subject
+  e mensagens de compartilhamento (contrato/progresso) saíram do i18n e viraram constantes EN (regra do dono).
+- **Revisão**: 2 implementadores paralelos (arquivos disjuntos) + revisor adversarial integrado: **APROVADO, 0
+  bloqueantes** (validou banco vivo, portal, package-lock e integridade i18n 439 chaves × en/es/pt). 3
+  recomendações baratas atendidas pré-commit (inglês client-facing; trava $0; comentário do i18n). Ressalvas
+  registradas: deposit re-data no re-save (semântica "due on receipt", aceita); guard fail-closed em erro de
+  rede; links de progresso/contrato de job perdido seguem vivos (produto, Onda 4). tsc limpo, jest 67/67.
+- **Bug corrigido**: topo do Job stale pós-Edit (P1 do diagnóstico 07/07) + pipeline inflado por trabalho perdido.
+
 ### [2026-07-07 16:20] — feat: v2 — ONDA 2/F12: PAGAMENTO FLEXÍVEL (3 modos, ledger de pagamentos, fim do Net-15 fixo)
 - **O que mudou**: fatura deixa de ser "Net-15 chumbado + status binário". Ao gerar (ou editar o plano), o
   empreiteiro escolhe em um sheet leigo-proof: **Tudo no final** (vencimento real, stepper de dias), **Entrada +

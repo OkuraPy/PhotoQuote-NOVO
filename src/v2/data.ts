@@ -72,6 +72,32 @@ export function deriveStage(estStatus?: string, invStatus?: string): Stage {
   }
 }
 
+/* ---------------- Closed jobs (lost / archived) — an axis ORTHOGONAL to Stage ---------------- */
+// "Closed" lives in projects.status ('Lost' | 'Archived'; reopening writes 'Active'), NEVER in the
+// estimate/invoice-derived Stage above. v1 wrote free-form statuses there ('Draft', 'In Progress',
+// …) — anything unrecognized reads as open (null), so legacy rows keep behaving as before.
+export type ClosedKind = 'lost' | 'archived';
+export function closedFromStatus(s?: string | null): ClosedKind | null {
+  const v = (s || '').toLowerCase();
+  if (v === 'lost') return 'lost';
+  if (v === 'archived') return 'archived';
+  return null;
+}
+
+// Home dashboard numbers. Closed jobs leave the pipeline: they count in NOTHING except
+// `collected`, which keeps Paid money from archived jobs (real revenue) but drops lost ones.
+// With no closed jobs this reproduces the original HomeScreen inline math bit for bit.
+export function homeMetrics(jobs: { stage: Stage; value: number; closed?: ClosedKind | null }[]) {
+  const open = jobs.filter((j) => !j.closed);
+  return {
+    pipeline: open.filter((j) => ['Draft', 'Quoted', 'Sent', 'Approved'].includes(j.stage)).reduce((s, j) => s + j.value, 0),
+    invoiced: open.filter((j) => j.stage === 'Invoiced').reduce((s, j) => s + j.value, 0),
+    collected: jobs.filter((j) => j.closed !== 'lost' && j.stage === 'Paid').reduce((s, j) => s + j.value, 0),
+    active: open.filter((j) => j.stage !== 'Paid').length,
+    openQuotes: open.filter((j) => ['Quoted', 'Sent'].includes(j.stage)).length,
+  };
+}
+
 /* ---------------- Flexible payment (F12): plan, schedule & ledger helpers (pure) ---------------- */
 export type PaymentMode = 'full' | 'deposit' | 'installments';
 // One agreed payment of the plan (invoice_schedule row). dueDate is date-only 'YYYY-MM-DD';
@@ -102,6 +128,15 @@ export function toDateOnly(d: Date): string {
 export function addDaysISO(days: number, from?: string): string {
   const b = from ? parseDateOnly(from) : new Date();
   return toDateOnly(new Date(b.getFullYear(), b.getMonth(), b.getDate() + days));
+}
+
+// Whole days from `today` to a stored date-only due date (re-editing an existing plan).
+// NEGATIVE = already overdue — the UI says "N days overdue" instead of clamping the truth away
+// (clamping to 0 silently re-dated past dues to today on re-save). null = the 15-day default.
+export function daysFromToday(iso: string | null, today = new Date()): number {
+  if (!iso) return 15;
+  const base = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  return Math.round((parseDateOnly(iso).getTime() - base) / 86400000);
 }
 
 // Split `total` into n cent-exact parts; the leftover cents land on the LAST part so the parts
@@ -155,6 +190,29 @@ export function statusFromPayments(total: number, paid: number): InvoicePayStatu
 // How much of the total the schedule rows do NOT yet cover (0 = fully allocated; negative = over).
 export const unallocated = (total: number, rows: { amount: number }[]) =>
   round2(total - rows.reduce((s, r) => s + (Number(r.amount) || 0), 0));
+
+// Resize the installments editor's draft rows to `n` WITHOUT re-splitting rows the user already
+// edited (the pristine path keeps the even re-split). Growing appends rows that soak up whatever
+// the total still lacks (never negative), due 30 days after the previous row; shrinking drops
+// from the end. Pure: the input rows are never mutated.
+export function resizeDraftRows(
+  rows: { label: string; amount: number; days: number }[],
+  n: number,
+  total: number
+): { label: string; amount: number; days: number }[] {
+  const count = Math.max(1, Math.floor(Number.isFinite(n) ? n : 1));
+  const out = rows.map((r) => ({ ...r }));
+  while (out.length > count) out.pop();
+  while (out.length < count) {
+    const last = out[out.length - 1];
+    out.push({
+      label: `Payment ${out.length + 1}`,
+      amount: Math.max(0, unallocated(total, out)),
+      days: last ? last.days + 30 : 15,
+    });
+  }
+  return out;
+}
 
 // Rescale a schedule proportionally to a new total (quote edited after invoicing, no payments
 // yet). Cent-exact: every row is re-rounded and the LAST row absorbs the rounding difference.
@@ -218,6 +276,7 @@ export type Job = {
   photos: number;
   date: string;
   thumb?: string | null; // first project photo, for the card thumbnail
+  closed?: ClosedKind | null; // lost/archived (projects.status) — orthogonal to `stage`
 };
 
 export const JOBS: Job[] = [

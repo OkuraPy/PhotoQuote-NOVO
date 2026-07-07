@@ -23,7 +23,7 @@ registerStrings({
   'auth.welcomeBack': { en: 'Welcome back', es: 'Bienvenido de nuevo', pt: 'Bem-vindo de volta' },
   'auth.photoToQuote': {
     en: 'Photo to quote in seconds.',
-    es: 'De la foto al presupuesto en segundos.',
+    es: 'De la foto a la cotización en segundos.',
     pt: 'Da foto ao orçamento em segundos.',
   },
   'auth.passwordPlaceholder': { en: 'Your password', es: 'Tu contraseña', pt: 'Sua senha' },
@@ -96,7 +96,7 @@ registerStrings({
   },
   'auth.onboardBusinessSub': {
     en: 'This appears on every quote and invoice.',
-    es: 'Aparece en cada presupuesto y factura.',
+    es: 'Aparece en cada cotización y factura.',
     pt: 'Aparece em cada orçamento e fatura.',
   },
   'auth.onboardCompanyName': { en: 'Company name', es: 'Nombre de la empresa', pt: 'Nome da empresa' },

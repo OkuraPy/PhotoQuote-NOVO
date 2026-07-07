@@ -28,7 +28,7 @@ registerStrings({
   'misc.jobHistory': { en: 'Job history', es: 'Historial de trabajos', pt: 'Histórico de trabalhos' },
   'misc.total': { en: '{count} total', es: '{count} en total', pt: '{count} no total' },
   'misc.noJobsYet': { en: 'No jobs yet for this client.', es: 'Aún no hay trabajos para este cliente.', pt: 'Ainda não há trabalhos para este cliente.' },
-  'misc.newQuoteFor': { en: 'New quote for {name}', es: 'Nuevo presupuesto para {name}', pt: 'Novo orçamento para {name}' },
+  'misc.newQuoteFor': { en: 'New quote for {name}', es: 'Nueva cotización para {name}', pt: 'Novo orçamento para {name}' },
   // ClientEditScreen
   'misc.editClient': { en: 'Edit client', es: 'Editar cliente', pt: 'Editar cliente' },
   'misc.newClient': { en: 'New client', es: 'Nuevo cliente', pt: 'Novo cliente' },
@@ -94,7 +94,7 @@ registerStrings({
   'misc.updatePassword': { en: 'Update password', es: 'Actualizar contraseña', pt: 'Atualizar senha' },
   // LanguageScreen
   'misc.language': { en: 'Language', es: 'Idioma', pt: 'Idioma' },
-  'misc.languageHint': { en: 'English is fully translated. Spanish & Portuguese are being added.', es: 'El inglés está totalmente traducido. El español y el portugués se están añadiendo.', pt: 'O inglês está totalmente traduzido. Espanhol e português estão sendo adicionados.' },
+  'misc.languageHint': { en: 'Documents you send to clients always go out in English.', es: 'Los documentos que envías a tus clientes siempre salen en inglés.', pt: 'Os documentos enviados aos seus clientes sempre saem em inglês.' },
 });
 
 export function ClientScreen({ go, back, params }: NavProp) {

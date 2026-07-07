@@ -1,5 +1,6 @@
 import {
   addDaysISO,
+  daysFromToday,
   deriveStage,
   invoiceBalance,
   paidTotal,
@@ -7,6 +8,7 @@ import {
   planFromInvoice,
   planRows,
   rescaleSchedule,
+  resizeDraftRows,
   splitInstallments,
   statusFromPayments,
   toDateOnly,
@@ -190,6 +192,70 @@ describe('planFromInvoice (stored invoice → plan)', () => {
     const p = planFromInvoice({ paymentMode: 'installments', dueDate: null, depositPercent: null, depositAmount: 123.45, total: 1000, schedule: sched });
     expect(p.depositAmount).toBe(123.45);
     expect(p.installments).toBe(sched);
+  });
+});
+
+describe('daysFromToday (re-editing a stored plan; NEGATIVE = overdue, never clamped)', () => {
+  const today = new Date(2026, 6, 7); // 2026-07-07 local
+
+  it('future / today / past / null (15-day default)', () => {
+    expect(daysFromToday('2026-07-22', today)).toBe(15);
+    expect(daysFromToday('2026-07-07', today)).toBe(0);
+    expect(daysFromToday('2026-07-01', today)).toBe(-6); // overdue keeps its real date on re-save
+    expect(daysFromToday(null, today)).toBe(15);
+  });
+
+  it('rolls over months/years and ignores the time of day of `today`', () => {
+    expect(daysFromToday('2026-08-06', today)).toBe(30);
+    expect(daysFromToday('2025-07-07', today)).toBe(-365);
+    expect(daysFromToday('2026-07-08', new Date(2026, 6, 7, 23, 59, 59))).toBe(1); // whole days, not 86400s windows
+  });
+});
+
+describe('resizeDraftRows (N× stepper on hand-edited rows: preserve, never re-split)', () => {
+  const rows = [
+    { label: 'Payment 1', amount: 700, days: 10 },
+    { label: 'Payment 2', amount: 200, days: 40 },
+  ];
+
+  it('growing appends a row that soaks up the unallocated remainder, due 30 days after the last', () => {
+    const out = resizeDraftRows(rows, 3, 1000);
+    expect(out).toHaveLength(3);
+    expect(out[0]).toEqual(rows[0]); // edits preserved untouched
+    expect(out[1]).toEqual(rows[1]);
+    expect(out[2]).toEqual({ label: 'Payment 3', amount: 100, days: 70 });
+  });
+
+  it('growing by several appends sequentially (each soaks what is left; then $0)', () => {
+    const out = resizeDraftRows([{ label: 'Payment 1', amount: 100, days: 15 }], 3, 400);
+    expect(out.map((r) => r.amount)).toEqual([100, 300, 0]);
+    expect(out.map((r) => r.days)).toEqual([15, 45, 75]);
+    expect(out.map((r) => r.label)).toEqual(['Payment 1', 'Payment 2', 'Payment 3']);
+  });
+
+  it('an over-allocated plan appends $0 rows — never a negative amount', () => {
+    const out = resizeDraftRows([{ label: 'Payment 1', amount: 1200, days: 15 }], 2, 1000);
+    expect(out[1].amount).toBe(0);
+  });
+
+  it('growing a FULLY allocated stored plan appends a $0 row (the sheet blocks saving until it is filled)', () => {
+    // the most common grow in production: a saved 2×$500 plan → "+" must not steal from agreed rows
+    const stored = [{ label: 'Payment 1', amount: 500, days: 0 }, { label: 'Payment 2', amount: 500, days: 30 }];
+    const out = resizeDraftRows(stored, 3, 1000);
+    expect(out[0]).toEqual(stored[0]);
+    expect(out[1]).toEqual(stored[1]);
+    expect(out[2]).toEqual({ label: 'Payment 3', amount: 0, days: 60 });
+  });
+
+  it('shrinking drops from the END and keeps the rest untouched', () => {
+    expect(resizeDraftRows(rows, 1, 1000)).toEqual([rows[0]]);
+    expect(resizeDraftRows(rows, 2, 1000)).toEqual(rows); // same size = no-op copy
+  });
+
+  it('is pure: the input rows are never mutated', () => {
+    const src = [{ label: 'Payment 1', amount: 700, days: 10 }];
+    resizeDraftRows(src, 3, 1000);
+    expect(src).toEqual([{ label: 'Payment 1', amount: 700, days: 10 }]);
   });
 });
 

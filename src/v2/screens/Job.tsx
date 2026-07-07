@@ -4,13 +4,14 @@ import { ActivityIndicator, Alert, Image, Pressable, Share, ScrollView, Text, Vi
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
-import { addDaysISO, applyMarkup, calcTotals, fmt, invoiceBalance, LineItem, parseDateOnly, PaymentMode, PaymentPlan, planFromInvoice, planRows, round2, split, splitInstallments, STAGES, statusFromPayments, unallocated } from '../data';
+import { addDaysISO, applyMarkup, calcTotals, ClosedKind, daysFromToday, fmt, invoiceBalance, LineItem, parseDateOnly, PaymentMode, PaymentPlan, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, unallocated } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { addPhaseComment, addPhasePhotos, agreementLink, createAgreement, createInvoice, createPhase, deletePhase, deriveStage, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, JobDetail, progressLink, ProgressPhase, PhaseStatus, recordInvoicePayment, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase } from '../lib/api';
+import { addPhaseComment, addPhasePhotos, agreementLink, createAgreement, createInvoice, createPhase, deletePhase, deriveStage, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, JobDetail, progressLink, ProgressPhase, PhaseStatus, recordInvoicePayment, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { sendDoc } from '../lib/send';
 import { registerStrings, useT } from '../lib/i18n';
-import { Between, Btn, Card, CatChip, Chip, DecimalInput, Divider, Empty, Field, Input, LinkBtn, Nav, Row, SectionTitle, SendSheet, Sheet, StageChip, Stepper, useStore } from '../ui';
+import { Between, Btn, Card, CatChip, Chip, DecimalInput, Divider, Empty, Field, Input, LinkBtn, Nav, NavBtn, Row, SectionTitle, SendSheet, Sheet, StageChip, Stepper, useStore } from '../ui';
+import { ClosedChip } from './Tabs';
 
 registerStrings({
   // NEXT STEP labels (keyed by stage action; Stage values themselves are not translated)
@@ -22,7 +23,7 @@ registerStrings({
   'job.next.done': { en: 'Paid in full', es: 'Pagada por completo', pt: 'Pago integralmente' },
   // header / labels
   'job.noClient': { en: 'No client', es: 'Sin cliente', pt: 'Sem cliente' },
-  'job.newEstimate': { en: 'New estimate', es: 'Nueva cotización', pt: 'Novo orçamento' },
+  'job.newEstimate': { en: 'New quote', es: 'Nueva cotización', pt: 'Novo orçamento' },
   'job.jobSuffix': { en: '{svc} job', es: 'Trabajo de {svc}', pt: 'Trabalho de {svc}' },
   'job.noAddress': { en: 'No address yet', es: 'Aún sin dirección', pt: 'Sem endereço ainda' },
   // tabs
@@ -31,22 +32,18 @@ registerStrings({
   'job.tab.contract': { en: 'Contract', es: 'Contrato', pt: 'Contrato' },
   'job.tab.progress': { en: 'Progress', es: 'Progreso', pt: 'Progresso' },
   // alerts
-  'job.alert.estimateNeeded': { en: 'Estimate needed', es: 'Se necesita la cotización', pt: 'Orçamento necessário' },
-  'job.alert.saveEstimateFirst': { en: 'Save the estimate first, then generate the invoice.', es: 'Guarda primero la cotización y luego genera la factura.', pt: 'Salve o orçamento primeiro e depois gere a fatura.' },
+  'job.alert.estimateNeeded': { en: 'Quote needed', es: 'Se necesita la cotización', pt: 'Orçamento necessário' },
+  'job.alert.saveEstimateFirst': { en: 'Save the quote first, then generate the invoice.', es: 'Guarda primero la cotización y luego genera la factura.', pt: 'Salve o orçamento primeiro e depois gere a fatura.' },
   'job.alert.couldNotCreateInvoice': { en: 'Could not create the invoice', es: 'No se pudo crear la factura', pt: 'Não foi possível criar a fatura' },
   'job.alert.invoiceNeeded': { en: 'Invoice needed', es: 'Se necesita la factura', pt: 'Fatura necessária' },
   'job.alert.generateInvoiceFirst': { en: 'Generate the invoice first, then the contract.', es: 'Genera primero la factura y luego el contrato.', pt: 'Gere a fatura primeiro e depois o contrato.' },
   'job.alert.couldNotCreateContract': { en: 'Could not create the contract', es: 'No se pudo crear el contrato', pt: 'Não foi possível criar o contrato' },
   'job.alert.couldNotUpdate': { en: 'Could not update', es: 'No se pudo actualizar', pt: 'Não foi possível atualizar' },
   'job.alert.tryAgain': { en: 'Try again.', es: 'Inténtalo de nuevo.', pt: 'Tente novamente.' },
-  // share messages
-  'job.share.contract': { en: 'Please review and sign your service agreement:\n{link}', es: 'Por favor revisa y firma tu contrato de servicio:\n{link}', pt: 'Por favor, revise e assine seu contrato de serviço:\n{link}' },
-  'job.share.progress': { en: "Track your project's progress here:\n{link}", es: 'Sigue el progreso de tu proyecto aquí:\n{link}', pt: 'Acompanhe o progresso do seu projeto aqui:\n{link}' },
-  // send doc labels
-  'job.doc.invoice': { en: 'Invoice', es: 'Factura', pt: 'Fatura' },
-  'job.doc.agreement': { en: 'Agreement', es: 'Contrato', pt: 'Contrato' },
-  'job.doc.quote': { en: 'Quote', es: 'Cotización', pt: 'Orçamento' },
+  // NOTE: share messages and PDF doc labels are NOT registered here on purpose — they reach the
+  // CLIENT, and client-facing output is always English (owner's rule). See CLIENT_SHARE below.
   'job.yourCompany': { en: 'Your company', es: 'Tu empresa', pt: 'Sua empresa' },
+  'job.zeroRow': { en: 'Every payment needs an amount above $0.', es: 'Cada pago necesita un monto mayor a $0.', pt: 'Cada pagamento precisa de um valor acima de $0.' },
   // QuoteTab
   'job.photos': { en: 'Photos · {n}', es: 'Fotos · {n}', pt: 'Fotos · {n}' },
   'job.lineItems': { en: 'Line items', es: 'Conceptos', pt: 'Itens' },
@@ -140,8 +137,8 @@ registerStrings({
   // ProgressTab — alerts & empties
   'job.alert.couldNotSend': { en: 'Could not send', es: 'No se pudo enviar', pt: 'Não foi possível enviar' },
   'job.empty.saveJobTitle': { en: 'Save the job first', es: 'Guarda primero el trabajo', pt: 'Salve o trabalho primeiro' },
-  'job.empty.saveJobBody': { en: 'Create the estimate, then track the work in phases the client can follow.', es: 'Crea la cotización y luego haz seguimiento del trabajo en fases que el cliente pueda seguir.', pt: 'Crie o orçamento e depois acompanhe o trabalho em fases que o cliente pode seguir.' },
-  'job.alert.generateEstimateFirst': { en: 'Generate the estimate first, then add phases.', es: 'Genera primero la cotización y luego agrega fases.', pt: 'Gere o orçamento primeiro e depois adicione fases.' },
+  'job.empty.saveJobBody': { en: 'Create the quote, then track the work in phases the client can follow.', es: 'Crea la cotización y luego haz seguimiento del trabajo en fases que el cliente pueda seguir.', pt: 'Crie o orçamento e depois acompanhe o trabalho em fases que o cliente pode seguir.' },
+  'job.alert.generateEstimateFirst': { en: 'Generate the quote first, then add phases.', es: 'Genera primero la cotización y luego agrega fases.', pt: 'Gere o orçamento primeiro e depois adicione fases.' },
   'job.alert.couldNotAddPhase': { en: 'Could not add phase', es: 'No se pudo agregar la fase', pt: 'Não foi possível adicionar a fase' },
   'job.alert.deletePhaseTitle': { en: 'Delete phase?', es: '¿Eliminar fase?', pt: 'Excluir fase?' },
   'job.alert.deletePhaseBody': { en: 'Remove "{name}" and its photos? This can\'t be undone.', es: '¿Eliminar "{name}" y sus fotos? Esto no se puede deshacer.', pt: 'Remover "{name}" e suas fotos? Isso não pode ser desfeito.' },
@@ -174,7 +171,59 @@ registerStrings({
   'job.writeReply': { en: 'Write a reply…', es: 'Escribe una respuesta…', pt: 'Escreva uma resposta…' },
   'job.send': { en: 'Send', es: 'Enviar', pt: 'Enviar' },
   'job.companyFallback': { en: 'You', es: 'Tú', pt: 'Você' },
+  // job menu — close (lost/archive) & reopen; "closed" lives on projects.status, orthogonal to the stage
+  'job.menu.title': { en: 'Job options', es: 'Opciones del trabajo', pt: 'Opções do trabalho' },
+  'job.menu.markLost': { en: 'Mark as lost', es: 'Marcar como perdida', pt: 'Marcar como perdido' },
+  'job.menu.markLostConfirmTitle': { en: 'Mark as lost?', es: '¿Marcar como perdida?', pt: 'Marcar como perdido?' },
+  'job.menu.markLostConfirmBody': {
+    en: 'It leaves your pipeline and stops counting in your numbers. You can reopen it anytime.',
+    es: 'Saldrá de tu lista activa y dejará de contar en tus números. Puedes reabrirla cuando quieras.',
+    pt: 'Ele sai da sua lista ativa e deixa de contar nos seus números. Você pode reabrir quando quiser.',
+  },
+  'job.menu.archive': { en: 'Archive job', es: 'Archivar trabajo', pt: 'Arquivar trabalho' },
+  'job.menu.reopen': { en: 'Reopen job', es: 'Reabrir trabajo', pt: 'Reabrir trabalho' },
+  'job.reopen': { en: 'Reopen', es: 'Reabrir', pt: 'Reabrir' },
+  'job.closedBanner.lost': {
+    en: 'This job is marked as lost — it no longer counts in your numbers.',
+    es: 'Este trabajo está marcado como perdido; ya no cuenta en tus números.',
+    pt: 'Este trabalho está marcado como perdido — não conta mais nos seus números.',
+  },
+  'job.closedBanner.archived': {
+    en: 'This job is archived — hidden from your active jobs.',
+    es: 'Este trabajo está archivado; no aparece entre tus trabajos activos.',
+    pt: 'Este trabalho está arquivado — fora dos seus trabalhos ativos.',
+  },
+  // approve without the send round-trip (client said yes on the phone / in person)
+  'job.approveDirectly': { en: 'Client already approved? Mark approved', es: '¿El cliente ya aprobó? Marcar aprobada', pt: 'Cliente já aprovou? Marcar aprovado' },
+  // company guard — a document must never go out saying "Your company"
+  'job.companyMissingTitle': { en: 'Add your company info first', es: 'Primero agrega los datos de tu empresa', pt: 'Adicione os dados da sua empresa primeiro' },
+  'job.companyMissingBody': {
+    en: 'This document would go out saying "Your company". Add your business name so clients see who it\'s from.',
+    es: 'Este documento saldría a nombre de "Tu empresa". Agrega el nombre de tu negocio para que los clientes vean de quién viene.',
+    pt: 'Este documento sairia como "Sua empresa". Adicione o nome do seu negócio para que os clientes vejam de quem ele é.',
+  },
+  'job.companyMissingCta': { en: 'Add company info', es: 'Agregar datos de la empresa', pt: 'Adicionar dados da empresa' },
+  // payment plan hardening: silent installment downgrade, overdue dues, $0 quote
+  'job.planDowngradedTitle': { en: 'Installments not saved', es: 'Las cuotas no se guardaron', pt: 'As parcelas não foram salvas' },
+  'job.planDowngradedBody': {
+    en: 'The invoice was saved as a single payment. Open "Edit payment plan" to set the installments again.',
+    es: 'La factura se guardó como pago único. Abre "Editar plan de pago" para configurar las cuotas de nuevo.',
+    pt: 'A fatura foi salva como pagamento único. Abra "Editar plano de pagamento" para configurar as parcelas novamente.',
+  },
+  'job.overdueDays': { en: '{n} days overdue', es: '{n} días de retraso', pt: '{n} dias em atraso' },
+  'job.zeroTotalTitle': { en: 'Quote total is $0', es: 'El total de la cotización es $0', pt: 'O total do orçamento é $0' },
+  'job.zeroTotalBody': {
+    en: 'Add line items with prices before generating the invoice.',
+    es: 'Agrega conceptos con precios antes de generar la factura.',
+    pt: 'Adicione itens com preços antes de gerar a fatura.',
+  },
 });
+
+// Client-facing copy is ALWAYS English (owner's rule) — never run these through t().
+const CLIENT_SHARE = {
+  contract: (link: string) => `Please review and sign your service agreement:\n${link}`,
+  progress: (link: string) => `Track your project's progress here:\n${link}`,
+};
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
@@ -234,6 +283,8 @@ export function JobScreen({ go, back, params }: NavProp) {
   // stage derived from the DB (estimate/invoice status) once detail loads; falls back to the list value
   const baseStage: Stage = detail ? deriveStage(est?.status, inv?.status) : job ? job.stage : 'Quoted';
   const stage = store.stageOverride[id] || baseStage;
+  // closed (lost/archived) is orthogonal to the stage — detail (fresh) wins over the list params
+  const closed: ClosedKind | null = detail ? detail.closed : job?.closed ?? null;
   const realClient = detail?.client || null;
   // new job (not yet persisted): show the AI estimate the user just generated, held in the store
   const items = detail?.items?.length ? detail.items : job ? [] : store.items;
@@ -247,7 +298,10 @@ export function JobScreen({ go, back, params }: NavProp) {
   const invoiceTotals: Totals = inv
     ? { subtotal: inv.subtotal, taxableSubtotal: computed.taxableSubtotal, tax: inv.tax, total: inv.total, taxRate: inv.taxRate }
     : quoteTotals;
-  const [vd, vc] = split(job ? job.value : quoteTotals.total);
+  // header total mirrors fetchJobs (invoice total wins over the estimate's) so the list and this
+  // header never diverge; the stale params value only bridges the gap while detail is loading.
+  const headerTotal = detail ? (inv ? inv.total : quoteTotals.total) : job ? job.value : quoteTotals.total;
+  const [vd, vc] = split(headerTotal);
   const name = job ? job.title : params?.title || (store.svcs[0] ? t('job.jobSuffix', { svc: store.svcs[0] }) : t('job.newEstimate'));
   // header prefers the REAL client from the DB — right after save the flow store is already
   // reset (aSel/aLoc cleared), so deriving from the store showed "No client" on a fresh job
@@ -265,6 +319,42 @@ export function JobScreen({ go, back, params }: NavProp) {
   const invoicePlan = inv ? planFromInvoice(inv) : null;
   const balance = inv ? invoiceBalance(inv.total, inv.amountPaid) : 0;
 
+  /* ----- close (lost / archive) & reopen — the "more" menu on the nav ----- */
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [closingBusy, setClosingBusy] = useState(false);
+  const setProjectStatus = async (status: 'Lost' | 'Archived' | 'Active') => {
+    if (!projectId || closingBusy) return;
+    setClosingBusy(true);
+    try {
+      await updateProjectStatus(projectId, status);
+      await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      setMenuOpen(false);
+    } catch (e: any) {
+      Alert.alert(t('job.alert.couldNotUpdate'), e?.message || t('job.alert.tryAgain'));
+    } finally {
+      setClosingBusy(false);
+    }
+  };
+  // losing a job pulls it out of the numbers — confirm first (archive/reopen are one tap, both undoable)
+  const confirmMarkLost = () => {
+    Alert.alert(t('job.menu.markLostConfirmTitle'), t('job.menu.markLostConfirmBody'), [
+      { text: t('job.cancel'), style: 'cancel' },
+      { text: t('job.menu.markLost'), style: 'destructive', onPress: () => { void setProjectStatus('Lost'); } },
+    ]);
+  };
+
+  /* ----- company guard: no document goes out saying "Your company" ----- */
+  // undefined = profile still loading (don't block on a race); a loaded row without a name = block
+  const companyReady = company === undefined ? true : !!String((company as any)?.company_name || '').trim();
+  const requireCompany = (proceed: () => void) => {
+    if (companyReady) return proceed();
+    Alert.alert(t('job.companyMissingTitle'), t('job.companyMissingBody'), [
+      { text: t('job.cancel'), style: 'cancel' },
+      { text: t('job.companyMissingCta'), onPress: () => go('profileCompany') },
+    ]);
+  };
+
   // generating is now 2 steps: pick the plan in the sheet, THEN create the invoice on confirm.
   // Deposit % pre-fills from the company default; installments start as an even 2-way split.
   const defaultPlan: PaymentPlan = {
@@ -277,6 +367,8 @@ export function JobScreen({ go, back, params }: NavProp) {
   const openGenerateInvoice = () => {
     if (inv) { clearStage(); setTab('invoice'); return; }
     if (!user?.id || !est?.id || !projectId) { Alert.alert(t('job.alert.estimateNeeded'), t('job.alert.saveEstimateFirst')); return; }
+    // a $0 invoice can never be settled (payments must be > 0) — send them back to the items
+    if (!(quoteTotals.total > 0)) { Alert.alert(t('job.zeroTotalTitle'), t('job.zeroTotalBody')); return; }
     setPlanSheet('generate');
   };
   const confirmPlan = async (plan: PaymentPlan) => {
@@ -284,14 +376,17 @@ export function JobScreen({ go, back, params }: NavProp) {
     const editing = planSheet === 'edit';
     setSavingPlan(true);
     try {
-      if (editing && inv) await updateInvoicePlan(user.id, inv.id, plan);
-      else if (est?.id && projectId) await createInvoice(user.id, est.id, projectId, plan);
+      let downgraded = false;
+      if (editing && inv) ({ downgraded } = await updateInvoicePlan(user.id, inv.id, plan));
+      else if (est?.id && projectId) ({ downgraded } = await createInvoice(user.id, est.id, projectId, plan));
       else return;
       await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
       setPlanSheet(null);
       clearStage(); // invoice now exists → DB-derived stage becomes "Invoiced"
       setTab('invoice');
+      // the schedule insert failed and the plan fell back to a single payment — say so, never silently
+      if (downgraded) Alert.alert(t('job.planDowngradedTitle'), t('job.planDowngradedBody'));
     } catch (e: any) {
       Alert.alert(editing ? t('job.couldNotSavePlan') : t('job.alert.couldNotCreateInvoice'), e?.message || t('job.alert.tryAgain'));
     } finally {
@@ -321,25 +416,29 @@ export function JobScreen({ go, back, params }: NavProp) {
   const [genningContract, setGenningContract] = useState(false);
   const shareContract = async (token: string) => {
     try {
-      await Share.share({ message: t('job.share.contract', { link: agreementLink(token) }) });
+      await Share.share({ message: CLIENT_SHARE.contract(agreementLink(token)) });
     } catch {
       /* user dismissed the share sheet */
     }
   };
   const generateContract = async () => {
-    if (detail?.agreement) return shareContract(detail.agreement.token);
+    if (detail?.agreement) return shareContract(detail.agreement.token); // existing doc — resharing is safe
     if (!inv) { Alert.alert(t('job.alert.invoiceNeeded'), t('job.alert.generateInvoiceFirst')); return; }
     if (!user?.id || !projectId) return;
-    setGenningContract(true);
-    try {
-      const { token } = await createAgreement(user.id, projectId, inv.id);
-      await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
-      await shareContract(token);
-    } catch (e: any) {
-      Alert.alert(t('job.alert.couldNotCreateContract'), e?.message || t('job.alert.tryAgain'));
-    } finally {
-      setGenningContract(false);
-    }
+    const [uid, pid, invId] = [user.id, projectId, inv.id];
+    // company guard before GENERATING: createAgreement freezes the company name into the contract HTML
+    requireCompany(async () => {
+      setGenningContract(true);
+      try {
+        const { token } = await createAgreement(uid, pid, invId);
+        await queryClient.invalidateQueries({ queryKey: ['jobDetail', pid] });
+        await shareContract(token);
+      } catch (e: any) {
+        Alert.alert(t('job.alert.couldNotCreateContract'), e?.message || t('job.alert.tryAgain'));
+      } finally {
+        setGenningContract(false);
+      }
+    });
   };
 
   // persist a status change to the DB then refetch. The optimistic update is applied only AFTER the
@@ -373,15 +472,24 @@ export function JobScreen({ go, back, params }: NavProp) {
   };
 
   const doNext = () => {
-    if (next.act === 'send') return up({ sheet: true });
+    if (next.act === 'send') return requireCompany(() => up({ sheet: true })); // quote goes out with the company header
     if (next.act === 'approve') return setEstimateStatus('Approved', 'Approved');
     if (next.act === 'invoice') return openGenerateInvoice();
     if (next.act === 'paid') return setPaySheet(true); // record what was received (pre-filled with the balance)
   };
+  // "already approved on the phone" shortcut — visible while the next step is still "send"
+  const canApproveDirectly = !closed && next.act === 'send' && !!est?.id;
 
   return (
     <>
-      <Nav title={cName || t('job.noClient')} sub={name} center onBack={back} />
+      <Nav
+        title={cName || t('job.noClient')}
+        sub={name}
+        center
+        onBack={back}
+        // the menu writes projects.status — only offered once the job exists in the DB
+        right={projectId ? <NavBtn icon="more" onPress={() => setMenuOpen(true)} /> : undefined}
+      />
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false}>
         <View style={{ backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: radii.xl, padding: 18, ...shadow.sm }}>
           <Between style={{ alignItems: 'flex-start' }}>
@@ -392,7 +500,7 @@ export function JobScreen({ go, back, params }: NavProp) {
                 <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.muted }}>{addr}</Text>
               </Row>
             </View>
-            <StageChip stage={stage} lg />
+            {closed ? <ClosedChip kind={closed} lg /> : <StageChip stage={stage} lg />}
           </Between>
           <Text style={{ fontFamily: fonts.num, fontSize: 32, color: colors.ink, marginTop: 14, letterSpacing: -0.6 }}>
             {vd}<Text style={{ color: colors.muted }}>{vc}</Text>
@@ -401,17 +509,32 @@ export function JobScreen({ go, back, params }: NavProp) {
           <Timeline stage={stage} />
         </View>
 
-        {stage !== 'Paid' ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 13, backgroundColor: colors.primaryTint, borderWidth: 1, borderColor: colors.primaryTint2, borderRadius: radii.lg, padding: 13, marginTop: 16 }}>
-            <View style={{ width: 38, height: 38, borderRadius: 11, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name={next.ico} size={19} color={colors.primary} />
+        {closed ? (
+          // a closed job has no "next step" — a thin banner with the way back replaces it
+          <Row style={{ gap: 10, backgroundColor: closed === 'lost' ? colors.errorTint : '#EEF0F3', borderRadius: radii.lg, paddingVertical: 11, paddingHorizontal: 13, marginTop: 16 }}>
+            <Icon name={closed === 'lost' ? 'flag' : 'layers'} size={15} color={closed === 'lost' ? colors.error : '#8A93A3'} />
+            <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 12.5, color: colors.ink2, lineHeight: 18 }}>{t('job.closedBanner.' + closed)}</Text>
+            <LinkBtn icon="trend" title={t('job.reopen')} onPress={() => { void setProjectStatus('Active'); }} />
+          </Row>
+        ) : stage !== 'Paid' ? (
+          <>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 13, backgroundColor: colors.primaryTint, borderWidth: 1, borderColor: colors.primaryTint2, borderRadius: radii.lg, padding: 13, marginTop: 16 }}>
+              <View style={{ width: 38, height: 38, borderRadius: 11, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name={next.ico} size={19} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, letterSpacing: 0.6, color: colors.primary }}>{t('job.nextStep')}</Text>
+                <Text style={{ fontFamily: fonts.bold, fontSize: 14, color: colors.ink, marginTop: 2 }}>{t('job.next.' + next.act)}</Text>
+              </View>
+              <Btn title={t('job.next.' + next.act)} sm onPress={doNext} />
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, letterSpacing: 0.6, color: colors.primary }}>{t('job.nextStep')}</Text>
-              <Text style={{ fontFamily: fonts.bold, fontSize: 14, color: colors.ink, marginTop: 2 }}>{t('job.next.' + next.act)}</Text>
-            </View>
-            <Btn title={t('job.next.' + next.act)} sm onPress={doNext} />
-          </View>
+            {canApproveDirectly ? (
+              // client already said yes (phone / in person) — skip the send round-trip
+              <View style={{ alignItems: 'center', marginTop: 12 }}>
+                <LinkBtn icon="check" title={t('job.approveDirectly')} onPress={() => setEstimateStatus('Approved', 'Approved')} />
+              </View>
+            ) : null}
+          </>
         ) : null}
 
         {/* internal tabs */}
@@ -447,7 +570,7 @@ export function JobScreen({ go, back, params }: NavProp) {
             }
           />
         )}
-        {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} company={company} invoice={inv} quoteTotal={est?.total} genning={savingPlan} onGen={openGenerateInvoice} onRecordPayment={() => setPaySheet(true)} onEditPlan={() => setPlanSheet('edit')} setSheet={(b: boolean) => up({ sheet: b })} />}
+        {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} company={company} invoice={inv} quoteTotal={est?.total} genning={savingPlan} onGen={openGenerateInvoice} onRecordPayment={() => setPaySheet(true)} onEditPlan={() => setPlanSheet('edit')} setSheet={(b: boolean) => (b ? requireCompany(() => up({ sheet: true })) : up({ sheet: false }))} />}
         {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={invoiceTotals} plan={invoicePlan} company={company} genning={genningContract} onGenerate={generateContract} />}
         {tab === 'progress' && <ProgressTab projectId={projectId} estimateId={est?.id || null} userId={user?.id || null} companyName={(company as any)?.company_name || t('job.companyFallback')} />}
       </ScrollView>
@@ -463,7 +586,8 @@ export function JobScreen({ go, back, params }: NavProp) {
           const co = (company as any) || {};
           sendDoc(option, {
             kind,
-            docLabel: kind === 'invoice' ? t('job.doc.invoice') : kind === 'contract' ? t('job.doc.agreement') : t('job.doc.quote'),
+            // English on purpose: docLabel prints on the PDF header and the email subject (client-facing)
+            docLabel: kind === 'invoice' ? 'Invoice' : kind === 'contract' ? 'Agreement' : 'Quote',
             number: kind === 'invoice' ? inv?.number : undefined,
             company: { name: co.company_name || t('job.yourCompany'), license: co.company_license, address: co.company_address, phone: co.company_phone, email: co.company_email },
             client: realClient,
@@ -491,7 +615,45 @@ export function JobScreen({ go, back, params }: NavProp) {
         onConfirm={confirmPlan}
       />
       <RecordPaymentSheet open={paySheet} onClose={() => setPaySheet(false)} balance={balance} busy={savingPay} onConfirm={confirmPayment} />
+      <JobMenuSheet
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        closed={closed}
+        busy={closingBusy}
+        canApprove={canApproveDirectly}
+        onApprove={() => { setMenuOpen(false); void setEstimateStatus('Approved', 'Approved'); }}
+        onMarkLost={confirmMarkLost}
+        onArchive={() => { void setProjectStatus('Archived'); }}
+        onReopen={() => { void setProjectStatus('Active'); }}
+      />
     </>
+  );
+}
+
+/* ---------------- Job menu sheet: mark lost / archive / reopen (+ approve shortcut) ---------------- */
+// Same local-state pattern as the payment sheets. "Closed" is projects.status — the underlying
+// quote/invoice keep their statuses, so reopening restores the exact pipeline stage.
+function JobMenuSheet({ open, onClose, closed, busy, canApprove, onApprove, onMarkLost, onArchive, onReopen }: { open: boolean; onClose: () => void; closed: ClosedKind | null; busy: boolean; canApprove: boolean; onApprove: () => void; onMarkLost: () => void; onArchive: () => void; onReopen: () => void }) {
+  const t = useT();
+  const rows: { key: string; ico: string; col: string; bg: string; label: string; onPress: () => void }[] = closed
+    ? [{ key: 'reopen', ico: 'trend', col: colors.primary, bg: colors.primaryTint, label: t('job.menu.reopen'), onPress: onReopen }]
+    : [
+        ...(canApprove ? [{ key: 'approve', ico: 'check', col: colors.success, bg: colors.successTint, label: t('job.approveDirectly'), onPress: onApprove }] : []),
+        { key: 'lost', ico: 'flag', col: colors.error, bg: colors.errorTint, label: t('job.menu.markLost'), onPress: onMarkLost },
+        { key: 'archive', ico: 'layers', col: colors.muted, bg: colors.chipBg, label: t('job.menu.archive'), onPress: onArchive },
+      ];
+  return (
+    <Sheet open={open} onClose={onClose} title={t('job.menu.title')}>
+      {rows.map((r) => (
+        <Pressable key={r.key} disabled={busy} onPress={r.onPress} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: colors.border, marginBottom: 10, opacity: busy ? 0.6 : 1 }}>
+          <View style={{ width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: r.bg }}>
+            <Icon name={r.ico} size={20} color={r.col} />
+          </View>
+          <Text style={{ flex: 1, fontFamily: fonts.bold, fontSize: 14.5, color: r.key === 'lost' ? colors.error : colors.ink }}>{r.label}</Text>
+          {busy ? <ActivityIndicator size="small" color={colors.muted} /> : <Icon name="chevR" size={18} color="#C2C9D2" />}
+        </Pressable>
+      ))}
+    </Sheet>
   );
 }
 
@@ -783,14 +945,13 @@ function ContractTab({ agreement, hasInvoice, totals, plan, company, genning, on
 }
 
 /* ---------------- Payment plan sheet (F12): full / deposit / installments ---------------- */
-// whole days from today to a stored date-only due date (re-editing an existing plan)
-const daysFromToday = (iso: string | null): number => {
-  if (!iso) return 15;
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  return Math.max(0, Math.round((parseDateOnly(iso).getTime() - today) / 86400000));
-};
+// daysFromToday moved to ../data (pure, unit-tested). It returns NEGATIVE for an overdue due —
+// shown as "N days overdue" instead of the old clamp-to-0, which silently re-dated past dues
+// to today whenever a plan was re-saved.
 type DraftRow = { label: string; amount: number; days: number };
+// due-in / overdue caption + the real date it resolves to (addDaysISO handles negatives)
+const dueDays = (t: (k: string, v?: Record<string, string | number>) => string, days: number) =>
+  days < 0 ? t('job.overdueDays', { n: -days }) : t('job.dueInDays', { n: days });
 // even N-way split; first due in 15 days, then monthly-ish (+30) — all editable per row
 const draftRows = (total: number, n: number): DraftRow[] =>
   splitInstallments(total, n).map((a, i) => ({ label: `Payment ${i + 1}`, amount: a, days: 15 + 30 * i }));
@@ -805,6 +966,9 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
   const [depPct, setDepPct] = useState(25);
   const [depAmt, setDepAmt] = useState(0);
   const [rows, setRows] = useState<DraftRow[]>([]);
+  // once the rows carry stored/hand-edited amounts, the N× stepper must PRESERVE them
+  // (resizeDraftRows) instead of re-splitting evenly and wiping the edits
+  const [rowsDirty, setRowsDirty] = useState(false);
 
   // re-seed from the defaults/invoice every time the sheet opens (the Modal stays mounted closed)
   useEffect(() => {
@@ -820,13 +984,17 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
         ? initial.installments.map((r, i) => ({ label: r.label || `Payment ${i + 1}`, amount: round2(r.amount), days: daysFromToday(r.dueDate) }))
         : draftRows(total, 2)
     );
+    setRowsDirty(initial.installments.length > 0); // stored rows are an agreement — never re-split them
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const depValue = depMode === 'pct' ? round2((total * depPct) / 100) : round2(depAmt);
   const depTooBig = depMode === 'amt' && depValue > total + 0.005;
   const missing = unallocated(total, rows); // installments must cover the total exactly
-  const rowsOk = Math.abs(missing) < 0.005;
+  const missingOk = Math.abs(missing) < 0.005;
+  // a $0 installment would print "Payment N · $0.00" on the invoice AND the contract — never savable
+  const hasZeroRow = rows.some((r) => !(r.amount > 0));
+  const rowsOk = missingOk && !hasZeroRow;
   const canConfirm = !busy && (mode === 'full' || (mode === 'deposit' && !depTooBig) || (mode === 'installments' && rowsOk));
 
   const buildPlan = (): PaymentPlan => {
@@ -866,10 +1034,10 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
             {on && c.key === 'full' ? (
               <Between style={{ marginTop: 12 }}>
                 <View>
-                  <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.ink }}>{t('job.dueInDays', { n: fullDays })}</Text>
+                  <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: fullDays < 0 ? colors.warning : colors.ink }}>{dueDays(t, fullDays)}</Text>
                   <Text style={{ fontFamily: fonts.semibold, fontSize: 11.5, color: colors.muted, marginTop: 2 }}>{mdDate(parseDateOnly(addDaysISO(fullDays)))}</Text>
                 </View>
-                <Stepper value={String(fullDays)} width={44} onMinus={() => setFullDays((d) => Math.max(0, d - 5))} onPlus={() => setFullDays((d) => Math.min(365, d + 5))} />
+                <Stepper value={String(fullDays)} width={44} onMinus={() => setFullDays((d) => Math.max(-365, d - 5))} onPlus={() => setFullDays((d) => Math.min(365, d + 5))} />
               </Between>
             ) : null}
 
@@ -896,7 +1064,13 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
               <View style={{ marginTop: 12 }}>
                 <Between>
                   <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.ink }}>{t('job.splitInto')}</Text>
-                  <Stepper value={`${rows.length}×`} width={44} onMinus={() => setRows((r) => draftRows(total, Math.max(2, r.length - 1)))} onPlus={() => setRows((r) => draftRows(total, Math.min(12, r.length + 1)))} />
+                  {/* pristine rows re-split evenly; edited/stored rows are RESIZED, edits preserved */}
+                  <Stepper
+                    value={`${rows.length}×`}
+                    width={44}
+                    onMinus={() => setRows((r) => (rowsDirty ? resizeDraftRows(r, Math.max(2, r.length - 1), total) : draftRows(total, Math.max(2, r.length - 1))))}
+                    onPlus={() => setRows((r) => (rowsDirty ? resizeDraftRows(r, Math.min(12, r.length + 1), total) : draftRows(total, Math.min(12, r.length + 1))))}
+                  />
                 </Between>
                 <ScrollView style={{ maxHeight: 250, marginTop: 10 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                   {rows.map((r, i) => (
@@ -904,18 +1078,18 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
                       <Between>
                         <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.ink }}>{rowLabel(t, r.label)}</Text>
                         <View style={{ width: 112 }}>
-                          <DecimalInput value={r.amount} onChangeValue={(v) => setRows((rs) => rs.map((x, xi) => (xi === i ? { ...x, amount: v } : x)))} style={{ height: 42 }} />
+                          <DecimalInput value={r.amount} onChangeValue={(v) => { setRowsDirty(true); setRows((rs) => rs.map((x, xi) => (xi === i ? { ...x, amount: v } : x))); }} style={{ height: 42 }} />
                         </View>
                       </Between>
                       <Between style={{ marginTop: 8 }}>
-                        <Text style={{ fontFamily: fonts.semibold, fontSize: 11.5, color: colors.muted }}>
-                          {t('job.dueInDays', { n: r.days })} · {mdDate(parseDateOnly(addDaysISO(r.days)))}
+                        <Text style={{ fontFamily: fonts.semibold, fontSize: 11.5, color: r.days < 0 ? colors.warning : colors.muted }}>
+                          {dueDays(t, r.days)} · {mdDate(parseDateOnly(addDaysISO(r.days)))}
                         </Text>
                         <Stepper
                           value={String(r.days)}
                           width={44}
-                          onMinus={() => setRows((rs) => rs.map((x, xi) => (xi === i ? { ...x, days: Math.max(0, x.days - 5) } : x)))}
-                          onPlus={() => setRows((rs) => rs.map((x, xi) => (xi === i ? { ...x, days: Math.min(365, x.days + 5) } : x)))}
+                          onMinus={() => { setRowsDirty(true); setRows((rs) => rs.map((x, xi) => (xi === i ? { ...x, days: Math.max(-365, x.days - 5) } : x))); }}
+                          onPlus={() => { setRowsDirty(true); setRows((rs) => rs.map((x, xi) => (xi === i ? { ...x, days: Math.min(365, x.days + 5) } : x))); }}
                         />
                       </Between>
                     </View>
@@ -923,7 +1097,7 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
                 </ScrollView>
                 {!rowsOk ? (
                   <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.warning, marginTop: 2 }}>
-                    {t('job.unallocated', { amount: missing >= 0 ? fmt(missing) : `-${fmt(Math.abs(missing))}` })}
+                    {!missingOk ? t('job.unallocated', { amount: missing >= 0 ? fmt(missing) : `-${fmt(Math.abs(missing))}` }) : t('job.zeroRow')}
                   </Text>
                 ) : null}
               </View>
@@ -1063,7 +1237,7 @@ function ProgressTab({ projectId, estimateId, userId, companyName }: { projectId
     setSharing(true);
     try {
       const token = await ensureShareToken(userId, projectId);
-      await Share.share({ message: t('job.share.progress', { link: progressLink(token) }) });
+      await Share.share({ message: CLIENT_SHARE.progress(progressLink(token)) });
     } catch (e: any) {
       Alert.alert(t('job.alert.couldNotCreateLink'), e?.message || t('job.alert.tryAgain'));
     } finally {

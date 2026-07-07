@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useQuery } from '@tanstack/react-query';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
-import { fmt0, initials, Job, split, STAGES } from '../data';
+import { ClosedKind, fmt0, homeMetrics, initials, Job, split, STAGES } from '../data';
 import { Avatar, Between, Btn, Card, Empty, NavBtn, Row, SearchBar, SectionTitle, StageChip, Switch, useStore } from '../ui';
 import { useAuth } from '../lib/auth';
 import { fetchClients, fetchCompanyProfile, fetchJobs } from '../lib/api';
@@ -14,28 +14,31 @@ import { LOCALES, registerStrings, useLocale, useT } from '../lib/i18n';
 registerStrings({
   // Job card
   'tabs.noClientYet': { en: 'No client yet', es: 'Sin cliente todavía', pt: 'Sem cliente ainda' },
+  // closed-state chip (ClosedChip lives here; the Job screen header reuses these keys)
+  'job.closed.lost': { en: 'LOST', es: 'PERDIDA', pt: 'PERDIDO' },
+  'job.closed.archived': { en: 'ARCHIVED', es: 'ARCHIVADA', pt: 'ARQUIVADO' },
 
   // Home
   'tabs.welcomeBack': { en: 'WELCOME BACK', es: 'BIENVENIDO DE NUEVO', pt: 'BEM-VINDO DE VOLTA' },
   'tabs.yourCompany': { en: 'Your company', es: 'Tu empresa', pt: 'Sua empresa' },
-  'tabs.pipeline': { en: 'Pipeline', es: 'Pipeline', pt: 'Pipeline' },
+  'tabs.pipeline': { en: 'Pipeline', es: 'En proceso', pt: 'Em andamento' },
   'tabs.pipelineMeta': {
     en: '{active} active jobs · {openQuotes} open quotes',
-    es: '{active} trabajos activos · {openQuotes} presupuestos abiertos',
+    es: '{active} trabajos activos · {openQuotes} cotizaciones abiertas',
     pt: '{active} trabalhos ativos · {openQuotes} orçamentos abertos',
   },
   'tabs.invoiced': { en: 'Invoiced', es: 'Facturado', pt: 'Faturado' },
   'tabs.awaitingPayment': { en: 'awaiting payment', es: 'pago pendiente', pt: 'aguardando pagamento' },
   'tabs.collected': { en: 'Collected', es: 'Cobrado', pt: 'Recebido' },
   'tabs.received': { en: 'received', es: 'recibido', pt: 'recebido' },
-  'tabs.newQuote': { en: 'New Quote', es: 'Nuevo presupuesto', pt: 'Novo orçamento' },
+  'tabs.newQuote': { en: 'New Quote', es: 'Nueva cotización', pt: 'Novo orçamento' },
   'tabs.newClient': { en: 'New client', es: 'Nuevo cliente', pt: 'Novo cliente' },
   'tabs.allJobs': { en: 'All jobs', es: 'Todos los trabajos', pt: 'Todos os trabalhos' },
   'tabs.recentJobs': { en: 'Recent jobs', es: 'Trabajos recientes', pt: 'Trabalhos recentes' },
   'tabs.seeAll': { en: 'See all', es: 'Ver todos', pt: 'Ver todos' },
   'tabs.noJobsHome': {
     en: 'No jobs yet. Tap "New Quote" to create your first.',
-    es: 'Aún no hay trabajos. Toca "Nuevo presupuesto" para crear el primero.',
+    es: 'Aún no hay trabajos. Toca "Nueva cotización" para crear el primero.',
     pt: 'Nenhum trabalho ainda. Toque em "Novo orçamento" para criar o primeiro.',
   },
 
@@ -47,11 +50,14 @@ registerStrings({
     pt: 'Buscar cliente ou endereço',
   },
   'tabs.filterAll': { en: 'All', es: 'Todos', pt: 'Todos' },
+  // closed filters — labels match the ClosedChip the cards show (values stay English in the store)
+  'tabs.filterLost': { en: 'Lost', es: 'Perdida', pt: 'Perdido' },
+  'tabs.filterArchived': { en: 'Archived', es: 'Archivada', pt: 'Arquivado' },
   'tabs.noJobsYet': { en: 'No jobs yet', es: 'Aún no hay trabajos', pt: 'Nenhum trabalho ainda' },
   'tabs.noMatches': { en: 'No matches', es: 'Sin resultados', pt: 'Nenhum resultado' },
   'tabs.noJobsBody': {
     en: 'Tap "New Quote" to create your first job.',
-    es: 'Toca "Nuevo presupuesto" para crear tu primer trabajo.',
+    es: 'Toca "Nueva cotización" para crear tu primer trabajo.',
     pt: 'Toque em "Novo orçamento" para criar seu primeiro trabalho.',
   },
   'tabs.noMatchesJobsBody': {
@@ -106,6 +112,24 @@ registerStrings({
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
 
+/* ---------------- CLOSED CHIP ---------------- */
+// Same silhouette as StageChip, but for the ORTHOGONAL closed axis (projects.status) — it
+// REPLACES the stage chip wherever a job is lost/archived. Shared: cards here, Job header there.
+const CLOSED_CHIP: Record<ClosedKind, { c: string; t: string; key: string }> = {
+  lost: { c: colors.error, t: colors.errorTint, key: 'job.closed.lost' },
+  archived: { c: '#8A93A3', t: '#EEF0F3', key: 'job.closed.archived' }, // Draft's neutral gray
+};
+export function ClosedChip({ kind, lg }: { kind: ClosedKind; lg?: boolean }) {
+  const t = useT();
+  const s = CLOSED_CHIP[kind];
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: lg ? 6 : 5, paddingHorizontal: lg ? 12 : 10, borderRadius: radii.pill, backgroundColor: s.t }}>
+      <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: s.c }} />
+      <Text style={{ fontFamily: fonts.extrabold, fontSize: lg ? 12.5 : 11.5, color: s.c }}>{t(s.key)}</Text>
+    </View>
+  );
+}
+
 /* ---------------- JOB CARD ---------------- */
 export function JobCard({ j, i, onPress }: { j: Job; i: number; onPress: () => void }) {
   const t = useT();
@@ -139,7 +163,7 @@ export function JobCard({ j, i, onPress }: { j: Job; i: number; onPress: () => v
             <Text style={{ fontFamily: fonts.extrabold, fontSize: 15, color: colors.ink }}>
               {d}<Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted }}>{c}</Text>
             </Text>
-            <StageChip stage={j.stage} />
+            {j.closed ? <ClosedChip kind={j.closed} /> : <StageChip stage={j.stage} />}
           </Between>
         </View>
       </Card>
@@ -153,13 +177,10 @@ export function HomeScreen({ go }: NavProp) {
   const { user } = useAuth();
   const { data: jobs = [], isLoading } = useQuery({ queryKey: ['jobs', user?.id], queryFn: () => fetchJobs(user!.id), enabled: !!user?.id });
   const { data: profile } = useQuery({ queryKey: ['company', user?.id], queryFn: () => fetchCompanyProfile(user!.id), enabled: !!user?.id });
-  const pipeline = jobs.filter((j) => ['Draft', 'Quoted', 'Sent', 'Approved'].includes(j.stage)).reduce((s, j) => s + j.value, 0);
-  const invoiced = jobs.filter((j) => j.stage === 'Invoiced').reduce((s, j) => s + j.value, 0);
-  const collected = jobs.filter((j) => j.stage === 'Paid').reduce((s, j) => s + j.value, 0);
-  const active = jobs.filter((j) => j.stage !== 'Paid').length;
-  const openQuotes = jobs.filter((j) => ['Quoted', 'Sent'].includes(j.stage)).length;
+  // closed (lost/archived) jobs are out of every number except collected — see homeMetrics
+  const { pipeline, invoiced, collected, active, openQuotes } = homeMetrics(jobs);
   const [pd, pc] = split(pipeline);
-  const recent = jobs.slice(0, 4);
+  const recent = jobs.filter((j) => !j.closed).slice(0, 4);
   const companyName = (profile as any)?.company_name || t('tabs.yourCompany');
   return (
     <>
@@ -234,8 +255,13 @@ export function JobsScreen({ go }: NavProp) {
   const { data: jobs = [], isLoading } = useQuery({ queryKey: ['jobs', user?.id], queryFn: () => fetchJobs(user!.id), enabled: !!user?.id });
   const filter = store.jobFilter || 'All';
   const q = store.jobQ || '';
-  const filters = ['All', ...STAGES];
-  let list = jobs.filter((j) => filter === 'All' || j.stage === filter);
+  // 'All' and the stage filters show OPEN jobs only; Lost/Archived list just their own closed kind
+  const filters = ['All', ...STAGES, 'Lost', 'Archived'];
+  let list = jobs.filter((j) =>
+    filter === 'Lost' ? j.closed === 'lost'
+    : filter === 'Archived' ? j.closed === 'archived'
+    : !j.closed && (filter === 'All' || j.stage === filter)
+  );
   if (q) list = list.filter((j) => (j.client || 'no client').toLowerCase().includes(q.toLowerCase()) || j.addr.toLowerCase().includes(q.toLowerCase()) || j.title.toLowerCase().includes(q.toLowerCase()));
   return (
     <>
@@ -251,7 +277,10 @@ export function JobsScreen({ go }: NavProp) {
               onPress={() => up({ jobFilter: f })}
               style={{ paddingVertical: 5, paddingHorizontal: 13, borderRadius: radii.pill, backgroundColor: filter === f ? colors.primary : colors.card, borderWidth: 1, borderColor: filter === f ? colors.primary : colors.border }}
             >
-              <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: filter === f ? '#fff' : colors.ink2 }}>{f === 'All' ? t('tabs.filterAll') : t('stage.' + f)}</Text>
+              {/* the store keeps the LOGICAL value (English); only the label is translated */}
+              <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: filter === f ? '#fff' : colors.ink2 }}>
+                {f === 'All' ? t('tabs.filterAll') : f === 'Lost' ? t('tabs.filterLost') : f === 'Archived' ? t('tabs.filterArchived') : t('stage.' + f)}
+              </Text>
             </Pressable>
           ))}
         </ScrollView>

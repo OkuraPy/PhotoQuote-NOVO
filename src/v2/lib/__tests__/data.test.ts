@@ -1,5 +1,6 @@
-import { applyMarkup, buildStarterEstimate, calcTotals, deriveBase, deriveStage } from '../../data';
-import type { LineItem } from '../../data';
+import { applyMarkup, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, homeMetrics } from '../../data';
+import type { ClosedKind, LineItem } from '../../data';
+import type { Stage } from '../../theme';
 
 const item = (over: Partial<LineItem> = {}): LineItem => ({
   id: 1, cat: 'Labor', desc: '', qty: 1, unit: 'hr', price: 100, taxable: false, ...over,
@@ -172,5 +173,67 @@ describe('buildStarterEstimate', () => {
   it('guards against a non-positive multiplier', () => {
     const base = buildStarterEstimate(['Painting'], 1);
     expect(buildStarterEstimate(['Painting'], 0)[0].price).toBe(base[0].price);
+  });
+});
+
+describe('closedFromStatus (projects.status → lost/archived, orthogonal to the stage)', () => {
+  it('maps Lost/Archived case-insensitively', () => {
+    expect(closedFromStatus('Lost')).toBe('lost');
+    expect(closedFromStatus('lost')).toBe('lost');
+    expect(closedFromStatus('LOST')).toBe('lost');
+    expect(closedFromStatus('Archived')).toBe('archived');
+    expect(closedFromStatus('ARCHIVED')).toBe('archived');
+  });
+
+  it('any other status (v1 free-form values, Active, empty, null) reads as OPEN', () => {
+    expect(closedFromStatus('In Progress')).toBeNull(); // legacy v1 status
+    expect(closedFromStatus('Draft')).toBeNull();
+    expect(closedFromStatus('Active')).toBeNull(); // reopened
+    expect(closedFromStatus('')).toBeNull();
+    expect(closedFromStatus(null)).toBeNull();
+    expect(closedFromStatus(undefined)).toBeNull();
+  });
+});
+
+describe('homeMetrics (dashboard numbers with lost/archived out of the pipeline)', () => {
+  const j = (stage: Stage, value: number, closed?: ClosedKind | null) => ({ stage, value, closed });
+
+  it('with NO closed jobs it reproduces the original HomeScreen inline math bit for bit', () => {
+    const jobs = [j('Draft', 100), j('Quoted', 200), j('Sent', 300), j('Approved', 400), j('Invoiced', 500), j('Paid', 600)];
+    // the exact expressions HomeScreen used before homeMetrics existed:
+    const expected = {
+      pipeline: jobs.filter((x) => ['Draft', 'Quoted', 'Sent', 'Approved'].includes(x.stage)).reduce((s, x) => s + x.value, 0),
+      invoiced: jobs.filter((x) => x.stage === 'Invoiced').reduce((s, x) => s + x.value, 0),
+      collected: jobs.filter((x) => x.stage === 'Paid').reduce((s, x) => s + x.value, 0),
+      active: jobs.filter((x) => x.stage !== 'Paid').length,
+      openQuotes: jobs.filter((x) => ['Quoted', 'Sent'].includes(x.stage)).length,
+    };
+    expect(homeMetrics(jobs)).toEqual(expected);
+    expect(homeMetrics(jobs)).toEqual({ pipeline: 1000, invoiced: 500, collected: 600, active: 5, openQuotes: 2 });
+    expect(homeMetrics([])).toEqual({ pipeline: 0, invoiced: 0, collected: 0, active: 0, openQuotes: 0 });
+  });
+
+  it('a lost job leaves the pipeline, the counters and the open quotes', () => {
+    const m = homeMetrics([j('Quoted', 500, 'lost'), j('Quoted', 100)]);
+    expect(m.pipeline).toBe(100);
+    expect(m.openQuotes).toBe(1);
+    expect(m.active).toBe(1);
+  });
+
+  it('archived+Paid still counts in collected (real money); lost+Paid does NOT', () => {
+    const m = homeMetrics([j('Paid', 900, 'archived'), j('Paid', 50, 'lost'), j('Paid', 100)]);
+    expect(m.collected).toBe(1000); // 900 archived + 100 open — the lost 50 is gone
+    expect(m.active).toBe(0);
+  });
+
+  it('invoiced and openQuotes ignore closed jobs entirely', () => {
+    const m = homeMetrics([j('Invoiced', 700, 'archived'), j('Sent', 200, 'lost'), j('Invoiced', 300)]);
+    expect(m.invoiced).toBe(300);
+    expect(m.openQuotes).toBe(0);
+    expect(m.active).toBe(1); // only the open Invoiced job
+  });
+
+  it('closed: null / undefined both mean open (fetchJobs maps unknown statuses to null)', () => {
+    expect(homeMetrics([j('Quoted', 100, null)])).toEqual(homeMetrics([j('Quoted', 100)]));
   });
 });

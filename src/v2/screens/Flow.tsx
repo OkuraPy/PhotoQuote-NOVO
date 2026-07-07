@@ -31,7 +31,7 @@ registerStrings({
   'flow.zipPlaceholder': { en: 'ZIP — sets regional pricing', es: 'Código postal — define el precio regional', pt: 'CEP — define o preço regional' },
   'flow.lookingUpZip': { en: 'Looking up ZIP…', es: 'Buscando el código postal…', pt: 'Buscando o CEP…' },
   'flow.standardPricing': { en: 'Standard pricing', es: 'Precio estándar', pt: 'Preço padrão' },
-  'flow.generateEstimate': { en: 'Generate estimate', es: 'Generar presupuesto', pt: 'Gerar orçamento' },
+  'flow.generateEstimate': { en: 'Generate quote', es: 'Generar cotización', pt: 'Gerar orçamento' },
 
   // Description input (voice)
   'flow.micAccessNeededTitle': { en: 'Microphone access needed', es: 'Se necesita acceso al micrófono', pt: 'Acesso ao microfone necessário' },
@@ -44,19 +44,20 @@ registerStrings({
   'flow.tapMicToDictate': { en: 'Or tap the mic to dictate — we’ll transcribe it into the description.', es: 'O toca el micrófono para dictar — lo transcribiremos en la descripción.', pt: 'Ou toque no microfone para ditar — vamos transcrever na descrição.' },
 
   // Estimate screen
-  'flow.estimate': { en: 'Estimate', es: 'Presupuesto', pt: 'Orçamento' },
+  'flow.estimate': { en: 'Quote', es: 'Cotización', pt: 'Orçamento' },
   'flow.analyzingOnePhoto': { en: 'Analyzing 1 photo…', es: 'Analizando 1 foto…', pt: 'Analisando 1 foto…' },
   'flow.analyzingNPhotos': { en: 'Analyzing {n} photos…', es: 'Analizando {n} fotos…', pt: 'Analisando {n} fotos…' },
   'flow.readingSurfaces': { en: 'Reading surfaces, materials & scope', es: 'Leyendo superficies, materiales y alcance', pt: 'Lendo superfícies, materiais e escopo' },
   'flow.notJobPhotos': { en: 'These don’t look like job photos', es: 'Estas no parecen fotos del trabajo', pt: 'Estas não parecem fotos do trabalho' },
   'flow.retakePhotos': { en: 'Retake photos', es: 'Volver a tomar fotos', pt: 'Tirar fotos novamente' },
-  'flow.couldNotGenerate': { en: 'Couldn’t generate the estimate', es: 'No se pudo generar el presupuesto', pt: 'Não foi possível gerar o orçamento' },
+  'flow.couldNotGenerate': { en: 'Couldn’t generate the quote', es: 'No se pudo generar la cotización', pt: 'Não foi possível gerar o orçamento' },
   'flow.tryAgain': { en: 'Try again', es: 'Intentar de nuevo', pt: 'Tentar novamente' },
-  'flow.starterEstimate': { en: 'Starter estimate', es: 'Presupuesto inicial', pt: 'Orçamento inicial' },
-  'flow.starterEstimateNote': { en: 'Starter estimate (AI unavailable) — review and edit the items below.', es: 'Presupuesto inicial (IA no disponible) — revisa y edita los elementos abajo.', pt: 'Orçamento inicial (IA indisponível) — revise e edite os itens abaixo.' },
+  'flow.starterEstimate': { en: 'Starter quote', es: 'Cotización inicial', pt: 'Orçamento inicial' },
+  'flow.starterEstimateNote': { en: 'Starter quote (AI unavailable) — review and edit the items below.', es: 'Cotización inicial (IA no disponible) — revisa y edita los elementos abajo.', pt: 'Orçamento inicial (IA indisponível) — revise e edite os itens abaixo.' },
   'flow.aiAnalyzedOnePhoto': { en: 'AI analyzed 1 photo', es: 'La IA analizó 1 foto', pt: 'A IA analisou 1 foto' },
   'flow.aiAnalyzedNPhotos': { en: 'AI analyzed {n} photos', es: 'La IA analizó {n} fotos', pt: 'A IA analisou {n} fotos' },
   'flow.reviewItemsBelow': { en: 'Review the items below and adjust as needed.', es: 'Revisa los elementos abajo y ajústalos según sea necesario.', pt: 'Revise os itens abaixo e ajuste conforme necessário.' },
+  'flow.confidencePct': { en: '{pct}% confident', es: '{pct}% de confianza', pt: '{pct}% de confiança' },
   'flow.estimatedTotal': { en: 'ESTIMATED TOTAL', es: 'TOTAL ESTIMADO', pt: 'TOTAL ESTIMADO' },
   'flow.subtotal': { en: 'Subtotal', es: 'Subtotal', pt: 'Subtotal' },
   'flow.taxLabel': { en: 'Tax', es: 'Impuesto', pt: 'Imposto' },
@@ -96,14 +97,14 @@ registerStrings({
   'flow.pulledAutomatically': { en: '{addr}, {city} · pulled automatically', es: '{addr}, {city} · obtenido automáticamente', pt: '{addr}, {city} · obtido automaticamente' },
   'flow.jobLocation': { en: 'Job location', es: 'Ubicación del trabajo', pt: 'Local do trabalho' },
   'flow.nothingToSaveTitle': { en: 'Nothing to save', es: 'Nada que guardar', pt: 'Nada para salvar' },
-  'flow.nothingToSaveBody': { en: 'Generate an estimate first.', es: 'Genera un presupuesto primero.', pt: 'Gere um orçamento primeiro.' },
+  'flow.nothingToSaveBody': { en: 'Generate a quote first.', es: 'Genera una cotización primero.', pt: 'Gere um orçamento primeiro.' },
   'flow.notSignedInTitle': { en: 'Not signed in', es: 'No has iniciado sesión', pt: 'Não conectado' },
   'flow.notSignedInBody': { en: 'Please sign in again.', es: 'Inicia sesión de nuevo.', pt: 'Faça login novamente.' },
   'flow.newClient': { en: 'New client', es: 'Nuevo cliente', pt: 'Novo cliente' },
   'flow.jobSuffix': { en: '{service} job', es: 'trabajo de {service}', pt: 'trabalho de {service}' },
-  'flow.newEstimate': { en: 'New estimate', es: 'Nuevo presupuesto', pt: 'Novo orçamento' },
+  'flow.newEstimate': { en: 'New quote', es: 'Nueva cotización', pt: 'Novo orçamento' },
   'flow.couldNotSave': { en: 'Could not save', es: 'No se pudo guardar', pt: 'Não foi possível salvar' },
-  'flow.skip': { en: 'Skip', es: 'Omitir', pt: 'Pular' },
+  'flow.skip': { en: 'Save without client', es: 'Guardar sin cliente', pt: 'Salvar sem cliente' },
   'flow.saving': { en: 'Saving…', es: 'Guardando…', pt: 'Salvando…' },
   'flow.saveJob': { en: 'Save job', es: 'Guardar trabajo', pt: 'Salvar trabalho' },
 });
@@ -647,7 +648,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
             {conf > 0 ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 9, borderRadius: radii.pill, backgroundColor: colors.accentTint, borderWidth: 1, borderColor: colors.accentBorder }}>
                 <Icon name="check" size={12} sw={2.6} color={colors.accentInk} />
-                <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: colors.accentInk }}>{conf}%</Text>
+                <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: colors.accentInk }}>{tr('flow.confidencePct', { pct: conf })}</Text>
               </View>
             ) : null}
           </Card>
@@ -937,7 +938,7 @@ export function AttachScreen({ go, back }: NavProp) {
       </ScrollView>
       <View style={actionbar}>
         <Row style={{ gap: 10 }}>
-          <Btn variant="ghost" title={t('flow.skip')} disabled={saving} onPress={() => onSave(true)} style={{ flex: 0.4 }} />
+          <Btn variant="ghost" title={t('flow.skip')} disabled={saving} onPress={() => onSave(true)} style={{ flex: 0.55 }} />
           <Btn title={saving ? t('flow.saving') : t('flow.saveJob')} icon={saving ? undefined : 'arrowRight'} disabled={saving} onPress={() => onSave(false)} style={{ flex: 1 }} />
         </Row>
       </View>

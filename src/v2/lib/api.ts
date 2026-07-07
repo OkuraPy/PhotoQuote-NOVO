@@ -4,7 +4,7 @@ import * as Location from 'expo-location';
 import * as Crypto from 'expo-crypto';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from './supabase';
-import { Client, deriveBase, deriveStage, Job, LineItem, paidTotal, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, Photo, planFromInvoice, planRows, rescaleSchedule, round2, ScheduleRow, statusFromPayments, toDateOnly } from '../data';
+import { Client, ClosedKind, closedFromStatus, deriveBase, deriveStage, Job, LineItem, paidTotal, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, Photo, planFromInvoice, planRows, rescaleSchedule, round2, ScheduleRow, statusFromPayments, toDateOnly } from '../data';
 export { deriveStage }; // re-exported for screens (lives in ../data so it's unit-testable)
 
 /* ---------------- Location: real ZIP (Zippopotam, keyless) + GPS (expo-location) ---------------- */
@@ -344,8 +344,10 @@ function invoicePlanColumns(plan: PaymentPlan) {
 // (Re)write the invoice's installment rows. PostgREST has no transactions (same caveat as
 // updateEstimateItems): if the insert fails after the invoice was written, the mode is
 // downgraded to 'full' so the invoice never claims a schedule it doesn't have.
-async function insertScheduleRows(userId: string, invoiceId: string, plan: PaymentPlan): Promise<void> {
-  if (plan.mode !== 'installments' || !plan.installments.length) return;
+// Returns true when the plan was DOWNGRADED to 'full' (the caller warns the contractor —
+// a silently-degraded plan would surprise them on the client's invoice).
+async function insertScheduleRows(userId: string, invoiceId: string, plan: PaymentPlan): Promise<boolean> {
+  if (plan.mode !== 'installments' || !plan.installments.length) return false;
   const rows = [...plan.installments]
     .sort((a, b) => a.sort - b.sort)
     .map((r, i) => ({
@@ -358,13 +360,17 @@ async function insertScheduleRows(userId: string, invoiceId: string, plan: Payme
       sort: i,
     }));
   const { error } = await supabase.from('invoice_schedule').insert(rows);
-  if (error) await supabase.from('invoices').update({ payment_mode: 'full' }).eq('id', invoiceId);
+  if (error) {
+    await supabase.from('invoices').update({ payment_mode: 'full' }).eq('id', invoiceId);
+    return true;
+  }
+  return false;
 }
 
 // Copies the estimate's totals (the DB trigger keeps those correct), assigns a sequential
 // per-user invoice number INV-YYYY-NNNN (no trigger exists, so we mint it here) and stores the
 // payment plan the contractor picked in the sheet (mode/due/deposit + installment rows).
-export async function createInvoice(userId: string, estimateId: string, projectId: string, plan: PaymentPlan): Promise<{ id: string; number: string }> {
+export async function createInvoice(userId: string, estimateId: string, projectId: string, plan: PaymentPlan): Promise<{ id: string; number: string; downgraded: boolean }> {
   const { data: est, error: eErr } = await supabase
     .from('estimates')
     .select('subtotal, tax_rate, tax_percent, tax_amount, margin_rate, margin_amount, total, grand_total')
@@ -396,18 +402,18 @@ export async function createInvoice(userId: string, estimateId: string, projectI
     .select('id, invoice_number')
     .single();
   if (error) throw error;
-  await insertScheduleRows(userId, inv.id, plan);
-  return { id: inv.id, number: inv.invoice_number };
+  const downgraded = await insertScheduleRows(userId, inv.id, plan);
+  return { id: inv.id, number: inv.invoice_number, downgraded };
 }
 
 // Re-edit the payment plan of an existing invoice: plan columns + delete/reinsert the schedule.
 // Recorded payments are NEVER touched — the ledger is history, the plan is the agreement.
-export async function updateInvoicePlan(userId: string, invoiceId: string, plan: PaymentPlan): Promise<void> {
+export async function updateInvoicePlan(userId: string, invoiceId: string, plan: PaymentPlan): Promise<{ downgraded: boolean }> {
   const { error } = await supabase.from('invoices').update(invoicePlanColumns(plan)).eq('id', invoiceId);
   if (error) throw error;
   const { error: dErr } = await supabase.from('invoice_schedule').delete().eq('invoice_id', invoiceId);
   if (dErr) throw dErr;
-  await insertScheduleRows(userId, invoiceId, plan);
+  return { downgraded: await insertScheduleRows(userId, invoiceId, plan) };
 }
 
 // Append a payment to the ledger, then refresh the invoice status from Σ(ledger) vs total.
@@ -457,6 +463,14 @@ export async function updateInvoiceStatus(invoiceId: string, status: string) {
   let q = supabase.from('invoices').update({ status }).eq('id', invoiceId);
   if (status === 'Sent') q = q.eq('status', 'Unpaid');
   const { error } = await q;
+  if (error) throw error;
+}
+
+// Close/reopen a job: 'Lost'/'Archived' take it out of the pipeline, 'Active' brings it back.
+// Lives in projects.status — an axis ORTHOGONAL to the estimate/invoice-derived Stage, so the
+// underlying quote/invoice statuses are untouched and reopening restores the exact stage.
+export async function updateProjectStatus(projectId: string, status: 'Lost' | 'Archived' | 'Active'): Promise<void> {
+  const { error } = await supabase.from('projects').update({ status }).eq('id', projectId);
   if (error) throw error;
 }
 
@@ -598,7 +612,7 @@ const monthDay = (iso?: string) => {
 
 export async function fetchJobs(userId: string): Promise<RealJob[]> {
   const [proj, cli, est, inv] = await Promise.all([
-    supabase.from('projects').select('id, name, client_id, address, city, created_at, photo_urls').eq('user_id', userId).order('created_at', { ascending: false }),
+    supabase.from('projects').select('id, name, client_id, address, city, created_at, photo_urls, status').eq('user_id', userId).order('created_at', { ascending: false }),
     supabase.from('clients').select('id, full_name').eq('user_id', userId),
     supabase.from('estimates').select('project_id, status, total, grand_total, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     supabase.from('invoices').select('project_id, status, total, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
@@ -629,6 +643,7 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
       photos: Array.isArray(p.photo_urls) ? p.photo_urls.length : 0,
       thumb: Array.isArray(p.photo_urls) && p.photo_urls[0] ? String(p.photo_urls[0]) : null,
       date: monthDay(p.created_at),
+      closed: closedFromStatus(p.status),
     };
   });
 }
@@ -688,6 +703,7 @@ export type JobDetail = {
   client: { name: string; addr: string; city: string; email: string; phone: string } | null;
   photoUrls: string[];
   agreement: { id: string; token: string; status: string; signedName: string | null; signedDate: string | null } | null;
+  closed: ClosedKind | null; // lost/archived (projects.status) — orthogonal to the derived stage
 };
 
 // invoices.payment_mode → PaymentMode with a safe fallback for anything unexpected
@@ -764,7 +780,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
 
   // real client for the invoice "Bill to"
   let client: JobDetail['client'] = null;
-  const projRes = await supabase.from('projects').select('client_id, photo_urls').eq('id', projectId).maybeSingle();
+  const projRes = await supabase.from('projects').select('client_id, photo_urls, status').eq('id', projectId).maybeSingle();
   if (projRes.data?.client_id) {
     const { data: c } = await supabase
       .from('clients')
@@ -802,6 +818,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
     client,
     photoUrls: Array.isArray(projRes.data?.photo_urls) ? (projRes.data!.photo_urls as string[]) : [],
     agreement: agr ? { id: agr.id, token: agr.token, status: agr.status, signedName: agr.signed_name, signedDate: agr.signed_date } : null,
+    closed: closedFromStatus(projRes.data?.status),
   };
 }
 
