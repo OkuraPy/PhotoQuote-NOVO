@@ -1,16 +1,16 @@
 // PhotoQuote v2 — Job screen: timeline + Quote / Invoice / Contract / Progress tabs
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Pressable, Share, ScrollView, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
-import { applyMarkup, calcTotals, fmt, LineItem, split, STAGES } from '../data';
+import { addDaysISO, applyMarkup, calcTotals, fmt, invoiceBalance, LineItem, parseDateOnly, PaymentMode, PaymentPlan, planFromInvoice, planRows, round2, split, splitInstallments, STAGES, statusFromPayments, unallocated } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { addPhaseComment, addPhasePhotos, agreementLink, createAgreement, createInvoice, createPhase, deletePhase, deriveStage, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, JobDetail, progressLink, ProgressPhase, PhaseStatus, updateEstimateStatus, updateInvoiceStatus, updatePhase } from '../lib/api';
+import { addPhaseComment, addPhasePhotos, agreementLink, createAgreement, createInvoice, createPhase, deletePhase, deriveStage, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, JobDetail, progressLink, ProgressPhase, PhaseStatus, recordInvoicePayment, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { sendDoc } from '../lib/send';
 import { registerStrings, useT } from '../lib/i18n';
-import { Between, Btn, Card, CatChip, Divider, Empty, Field, Input, Nav, Row, SectionTitle, SendSheet, Sheet, StageChip, useStore } from '../ui';
+import { Between, Btn, Card, CatChip, Chip, DecimalInput, Divider, Empty, Field, Input, LinkBtn, Nav, Row, SectionTitle, SendSheet, Sheet, StageChip, Stepper, useStore } from '../ui';
 
 registerStrings({
   // NEXT STEP labels (keyed by stage action; Stage values themselves are not translated)
@@ -18,7 +18,7 @@ registerStrings({
   'job.next.send': { en: 'Send quote', es: 'Enviar cotización', pt: 'Enviar orçamento' },
   'job.next.approve': { en: 'Mark approved', es: 'Marcar aprobada', pt: 'Marcar aprovado' },
   'job.next.invoice': { en: 'Generate invoice', es: 'Generar factura', pt: 'Gerar fatura' },
-  'job.next.paid': { en: 'Mark paid', es: 'Marcar pagada', pt: 'Marcar pago' },
+  'job.next.paid': { en: 'Record payment', es: 'Registrar pago', pt: 'Registrar pagamento' },
   'job.next.done': { en: 'Paid in full', es: 'Pagada por completo', pt: 'Pago integralmente' },
   // header / labels
   'job.noClient': { en: 'No client', es: 'Sin cliente', pt: 'Sem cliente' },
@@ -63,18 +63,56 @@ registerStrings({
   'job.generating': { en: 'Generating…', es: 'Generando…', pt: 'Gerando…' },
   'job.generateInvoice': { en: 'Generate invoice', es: 'Generar factura', pt: 'Gerar fatura' },
   'job.paidBadge': { en: 'PAID', es: 'PAGADA', pt: 'PAGA' },
+  'job.partialBadge': { en: 'PARTIAL', es: 'PARCIAL', pt: 'PARCIAL' },
   'job.dueBadge': { en: 'DUE', es: 'POR PAGAR', pt: 'A VENCER' },
   'job.invoiceLabel': { en: 'Invoice', es: 'Factura', pt: 'Fatura' },
   'job.issuedDue': { en: 'Issued · Due', es: 'Emitida · Vence', pt: 'Emitida · Vence' },
+  'job.issuedOnly': { en: 'Issued', es: 'Emitida', pt: 'Emitida' },
   'job.from': { en: 'From', es: 'De', pt: 'De' },
   'job.billTo': { en: 'Bill to', es: 'Facturar a', pt: 'Faturar para' },
   'job.totalDue': { en: 'Total due', es: 'Total a pagar', pt: 'Total a pagar' },
-  'job.deposit': { en: 'Deposit ({pct}%)', es: 'Depósito ({pct}%)', pt: 'Entrada ({pct}%)' },
   'job.paid': { en: 'Paid', es: 'Pagado', pt: 'Pago' },
   'job.balanceDue': { en: 'Balance due', es: 'Saldo pendiente', pt: 'Saldo devedor' },
-  'job.payTerms': { en: 'Pay by card, ACH or check. Terms: Net 15 from issue date.', es: 'Paga con tarjeta, ACH o cheque. Plazo: Neto 15 desde la fecha de emisión.', pt: 'Pague com cartão, ACH ou cheque. Prazo: 15 dias da emissão.' },
+  'job.paymentsReceived': { en: 'Payments received', es: 'Pagos recibidos', pt: 'Pagamentos recebidos' },
+  'job.quoteChanged': { en: 'The quote changed after this invoice was created. Payments are already recorded, so the invoice keeps its original amounts.', es: 'La cotización cambió después de crear esta factura. Ya hay pagos registrados, así que la factura mantiene sus montos originales.', pt: 'O orçamento mudou depois desta fatura ser criada. Já há pagamentos registrados, então a fatura mantém os valores originais.' },
   'job.pdf': { en: 'PDF', es: 'PDF', pt: 'PDF' },
   'job.sendInvoice': { en: 'Send invoice', es: 'Enviar factura', pt: 'Enviar fatura' },
+  // payment plan sheet (leigo-proof: no "Net 15" jargon — real dates and plain words)
+  'job.paymentPlan': { en: 'Payment plan', es: 'Plan de pago', pt: 'Plano de pagamento' },
+  'job.planTotal': { en: 'Total: {amount}', es: 'Total: {amount}', pt: 'Total: {amount}' },
+  'job.plan.full': { en: 'Pay in full', es: 'Pago único', pt: 'Pagamento único' },
+  'job.plan.fullDesc': { en: 'One payment for the whole amount', es: 'Un solo pago por el monto total', pt: 'Um pagamento único do valor total' },
+  'job.plan.deposit': { en: 'Deposit + balance', es: 'Anticipo + saldo', pt: 'Entrada + saldo' },
+  'job.plan.depositDesc': { en: 'Part up front, the rest at the end', es: 'Una parte por adelantado y el resto al final', pt: 'Uma parte adiantada e o resto no final' },
+  'job.plan.installments': { en: 'Installments', es: 'Cuotas', pt: 'Parcelas' },
+  'job.plan.installmentsDesc': { en: 'Split into 2–12 payments', es: 'Divide en 2–12 pagos', pt: 'Divida em 2–12 pagamentos' },
+  'job.dueInDays': { en: 'Due in {n} days', es: 'Vence en {n} días', pt: 'Vence em {n} dias' },
+  'job.dueOn': { en: 'Due {date}', es: 'Vence {date}', pt: 'Vence {date}' },
+  'job.uponCompletion': { en: 'Upon completion', es: 'Al finalizar', pt: 'Na conclusão' },
+  'job.splitInto': { en: 'Split into', es: 'Dividir en', pt: 'Dividir em' },
+  'job.depositPreview': { en: 'Deposit {dep} · Balance {bal}', es: 'Anticipo {dep} · Saldo {bal}', pt: 'Entrada {dep} · Saldo {bal}' },
+  'job.depositTooBig': { en: 'The deposit can’t exceed the total.', es: 'El anticipo no puede superar el total.', pt: 'A entrada não pode passar do total.' },
+  'job.unallocated': { en: 'Unallocated: {amount}', es: 'Sin asignar: {amount}', pt: 'Falta alocar: {amount}' },
+  'job.rowDeposit': { en: 'Deposit', es: 'Anticipo', pt: 'Entrada' },
+  'job.rowBalance': { en: 'Balance', es: 'Saldo', pt: 'Saldo' },
+  'job.rowFullPayment': { en: 'Full payment', es: 'Pago total', pt: 'Pagamento total' },
+  'job.paymentN': { en: 'Payment {n}', es: 'Pago {n}', pt: 'Pagamento {n}' },
+  'job.savePlan': { en: 'Save plan', es: 'Guardar plan', pt: 'Salvar plano' },
+  'job.editPaymentPlan': { en: 'Edit payment plan', es: 'Editar plan de pago', pt: 'Editar plano de pagamento' },
+  'job.editPlanKeepsPayments': { en: 'Payments already recorded won’t change.', es: 'Los pagos ya registrados no cambian.', pt: 'Pagamentos já registrados não mudam.' },
+  'job.couldNotSavePlan': { en: 'Could not save the plan', es: 'No se pudo guardar el plan', pt: 'Não foi possível salvar o plano' },
+  // record payment sheet
+  'job.recordPayment': { en: 'Record payment', es: 'Registrar pago', pt: 'Registrar pagamento' },
+  'job.recordPaymentSub': { en: 'Log what the client paid you.', es: 'Registra lo que el cliente te pagó.', pt: 'Registre o que o cliente pagou.' },
+  'job.amountLabel': { en: 'Amount', es: 'Monto', pt: 'Valor' },
+  'job.methodLabel': { en: 'Payment method', es: 'Método de pago', pt: 'Forma de pagamento' },
+  'job.method.cash': { en: 'Cash', es: 'Efectivo', pt: 'Dinheiro' },
+  'job.method.check': { en: 'Check', es: 'Cheque', pt: 'Cheque' },
+  'job.method.card': { en: 'Card', es: 'Tarjeta', pt: 'Cartão' },
+  'job.method.ach': { en: 'Bank transfer', es: 'Transferencia', pt: 'Transferência' },
+  'job.method.other': { en: 'Other', es: 'Otro', pt: 'Outro' },
+  'job.receivedToday': { en: 'Received today · {date}', es: 'Recibido hoy · {date}', pt: 'Recebido hoje · {date}' },
+  'job.couldNotRecordPayment': { en: 'Could not record the payment', es: 'No se pudo registrar el pago', pt: 'Não foi possível registrar o pagamento' },
   // ContractTab
   'job.invoiceNeededFirst': { en: 'Invoice needed first', es: 'Primero se necesita la factura', pt: 'Fatura necessária primeiro' },
   'job.contractIntro': { en: 'Generate the invoice, then create a service agreement for the client to sign.', es: 'Genera la factura y luego crea un contrato de servicio para que el cliente lo firme.', pt: 'Gere a fatura e depois crie um contrato de serviço para o cliente assinar.' },
@@ -82,7 +120,6 @@ registerStrings({
   'job.statusSigned': { en: 'SIGNED', es: 'FIRMADO', pt: 'ASSINADO' },
   'job.statusSent': { en: 'SENT', es: 'ENVIADO', pt: 'ENVIADO' },
   'job.statusDraft': { en: 'DRAFT', es: 'BORRADOR', pt: 'RASCUNHO' },
-  'job.requiredDeposit': { en: 'Required deposit ({pct}%)', es: 'Depósito requerido ({pct}%)', pt: 'Entrada obrigatória ({pct}%)' },
   'job.signature': { en: 'Signature', es: 'Firma', pt: 'Assinatura' },
   'job.signedBy': { en: 'Signed by {name}', es: 'Firmado por {name}', pt: 'Assinado por {name}' },
   'job.client': { en: 'client', es: 'cliente', pt: 'cliente' },
@@ -218,23 +255,65 @@ export function JobScreen({ go, back, params }: NavProp) {
   const addr = realClient?.addr || (job ? job.addr : client?.addr || store.aLoc?.city) || t('job.noAddress');
   const next = NEXT[stage];
   const queryClient = useQueryClient();
-  const [genningInv, setGenningInv] = useState(false);
 
-  // generate a real invoice from the saved estimate (copies its totals; sequential number)
-  const generateInvoice = async () => {
+  /* ----- F12 payment plan + received payments ----- */
+  // local state on purpose (never the global store) — nothing leaks between jobs
+  const [planSheet, setPlanSheet] = useState<null | 'generate' | 'edit'>(null);
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [paySheet, setPaySheet] = useState(false);
+  const [savingPay, setSavingPay] = useState(false);
+  const invoicePlan = inv ? planFromInvoice(inv) : null;
+  const balance = inv ? invoiceBalance(inv.total, inv.amountPaid) : 0;
+
+  // generating is now 2 steps: pick the plan in the sheet, THEN create the invoice on confirm.
+  // Deposit % pre-fills from the company default; installments start as an even 2-way split.
+  const defaultPlan: PaymentPlan = {
+    mode: 'full',
+    dueDate: addDaysISO(15),
+    depositPercent: (company as any)?.default_deposit_percent ?? 25,
+    depositAmount: 0,
+    installments: [],
+  };
+  const openGenerateInvoice = () => {
     if (inv) { clearStage(); setTab('invoice'); return; }
     if (!user?.id || !est?.id || !projectId) { Alert.alert(t('job.alert.estimateNeeded'), t('job.alert.saveEstimateFirst')); return; }
-    setGenningInv(true);
+    setPlanSheet('generate');
+  };
+  const confirmPlan = async (plan: PaymentPlan) => {
+    if (!user?.id) return;
+    const editing = planSheet === 'edit';
+    setSavingPlan(true);
     try {
-      await createInvoice(user.id, est.id, projectId);
+      if (editing && inv) await updateInvoicePlan(user.id, inv.id, plan);
+      else if (est?.id && projectId) await createInvoice(user.id, est.id, projectId, plan);
+      else return;
       await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      setPlanSheet(null);
       clearStage(); // invoice now exists → DB-derived stage becomes "Invoiced"
       setTab('invoice');
     } catch (e: any) {
-      Alert.alert(t('job.alert.couldNotCreateInvoice'), e?.message || t('job.alert.tryAgain'));
+      Alert.alert(editing ? t('job.couldNotSavePlan') : t('job.alert.couldNotCreateInvoice'), e?.message || t('job.alert.tryAgain'));
     } finally {
-      setGenningInv(false);
+      setSavingPlan(false);
+    }
+  };
+
+  // "Mark paid" became "Record payment": money received goes to the ledger and the status
+  // (Unpaid / Partially Paid / Paid) is derived server-side from Σ(payments) vs total.
+  const confirmPayment = async (amount: number, method: string | null) => {
+    if (!user?.id || !inv?.id) return;
+    setSavingPay(true);
+    try {
+      await recordInvoicePayment(user.id, inv.id, { amount, method });
+      await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      setPaySheet(false);
+      clearStage();
+    } catch (e: any) {
+      Alert.alert(t('job.couldNotRecordPayment'), e?.message || t('job.alert.tryAgain'));
+    } finally {
+      setSavingPay(false);
     }
   };
 
@@ -296,8 +375,8 @@ export function JobScreen({ go, back, params }: NavProp) {
   const doNext = () => {
     if (next.act === 'send') return up({ sheet: true });
     if (next.act === 'approve') return setEstimateStatus('Approved', 'Approved');
-    if (next.act === 'invoice') return generateInvoice();
-    if (next.act === 'paid') return setInvoiceStatus('Paid', 'Paid');
+    if (next.act === 'invoice') return openGenerateInvoice();
+    if (next.act === 'paid') return setPaySheet(true); // record what was received (pre-filled with the balance)
   };
 
   return (
@@ -368,8 +447,8 @@ export function JobScreen({ go, back, params }: NavProp) {
             }
           />
         )}
-        {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} company={company} invoice={inv} genning={genningInv} onGen={generateInvoice} setSheet={(b: boolean) => up({ sheet: b })} />}
-        {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={invoiceTotals} depositPercent={inv?.depositPercent ?? 25} company={company} genning={genningContract} onGenerate={generateContract} />}
+        {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} company={company} invoice={inv} quoteTotal={est?.total} genning={savingPlan} onGen={openGenerateInvoice} onRecordPayment={() => setPaySheet(true)} onEditPlan={() => setPlanSheet('edit')} setSheet={(b: boolean) => up({ sheet: b })} />}
+        {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={invoiceTotals} plan={invoicePlan} company={company} genning={genningContract} onGenerate={generateContract} />}
         {tab === 'progress' && <ProgressTab projectId={projectId} estimateId={est?.id || null} userId={user?.id || null} companyName={(company as any)?.company_name || t('job.companyFallback')} />}
       </ScrollView>
 
@@ -390,11 +469,28 @@ export function JobScreen({ go, back, params }: NavProp) {
             client: realClient,
             items,
             totals: tt,
+            // invoice PDF/text: the payment plan + what's already paid (English by design)
+            payment:
+              kind === 'invoice' && inv && invoicePlan
+                ? { rows: planRows(invoicePlan, inv.total).map((r) => ({ label: r.label, amount: r.amount, due: r.dueDate })), paid: inv.amountPaid, balance }
+                : undefined,
           });
           if (kind === 'quote') setEstimateStatus('Sent', 'Sent');
-          else if (kind === 'invoice') setInvoiceStatus('Sent');
+          else if (kind === 'invoice') setInvoiceStatus('Sent'); // api ignores it unless still 'Unpaid'
         }}
       />
+
+      <PaymentPlanSheet
+        open={!!planSheet}
+        onClose={() => setPlanSheet(null)}
+        total={planSheet === 'edit' && inv ? inv.total : quoteTotals.total}
+        initial={planSheet === 'edit' && invoicePlan ? invoicePlan : defaultPlan}
+        hasPayments={planSheet === 'edit' && !!inv?.payments.length}
+        busy={savingPlan}
+        confirmLabel={planSheet === 'edit' ? t('job.savePlan') : t('job.generateInvoice')}
+        onConfirm={confirmPlan}
+      />
+      <RecordPaymentSheet open={paySheet} onClose={() => setPaySheet(false)} balance={balance} busy={savingPay} onConfirm={confirmPayment} />
     </>
   );
 }
@@ -456,17 +552,27 @@ function QuoteTab({ items, totals, markupPercent = 0, go, photos, onEdit }: { it
   );
 }
 
-function InvoiceTab({ stage, items, totals, client, company, invoice, genning, onGen, setSheet }: { stage: Stage; items: LineItem[]; totals: Totals; client: JobDetail['client']; company?: any; invoice?: JobDetail['invoice']; genning: boolean; onGen: () => void; setSheet: (b: boolean) => void }) {
+// planRows labels are English (they feed the client documents) — the app screens translate
+// their own display copies here. Custom/unknown labels pass through untouched.
+const ROW_LABEL_KEY: Record<string, string> = { Deposit: 'job.rowDeposit', Balance: 'job.rowBalance', 'Full payment': 'job.rowFullPayment' };
+function rowLabel(t: (k: string, v?: Record<string, string | number>) => string, label: string): string {
+  if (ROW_LABEL_KEY[label]) return t(ROW_LABEL_KEY[label]);
+  const m = /^Payment (\d+)$/.exec(label);
+  return m ? t('job.paymentN', { n: m[1] }) : label;
+}
+// method keys are stored in English (Cash/Check/Card/ACH/Other) — translate for display
+const METHOD_KEY: Record<string, string> = { Cash: 'job.method.cash', Check: 'job.method.check', Card: 'job.method.card', ACH: 'job.method.ach', Other: 'job.method.other' };
+const methodLabel = (t: (k: string) => string, m: string) => (METHOD_KEY[m] ? t(METHOD_KEY[m]) : m);
+const mdDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+function InvoiceTab({ stage, items, totals, client, company, invoice, quoteTotal, genning, onGen, onRecordPayment, onEditPlan, setSheet }: { stage: Stage; items: LineItem[]; totals: Totals; client: JobDetail['client']; company?: any; invoice?: JobDetail['invoice']; quoteTotal?: number; genning: boolean; onGen: () => void; onRecordPayment: () => void; onEditPlan: () => void; setSheet: (b: boolean) => void }) {
   const t = useT();
   const has = !!invoice || ['Invoiced', 'Paid'].includes(stage);
-  const deposit = invoice?.depositPercent ?? 25;
   const co = company || {};
   const coName = co.company_name || t('job.yourCompany');
-  // real issued / due dates (Net 15 from issue)
+  // real issued / due dates — due comes from the payment plan (no more hardcoded Net-15)
   const issued = invoice?.created ? new Date(invoice.created) : new Date();
-  const due = new Date(issued);
-  due.setDate(due.getDate() + 15);
-  const md = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const due = invoice?.dueDate ? parseDateOnly(invoice.dueDate) : null;
   if (!has) {
     return (
       <View style={{ marginTop: 16, alignItems: 'center', paddingVertical: 40, paddingHorizontal: 24 }}>
@@ -479,11 +585,28 @@ function InvoiceTab({ stage, items, totals, client, company, invoice, genning, o
       </View>
     );
   }
-  const depAmt = totals.total * (deposit / 100);
-  const balance = totals.total - depAmt;
-  const paid = invoice?.status === 'Paid' || stage === 'Paid';
+  // plan rows + ledger-derived amounts (a legacy Paid invoice maps amountPaid = total upstream)
+  const amountPaid = invoice?.amountPaid ?? 0;
+  const balance = invoice ? invoiceBalance(invoice.total, amountPaid) : totals.total;
+  const rows = invoice ? planRows(planFromInvoice(invoice), invoice.total) : [];
+  const payStatus = invoice ? statusFromPayments(invoice.total, amountPaid) : 'Unpaid';
+  const paid = payStatus === 'Paid' || stage === 'Paid';
+  const partial = !paid && payStatus === 'Partially Paid';
+  const badge: [string, string, string] = paid
+    ? [t('job.paidBadge'), colors.success, colors.successTint]
+    : partial
+      ? [t('job.partialBadge'), colors.info, colors.infoTint]
+      : [t('job.dueBadge'), colors.warning, colors.warningTint];
+  // the quote was edited after invoicing and the invoice couldn't be re-synced (payments exist)
+  const outOfSync = quoteTotal != null && !!invoice && Math.abs(quoteTotal - invoice.total) > 0.005;
   return (
     <View style={{ marginTop: 16 }}>
+      {outOfSync ? (
+        <Row style={{ gap: 8, alignItems: 'flex-start', backgroundColor: colors.warningTint, borderRadius: radii.lg, padding: 12, marginBottom: 12 }}>
+          <Icon name="flag" size={15} color={colors.warning} />
+          <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 12.5, color: colors.ink2, lineHeight: 18 }}>{t('job.quoteChanged')}</Text>
+        </Row>
+      ) : null}
       <Card style={{ overflow: 'hidden', ...shadow.card }}>
         {/* head */}
         <View style={{ padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border }}>
@@ -497,13 +620,13 @@ function InvoiceTab({ stage, items, totals, client, company, invoice, genning, o
                 <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted }}>{co.company_license || ''}</Text>
               </View>
             </Row>
-            <View style={{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: radii.pill, backgroundColor: paid ? colors.successTint : colors.warningTint }}>
-              <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: paid ? colors.success : colors.warning }}>{paid ? t('job.paidBadge') : t('job.dueBadge')}</Text>
+            <View style={{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: radii.pill, backgroundColor: badge[2] }}>
+              <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: badge[1] }}>{badge[0]}</Text>
             </View>
           </Between>
           <Between style={{ marginTop: 16, alignItems: 'flex-start' }}>
             <View><DpLab text={t('job.invoiceLabel')} /><Text style={{ fontFamily: fonts.num, fontSize: 14, color: colors.muted, marginTop: 3 }}>{invoice?.number || 'INV-2026-0001'}</Text></View>
-            <View style={{ alignItems: 'flex-end' }}><DpLab text={t('job.issuedDue')} /><Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.ink, marginTop: 3 }}>{md(issued)} · {md(due)}</Text></View>
+            <View style={{ alignItems: 'flex-end' }}><DpLab text={due ? t('job.issuedDue') : t('job.issuedOnly')} /><Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.ink, marginTop: 3 }}>{mdDate(issued)}{due ? ` · ${mdDate(due)}` : ''}</Text></View>
           </Between>
         </View>
         {/* parties */}
@@ -531,7 +654,7 @@ function InvoiceTab({ stage, items, totals, client, company, invoice, genning, o
             </Between>
           ))}
         </View>
-        {/* totals */}
+        {/* totals + payment plan + ledger */}
         <View style={{ padding: 20, backgroundColor: colors.card2, borderTopWidth: 1, borderTopColor: colors.border }}>
           <TotRow label={t('job.subtotal')} value={fmt(totals.subtotal)} />
           <TotRow label={t('job.tax', { rate: totals.taxRate, amount: fmt(totals.taxableSubtotal) })} value={fmt(totals.tax)} />
@@ -540,30 +663,48 @@ function InvoiceTab({ stage, items, totals, client, company, invoice, genning, o
             <Text style={{ fontFamily: fonts.num, fontSize: 24, color: colors.ink, letterSpacing: -0.5 }}>{fmt(totals.total)}</Text>
           </Between>
           <View style={{ marginTop: 10 }}>
-            <TotRow label={t('job.deposit', { pct: deposit })} value={fmt(depAmt)} />
-            <TotRow label={paid ? t('job.paid') : t('job.balanceDue')} value={paid ? fmt(totals.total) : fmt(balance)} color={paid ? colors.success : colors.ink} />
+            {rows.length > 1
+              ? rows.map((r, i) => <TotRow key={i} label={`${rowLabel(t, r.label)}${r.dueDate ? ` · ${mdDate(parseDateOnly(r.dueDate))}` : ''}`} value={fmt(r.amount)} />)
+              : null}
+            {amountPaid > 0 ? <TotRow label={t('job.paid')} value={fmt(amountPaid)} color={colors.success} /> : null}
+            <TotRow label={t('job.balanceDue')} value={fmt(balance)} color={paid ? colors.success : colors.ink} />
           </View>
         </View>
+        {/* received payments (ledger) */}
+        {invoice?.payments.length ? (
+          <View style={{ paddingHorizontal: 20, paddingVertical: 14, borderTopWidth: 1, borderTopColor: colors.border }}>
+            <DpLab text={t('job.paymentsReceived')} />
+            {invoice.payments.map((p) => (
+              <Between key={p.id} style={{ marginTop: 8 }}>
+                <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{mdDate(parseDateOnly(p.paidAt))}{p.method ? ` · ${methodLabel(t, p.method)}` : ''}</Text>
+                <Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.success }}>{fmt(p.amount)}</Text>
+              </Between>
+            ))}
+          </View>
+        ) : null}
       </Card>
-      <Row style={{ gap: 6, marginTop: 12, paddingHorizontal: 4 }}>
-        <Icon name="card" size={13} color={colors.muted} />
-        <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, flex: 1, lineHeight: 18 }}>{t('job.payTerms')}</Text>
-      </Row>
-      <Row style={{ gap: 10, marginTop: 16 }}>
+      {invoice && balance > 0.005 ? <Btn title={t('job.recordPayment')} icon="wallet" onPress={onRecordPayment} style={{ marginTop: 16 }} /> : null}
+      <Row style={{ gap: 10, marginTop: invoice && balance > 0.005 ? 10 : 16 }}>
         <Btn variant="ghost" icon="pdf" title={t('job.pdf')} onPress={() => setSheet(true)} style={{ flex: 0.4 }} />
-        <Btn title={t('job.sendInvoice')} icon="send" onPress={() => setSheet(true)} style={{ flex: 1 }} />
+        <Btn variant={invoice && balance > 0.005 ? 'ghost' : 'primary'} title={t('job.sendInvoice')} icon="send" onPress={() => setSheet(true)} style={{ flex: 1 }} />
       </Row>
+      {invoice ? (
+        <View style={{ alignItems: 'center', marginTop: 14 }}>
+          <LinkBtn icon="edit" title={t('job.editPaymentPlan')} onPress={onEditPlan} />
+        </View>
+      ) : null}
     </View>
   );
 }
 const DpLab = ({ text }: { text: string }) => <Text style={{ fontFamily: fonts.extrabold, fontSize: 10, letterSpacing: 1, color: colors.faint }}>{text.toUpperCase()}</Text>;
 
-function ContractTab({ agreement, hasInvoice, totals, depositPercent, company, genning, onGenerate }: { agreement: JobDetail['agreement']; hasInvoice: boolean; totals: Totals; depositPercent: number; company?: any; genning: boolean; onGenerate: () => void }) {
+function ContractTab({ agreement, hasInvoice, totals, plan, company, genning, onGenerate }: { agreement: JobDetail['agreement']; hasInvoice: boolean; totals: Totals; plan: PaymentPlan | null; company?: any; genning: boolean; onGenerate: () => void }) {
   const t = useT();
   const coName = company?.company_name || t('job.yourCompany');
   const signed = agreement?.status === 'signed';
   const sent = !!agreement && !signed;
-  const deposit = totals.total * (depositPercent / 100);
+  // the same payment plan the contract's "3. PAYMENT TERMS" table is generated from
+  const rows = plan ? planRows(plan, totals.total) : [];
   const statusLabel = signed ? t('job.statusSigned') : sent ? t('job.statusSent') : t('job.statusDraft');
   const statusColor = signed ? colors.success : sent ? colors.accentInk : '#8A93A3';
   const statusBg = signed ? colors.successTint : sent ? colors.accentTint : '#EEF0F3';
@@ -598,10 +739,14 @@ function ContractTab({ agreement, hasInvoice, totals, depositPercent, company, g
           </View>
         </Between>
         <Divider />
-        <Between>
-          <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{t('job.requiredDeposit', { pct: depositPercent })}</Text>
-          <Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.ink }}>{fmt(deposit)}</Text>
-        </Between>
+        {rows.map((r, i) => (
+          <Between key={i} style={i ? { marginTop: 12 } : undefined}>
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>
+              {rowLabel(t, r.label)}{r.dueDate ? ` · ${mdDate(parseDateOnly(r.dueDate))}` : ` · ${t('job.uponCompletion')}`}
+            </Text>
+            <Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.ink }}>{fmt(r.amount)}</Text>
+          </Between>
+        ))}
         <Between style={{ marginTop: 12 }}>
           <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{t('job.signature')}</Text>
           <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: signed ? colors.success : colors.ink }}>
@@ -634,6 +779,192 @@ function ContractTab({ agreement, hasInvoice, totals, depositPercent, company, g
         <Btn variant="ghost" title={t('job.shareSignedLink')} icon="share" onPress={onGenerate} style={{ marginTop: 16 }} />
       )}
     </View>
+  );
+}
+
+/* ---------------- Payment plan sheet (F12): full / deposit / installments ---------------- */
+// whole days from today to a stored date-only due date (re-editing an existing plan)
+const daysFromToday = (iso: string | null): number => {
+  if (!iso) return 15;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  return Math.max(0, Math.round((parseDateOnly(iso).getTime() - today) / 86400000));
+};
+type DraftRow = { label: string; amount: number; days: number };
+// even N-way split; first due in 15 days, then monthly-ish (+30) — all editable per row
+const draftRows = (total: number, n: number): DraftRow[] =>
+  splitInstallments(total, n).map((a, i) => ({ label: `Payment ${i + 1}`, amount: a, days: 15 + 30 * i }));
+
+function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, confirmLabel, onConfirm }: { open: boolean; onClose: () => void; total: number; initial: PaymentPlan; hasPayments: boolean; busy: boolean; confirmLabel: string; onConfirm: (plan: PaymentPlan) => void }) {
+  const t = useT();
+  // LOCAL state on purpose (not the global store): closing/reopening or switching jobs can
+  // never leak a half-edited plan anywhere else.
+  const [mode, setMode] = useState<PaymentMode>('full');
+  const [fullDays, setFullDays] = useState(15);
+  const [depMode, setDepMode] = useState<'pct' | 'amt'>('pct');
+  const [depPct, setDepPct] = useState(25);
+  const [depAmt, setDepAmt] = useState(0);
+  const [rows, setRows] = useState<DraftRow[]>([]);
+
+  // re-seed from the defaults/invoice every time the sheet opens (the Modal stays mounted closed)
+  useEffect(() => {
+    if (!open) return;
+    setMode(initial.mode);
+    setFullDays(initial.mode === 'full' ? daysFromToday(initial.dueDate) : 15);
+    const pct = initial.depositPercent ?? 25;
+    setDepMode(initial.mode === 'deposit' && initial.depositPercent == null && initial.depositAmount > 0 ? 'amt' : 'pct');
+    setDepPct(Math.min(100, Math.max(0, Math.round(pct))));
+    setDepAmt(initial.depositAmount > 0 ? round2(initial.depositAmount) : round2((total * pct) / 100));
+    setRows(
+      initial.installments.length
+        ? initial.installments.map((r, i) => ({ label: r.label || `Payment ${i + 1}`, amount: round2(r.amount), days: daysFromToday(r.dueDate) }))
+        : draftRows(total, 2)
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const depValue = depMode === 'pct' ? round2((total * depPct) / 100) : round2(depAmt);
+  const depTooBig = depMode === 'amt' && depValue > total + 0.005;
+  const missing = unallocated(total, rows); // installments must cover the total exactly
+  const rowsOk = Math.abs(missing) < 0.005;
+  const canConfirm = !busy && (mode === 'full' || (mode === 'deposit' && !depTooBig) || (mode === 'installments' && rowsOk));
+
+  const buildPlan = (): PaymentPlan => {
+    if (mode === 'deposit') {
+      // deposit due on receipt (today); the balance is due upon completion (null)
+      return { mode, dueDate: addDaysISO(0), depositPercent: depMode === 'pct' ? depPct : null, depositAmount: depValue, installments: [] };
+    }
+    if (mode === 'installments') {
+      return { mode, dueDate: null, depositPercent: null, depositAmount: 0, installments: rows.map((r, i) => ({ label: r.label, amount: round2(r.amount), dueDate: addDaysISO(r.days), sort: i })) };
+    }
+    return { mode: 'full', dueDate: addDaysISO(fullDays), depositPercent: null, depositAmount: 0, installments: [] };
+  };
+
+  const cards: { key: PaymentMode; ico: string; k: string }[] = [
+    { key: 'full', ico: 'receipt', k: 'full' },
+    { key: 'deposit', ico: 'wallet', k: 'deposit' },
+    { key: 'installments', ico: 'calendar', k: 'installments' },
+  ];
+
+  return (
+    <Sheet open={open} onClose={onClose} title={t('job.paymentPlan')} sub={t('job.planTotal', { amount: fmt(total) })}>
+      {cards.map((c) => {
+        const on = mode === c.key;
+        return (
+          <Pressable key={c.key} onPress={() => setMode(c.key)} style={{ borderRadius: 14, borderWidth: 1.5, borderColor: on ? colors.primary : colors.border, backgroundColor: on ? colors.primaryTint : colors.card, padding: 14, marginBottom: 10 }}>
+            <Row style={{ gap: 12 }}>
+              <View style={{ width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? colors.primary : colors.chipBg }}>
+                <Icon name={c.ico} size={18} color={on ? '#fff' : colors.muted} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: fonts.bold, fontSize: 14.5, color: colors.ink }}>{t('job.plan.' + c.k)}</Text>
+                <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 1 }}>{t('job.plan.' + c.k + 'Desc')}</Text>
+              </View>
+              {on ? <Icon name="checkCircle" size={19} color={colors.primary} /> : null}
+            </Row>
+
+            {on && c.key === 'full' ? (
+              <Between style={{ marginTop: 12 }}>
+                <View>
+                  <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.ink }}>{t('job.dueInDays', { n: fullDays })}</Text>
+                  <Text style={{ fontFamily: fonts.semibold, fontSize: 11.5, color: colors.muted, marginTop: 2 }}>{mdDate(parseDateOnly(addDaysISO(fullDays)))}</Text>
+                </View>
+                <Stepper value={String(fullDays)} width={44} onMinus={() => setFullDays((d) => Math.max(0, d - 5))} onPlus={() => setFullDays((d) => Math.min(365, d + 5))} />
+              </Between>
+            ) : null}
+
+            {on && c.key === 'deposit' ? (
+              <View style={{ marginTop: 12 }}>
+                <Between>
+                  <Row style={{ gap: 8 }}>
+                    <Chip label="%" selected={depMode === 'pct'} onPress={() => setDepMode('pct')} />
+                    <Chip label="$" selected={depMode === 'amt'} onPress={() => { setDepAmt(round2((total * depPct) / 100)); setDepMode('amt'); }} />
+                  </Row>
+                  {depMode === 'pct' ? (
+                    <Stepper value={`${depPct}%`} onMinus={() => setDepPct((p) => Math.max(0, p - 5))} onPlus={() => setDepPct((p) => Math.min(100, p + 5))} />
+                  ) : null}
+                </Between>
+                {depMode === 'amt' ? <DecimalInput value={depAmt} onChangeValue={setDepAmt} style={{ marginTop: 10 }} /> : null}
+                {depTooBig ? <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.error, marginTop: 8 }}>{t('job.depositTooBig')}</Text> : null}
+                <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.ink2, marginTop: 10 }}>
+                  {t('job.depositPreview', { dep: fmt(Math.min(depValue, total)), bal: fmt(invoiceBalance(total, Math.min(depValue, total))) })}
+                </Text>
+              </View>
+            ) : null}
+
+            {on && c.key === 'installments' ? (
+              <View style={{ marginTop: 12 }}>
+                <Between>
+                  <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.ink }}>{t('job.splitInto')}</Text>
+                  <Stepper value={`${rows.length}×`} width={44} onMinus={() => setRows((r) => draftRows(total, Math.max(2, r.length - 1)))} onPlus={() => setRows((r) => draftRows(total, Math.min(12, r.length + 1)))} />
+                </Between>
+                <ScrollView style={{ maxHeight: 250, marginTop: 10 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                  {rows.map((r, i) => (
+                    <View key={i} style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 10, marginBottom: 8, backgroundColor: colors.card }}>
+                      <Between>
+                        <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.ink }}>{rowLabel(t, r.label)}</Text>
+                        <View style={{ width: 112 }}>
+                          <DecimalInput value={r.amount} onChangeValue={(v) => setRows((rs) => rs.map((x, xi) => (xi === i ? { ...x, amount: v } : x)))} style={{ height: 42 }} />
+                        </View>
+                      </Between>
+                      <Between style={{ marginTop: 8 }}>
+                        <Text style={{ fontFamily: fonts.semibold, fontSize: 11.5, color: colors.muted }}>
+                          {t('job.dueInDays', { n: r.days })} · {mdDate(parseDateOnly(addDaysISO(r.days)))}
+                        </Text>
+                        <Stepper
+                          value={String(r.days)}
+                          width={44}
+                          onMinus={() => setRows((rs) => rs.map((x, xi) => (xi === i ? { ...x, days: Math.max(0, x.days - 5) } : x)))}
+                          onPlus={() => setRows((rs) => rs.map((x, xi) => (xi === i ? { ...x, days: Math.min(365, x.days + 5) } : x)))}
+                        />
+                      </Between>
+                    </View>
+                  ))}
+                </ScrollView>
+                {!rowsOk ? (
+                  <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.warning, marginTop: 2 }}>
+                    {t('job.unallocated', { amount: missing >= 0 ? fmt(missing) : `-${fmt(Math.abs(missing))}` })}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+          </Pressable>
+        );
+      })}
+      {hasPayments ? <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, textAlign: 'center', marginBottom: 10 }}>{t('job.editPlanKeepsPayments')}</Text> : null}
+      <Btn title={busy ? t('job.working') : confirmLabel} icon={busy ? undefined : 'check'} disabled={!canConfirm} onPress={() => onConfirm(buildPlan())} style={{ marginTop: 4 }} />
+    </Sheet>
+  );
+}
+
+/* ---------------- Record payment sheet (F12): money received → ledger ---------------- */
+function RecordPaymentSheet({ open, onClose, balance, busy, onConfirm }: { open: boolean; onClose: () => void; balance: number; busy: boolean; onConfirm: (amount: number, method: string | null) => void }) {
+  const t = useT();
+  const [amount, setAmount] = useState(0);
+  const [method, setMethod] = useState<string | null>(null);
+  // pre-fill with the outstanding balance on every open (fresh per job/press — local state)
+  useEffect(() => {
+    if (open) { setAmount(round2(balance)); setMethod(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+  // method KEYS stay English in the DB; only the chip labels are translated
+  const methods: [string, string][] = [['Cash', 'cash'], ['Check', 'check'], ['Card', 'card'], ['ACH', 'ach'], ['Other', 'other']];
+  return (
+    <Sheet open={open} onClose={onClose} title={t('job.recordPayment')} sub={t('job.recordPaymentSub')}>
+      <Field label={t('job.amountLabel')}><DecimalInput value={amount} onChangeValue={setAmount} /></Field>
+      <Field label={t('job.methodLabel')} opt>
+        <Row style={{ flexWrap: 'wrap', gap: 8 }}>
+          {methods.map(([key, k]) => (
+            <Chip key={key} label={t('job.method.' + k)} selected={method === key} onPress={() => setMethod((m) => (m === key ? null : key))} />
+          ))}
+        </Row>
+      </Field>
+      <Row style={{ gap: 6 }}>
+        <Icon name="calendar" size={14} color={colors.muted} />
+        <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{t('job.receivedToday', { date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) })}</Text>
+      </Row>
+      <Btn title={busy ? t('job.working') : t('job.recordPayment')} icon={busy ? undefined : 'check'} disabled={busy || !(amount > 0)} onPress={() => onConfirm(round2(amount), method)} style={{ marginTop: 16 }} />
+    </Sheet>
   );
 }
 

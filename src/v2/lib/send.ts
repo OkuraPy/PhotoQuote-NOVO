@@ -1,9 +1,13 @@
 // PhotoQuote v2 — sending quotes/invoices: branded PDF (escaped HTML) + Email/SMS/WhatsApp.
+// Client-facing output is ALWAYS English (owner's rule) — no i18n in this file on purpose.
 import { Alert, Linking, Platform } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { parseDateOnly } from '../data';
 
 const fmt = (n: number) => '$' + (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// date-only 'YYYY-MM-DD' → "Jul 22, 2026"; null = the payment is due upon completion
+const dueTxt = (d: string | null) => (d ? parseDateOnly(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Upon completion');
 
 // Escape every dynamic value before it goes into the PDF HTML (prevents the XSS the v1 PDFs had).
 export function escapeHtml(s: unknown): string {
@@ -23,6 +27,8 @@ export type SendData = {
   client: { name?: string; email?: string; phone?: string; addr?: string; city?: string } | null;
   items: { cat: string; desc: string; qty: number; unit: string; price: number; taxable: boolean }[];
   totals: { subtotal: number; tax: number; total: number; taxRate: number };
+  // invoice payment plan + ledger summary (labels/dates already English — planRows output)
+  payment?: { rows: { label: string; amount: number; due: string | null }[]; paid: number; balance: number };
 };
 
 function buildHtml(d: SendData): string {
@@ -58,6 +64,8 @@ function buildHtml(d: SendData): string {
     .row b{color:#0C1116}
     .grand{display:flex;justify-content:space-between;font-size:18px;font-weight:800;border-top:2px solid #D7DCE3;padding-top:10px;margin-top:8px}
     .foot{color:#8A93A3;font-size:11px;margin-top:28px}
+    .ok{color:#1E9E6A}
+    .due{color:#5B6573;text-align:right;white-space:nowrap;font-size:12px}
   </style></head>
   <body>
     <div class="head">
@@ -69,10 +77,24 @@ function buildHtml(d: SendData): string {
       <div><div class="lab">Bill to</div><div class="name">${escapeHtml(cl?.name || '')}</div><div class="muted">${escapeHtml(cl?.addr || '')}<br>${escapeHtml(cl?.city || '')}<br>${escapeHtml(cl?.email || '')}</div></div>
     </div>
     <table>${rows}</table>
+    ${
+      d.payment
+        ? `<div class="lab" style="margin-top:24px">Payment schedule</div>
+    <table>${d.payment.rows
+      .map((r) => `<tr><td><div class="desc">${escapeHtml(r.label)}</div></td><td class="due">${escapeHtml(dueTxt(r.due))}</td><td class="amt">${fmt(r.amount)}</td></tr>`)
+      .join('')}</table>`
+        : ''
+    }
     <div class="tot">
       <div class="row"><span>Subtotal</span><b>${fmt(d.totals.subtotal)}</b></div>
       <div class="row"><span>Tax (${escapeHtml(d.totals.taxRate)}%)</span><b>${fmt(d.totals.tax)}</b></div>
       <div class="grand"><span>Total</span><span>${fmt(d.totals.total)}</span></div>
+      ${
+        d.payment
+          ? `${d.payment.paid > 0 ? `<div class="row" style="margin-top:6px"><span>Paid</span><b class="ok">${fmt(d.payment.paid)}</b></div>` : ''}
+      <div class="grand" style="border-top:1px solid #E6E9EE;font-size:15px"><span>Balance due</span><span>${fmt(d.payment.balance)}</span></div>`
+          : ''
+      }
     </div>
     <div class="foot">Thank you for your business.</div>
   </body></html>`;
@@ -80,7 +102,14 @@ function buildHtml(d: SendData): string {
 
 function buildText(d: SendData): string {
   const lines = d.items.map((it) => `• ${it.desc} — ${fmt(it.qty * it.price)}`).join('\n');
-  return `${d.docLabel}${d.number ? ' ' + d.number : ''} — ${d.company.name}\n${d.client?.name ? `For: ${d.client.name}\n` : ''}\n${lines}\n\nSubtotal ${fmt(d.totals.subtotal)} · Tax ${fmt(d.totals.tax)} · Total ${fmt(d.totals.total)}`;
+  const pay = d.payment
+    ? `\n${
+        d.payment.rows.length > 1
+          ? '\nPayment schedule:\n' + d.payment.rows.map((r) => `• ${r.label} — ${fmt(r.amount)} (${r.due ? 'due ' + dueTxt(r.due) : 'upon completion'})`).join('\n') + '\n'
+          : ''
+      }${d.payment.paid > 0 ? `Paid ${fmt(d.payment.paid)} · ` : ''}Balance due ${fmt(d.payment.balance)}`
+    : '';
+  return `${d.docLabel}${d.number ? ' ' + d.number : ''} — ${d.company.name}\n${d.client?.name ? `For: ${d.client.name}\n` : ''}\n${lines}\n\nSubtotal ${fmt(d.totals.subtotal)} · Tax ${fmt(d.totals.tax)} · Total ${fmt(d.totals.total)}${pay}`;
 }
 
 export async function sendDoc(option: string, d: SendData) {

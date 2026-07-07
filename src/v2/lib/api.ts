@@ -4,7 +4,7 @@ import * as Location from 'expo-location';
 import * as Crypto from 'expo-crypto';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from './supabase';
-import { Client, deriveBase, deriveStage, Job, LineItem, Photo } from '../data';
+import { Client, deriveBase, deriveStage, Job, LineItem, paidTotal, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, Photo, planFromInvoice, planRows, rescaleSchedule, round2, ScheduleRow, statusFromPayments, toDateOnly } from '../data';
 export { deriveStage }; // re-exported for screens (lives in ../data so it's unit-testable)
 
 /* ---------------- Location: real ZIP (Zippopotam, keyless) + GPS (expo-location) ---------------- */
@@ -238,6 +238,8 @@ export async function createJob(input: {
 // recomputes subtotal/tax/margin/total server-side (incl. the all-items-deleted case).
 // Not transactional (PostgREST): if the insert fails after the delete the estimate is left
 // empty on the server, but the app still holds the items in memory so Save can be retried.
+// Afterwards the newest invoice is re-synced with the fresh totals when that's still safe
+// (fixes the live-items × frozen-totals mismatch on the invoice tab).
 export async function updateEstimateItems(estimateId: string, items: LineItem[], taxRate: number, marginRate: number): Promise<void> {
   // embedded markup: prices are final → margin zeroed for the trigger, % kept as metadata
   const { error: rErr } = await supabase
@@ -264,18 +266,111 @@ export async function updateEstimateItems(estimateId: string, items: LineItem[],
     const { error: iErr } = await supabase.from('line_items').insert(rows);
     if (iErr) throw iErr;
   }
+  await syncInvoiceWithEstimate(estimateId);
+}
+
+// F12: the invoice tab shows the LIVE line items but the invoice's own frozen totals — editing
+// the quote after invoicing desynced them. Re-copy the recomputed totals into the newest invoice
+// while that's still safe: never a Paid invoice, never one with recorded payments (the client
+// already acted on that document — the UI shows a "quote changed" banner instead). Best-effort
+// by design: a failed sync degrades to that same banner, never breaks the estimate save.
+async function syncInvoiceWithEstimate(estimateId: string): Promise<void> {
+  try {
+    const { data: inv } = await supabase
+      .from('invoices')
+      .select('id, status, total, deposit_percent')
+      .eq('estimate_id', estimateId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!inv || String(inv.status || '').toLowerCase() === 'paid') return;
+    const { count } = await supabase.from('invoice_payments').select('id', { count: 'exact', head: true }).eq('invoice_id', inv.id);
+    if (count) return;
+
+    // the totals trigger already ran on the line_items writes — read the fresh numbers back
+    const { data: est } = await supabase
+      .from('estimates')
+      .select('subtotal, tax_rate, tax_percent, tax_amount, total, grand_total')
+      .eq('id', estimateId)
+      .maybeSingle();
+    if (!est) return;
+    const newTotal = Number(est.total ?? est.grand_total ?? 0);
+    const patch: Record<string, unknown> = {
+      subtotal: Number(est.subtotal ?? 0),
+      tax_rate: Number(est.tax_rate ?? est.tax_percent ?? 0),
+      tax_amount: Number(est.tax_amount ?? 0),
+      total: newTotal,
+    };
+    // a %-deposit follows the new total; an absolute-$ deposit (percent null) stays as agreed
+    if (inv.deposit_percent != null) patch.deposit_amount = round2((newTotal * Number(inv.deposit_percent)) / 100);
+    await supabase.from('invoices').update(patch).eq('id', inv.id);
+
+    // rescale the installments proportionally so the schedule still sums to the new total
+    const { data: sch } = await supabase
+      .from('invoice_schedule')
+      .select('id, label, amount, due_date, phase_id, sort')
+      .eq('invoice_id', inv.id)
+      .order('sort', { ascending: true });
+    if (sch?.length) {
+      const rows = rescaleSchedule(
+        sch.map((r: any) => ({ id: r.id, label: r.label || '', amount: Number(r.amount) || 0, dueDate: r.due_date ?? null, phaseId: r.phase_id ?? null, sort: r.sort ?? 0 })),
+        Number(inv.total) || 0,
+        newTotal
+      );
+      await Promise.all(rows.map((r) => supabase.from('invoice_schedule').update({ amount: r.amount }).eq('id', r.id!)));
+    }
+  } catch {
+    /* best-effort — the invoice tab's "quote changed" banner covers a stale invoice */
+  }
 }
 
 /* ---------------- Invoice (generated from an approved estimate) ---------------- */
-// Copies the estimate's totals (the DB trigger keeps those correct) and assigns a sequential
-// per-user invoice number INV-YYYY-NNNN. No invoice-number trigger exists, so we mint it here.
-export async function createInvoice(userId: string, estimateId: string, projectId: string): Promise<{ id: string; number: string }> {
-  const [{ data: est, error: eErr }, { data: prof }] = await Promise.all([
-    supabase.from('estimates').select('subtotal, tax_rate, tax_percent, tax_amount, margin_rate, margin_amount, total, grand_total').eq('id', estimateId).maybeSingle(),
-    supabase.from('users').select('default_deposit_percent').eq('id', userId).maybeSingle(),
-  ]);
+// The invoices columns that encode a PaymentPlan. deposit_percent is an INT CHECK 0-100 and is
+// written ONLY when the deposit was entered as a % (an absolute-$ deposit keeps it null).
+function invoicePlanColumns(plan: PaymentPlan) {
+  const sorted = [...plan.installments].sort((a, b) => a.sort - b.sort);
+  return {
+    payment_mode: plan.mode,
+    // full/deposit: the picked due date; installments: the invoice is fully due at the LAST one
+    due_date: plan.mode === 'installments' ? sorted[sorted.length - 1]?.dueDate ?? null : plan.dueDate,
+    deposit_percent:
+      plan.mode === 'deposit' && plan.depositPercent != null
+        ? Math.min(100, Math.max(0, Math.round(plan.depositPercent)))
+        : null,
+    deposit_amount: plan.mode === 'deposit' ? round2(plan.depositAmount) : null,
+  };
+}
+
+// (Re)write the invoice's installment rows. PostgREST has no transactions (same caveat as
+// updateEstimateItems): if the insert fails after the invoice was written, the mode is
+// downgraded to 'full' so the invoice never claims a schedule it doesn't have.
+async function insertScheduleRows(userId: string, invoiceId: string, plan: PaymentPlan): Promise<void> {
+  if (plan.mode !== 'installments' || !plan.installments.length) return;
+  const rows = [...plan.installments]
+    .sort((a, b) => a.sort - b.sort)
+    .map((r, i) => ({
+      invoice_id: invoiceId,
+      user_id: userId,
+      label: r.label || `Payment ${i + 1}`, // English on purpose — feeds client-facing documents
+      amount: round2(r.amount),
+      due_date: r.dueDate,
+      phase_id: r.phaseId ?? null,
+      sort: i,
+    }));
+  const { error } = await supabase.from('invoice_schedule').insert(rows);
+  if (error) await supabase.from('invoices').update({ payment_mode: 'full' }).eq('id', invoiceId);
+}
+
+// Copies the estimate's totals (the DB trigger keeps those correct), assigns a sequential
+// per-user invoice number INV-YYYY-NNNN (no trigger exists, so we mint it here) and stores the
+// payment plan the contractor picked in the sheet (mode/due/deposit + installment rows).
+export async function createInvoice(userId: string, estimateId: string, projectId: string, plan: PaymentPlan): Promise<{ id: string; number: string }> {
+  const { data: est, error: eErr } = await supabase
+    .from('estimates')
+    .select('subtotal, tax_rate, tax_percent, tax_amount, margin_rate, margin_amount, total, grand_total')
+    .eq('id', estimateId)
+    .maybeSingle();
   if (eErr) throw eErr;
-  const depositPct = prof?.default_deposit_percent ?? 25; // snapshot the contractor's default deposit at invoice time
 
   // atomic per-user/per-year number from the DB (forces auth.uid() server-side; no race/collision)
   const { data: numData, error: nErr } = await supabase.rpc('next_invoice_number');
@@ -296,12 +391,58 @@ export async function createInvoice(userId: string, estimateId: string, projectI
       margin_rate: Number(est?.margin_rate ?? 0),
       margin_amount: Number(est?.margin_amount ?? 0),
       total: Number(est?.total ?? est?.grand_total ?? 0),
-      deposit_percent: depositPct,
+      ...invoicePlanColumns(plan),
     })
     .select('id, invoice_number')
     .single();
   if (error) throw error;
+  await insertScheduleRows(userId, inv.id, plan);
   return { id: inv.id, number: inv.invoice_number };
+}
+
+// Re-edit the payment plan of an existing invoice: plan columns + delete/reinsert the schedule.
+// Recorded payments are NEVER touched — the ledger is history, the plan is the agreement.
+export async function updateInvoicePlan(userId: string, invoiceId: string, plan: PaymentPlan): Promise<void> {
+  const { error } = await supabase.from('invoices').update(invoicePlanColumns(plan)).eq('id', invoiceId);
+  if (error) throw error;
+  const { error: dErr } = await supabase.from('invoice_schedule').delete().eq('invoice_id', invoiceId);
+  if (dErr) throw dErr;
+  await insertScheduleRows(userId, invoiceId, plan);
+}
+
+// Append a payment to the ledger, then refresh the invoice status from Σ(ledger) vs total.
+// A legacy invoice already marked Paid WITHOUT ledger rows is never downgraded by a late entry.
+export async function recordInvoicePayment(
+  userId: string,
+  invoiceId: string,
+  p: { amount: number; paidAt?: string; method?: string | null; scheduleId?: string | null }
+): Promise<void> {
+  const amount = round2(p.amount);
+  if (!(amount > 0)) throw new Error('Enter an amount greater than zero.');
+  const [{ data: inv, error: iErr }, { count }] = await Promise.all([
+    supabase.from('invoices').select('status, total').eq('id', invoiceId).maybeSingle(),
+    supabase.from('invoice_payments').select('id', { count: 'exact', head: true }).eq('invoice_id', invoiceId),
+  ]);
+  if (iErr) throw iErr;
+  if (!inv) throw new Error('Invoice not found.');
+  const legacyPaid = String(inv.status || '').toLowerCase() === 'paid' && !count;
+
+  const { error } = await supabase.from('invoice_payments').insert({
+    invoice_id: invoiceId,
+    user_id: userId,
+    amount,
+    paid_at: p.paidAt || toDateOnly(new Date()),
+    method: p.method || null,
+    schedule_id: p.scheduleId || null,
+  });
+  if (error) throw error;
+  if (legacyPaid) return; // fully paid before the ledger existed — keep the status
+
+  const { data: pays, error: pErr } = await supabase.from('invoice_payments').select('amount').eq('invoice_id', invoiceId);
+  if (pErr) throw pErr;
+  const status = statusFromPayments(Number(inv.total) || 0, paidTotal(pays || []));
+  const { error: uErr } = await supabase.from('invoices').update({ status }).eq('id', invoiceId);
+  if (uErr) throw uErr;
 }
 
 // Persist a status change to the DB (replaces the old in-memory-only stage override).
@@ -311,7 +452,11 @@ export async function updateEstimateStatus(estimateId: string, status: string) {
 }
 
 export async function updateInvoiceStatus(invoiceId: string, status: string) {
-  const { error } = await supabase.from('invoices').update({ status }).eq('id', invoiceId);
+  // 'Sent' only stamps a still-Unpaid invoice — resending must never clobber a ledger-derived
+  // 'Partially Paid'/'Paid' (the filtered update simply matches 0 rows then).
+  let q = supabase.from('invoices').update({ status }).eq('id', invoiceId);
+  if (status === 'Sent') q = q.eq('status', 'Unpaid');
+  const { error } = await q;
   if (error) throw error;
 }
 
@@ -335,6 +480,18 @@ function lineItemsTableHtml(items: any[]): string {
   return `<table style="width:100%;border-collapse:collapse;margin:8px 0;font-size:13px"><thead><tr><th style="text-align:left;padding:6px 8px;border-bottom:2px solid #11705A">Item</th><th style="text-align:right;padding:6px 8px;border-bottom:2px solid #11705A">Qty</th><th style="text-align:right;padding:6px 8px;border-bottom:2px solid #11705A">Amount</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+// "3. PAYMENT TERMS" table for the contract — same trusted-template/escaped-data rules as
+// lineItemsTableHtml. Always English (client-facing); a null due date = "Upon completion".
+function paymentScheduleTableHtml(rows: { label: string; amount: number; dueDate: string | null }[]): string {
+  const due = (d: string | null) => (d ? parseDateOnly(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Upon completion');
+  const body = (rows || [])
+    .map(
+      (r) => `<tr><td style="padding:6px 8px;border-bottom:1px solid #E6E9EE">${escC(r.label)}</td><td style="padding:6px 8px;border-bottom:1px solid #E6E9EE;text-align:right;white-space:nowrap">${escC(due(r.dueDate))}</td><td style="padding:6px 8px;border-bottom:1px solid #E6E9EE;text-align:right;white-space:nowrap">$${money2(r.amount)}</td></tr>`
+    )
+    .join('');
+  return `<table style="width:100%;border-collapse:collapse;margin:8px 0;font-size:13px"><thead><tr><th style="text-align:left;padding:6px 8px;border-bottom:2px solid #11705A">Payment</th><th style="text-align:right;padding:6px 8px;border-bottom:2px solid #11705A">Due</th><th style="text-align:right;padding:6px 8px;border-bottom:2px solid #11705A">Amount</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+
 function fillTemplate(template: string, d: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, k) => (k in d ? d[k] : ''));
 }
@@ -352,16 +509,17 @@ function renderTermsBlocks(blocks: unknown): string {
 export async function createAgreement(userId: string, projectId: string, invoiceId: string): Promise<{ id: string; token: string }> {
   const [{ data: proj }, { data: inv }, { data: company }] = await Promise.all([
     supabase.from('projects').select('client_id, name, address, city, property_state, service_type, zip').eq('id', projectId).maybeSingle(),
-    supabase.from('invoices').select('invoice_number, estimate_id, subtotal, tax_rate, tax_amount, total, deposit_percent').eq('id', invoiceId).maybeSingle(),
-    supabase.from('users').select('company_name, company_address, company_phone, company_email, company_license, default_state, default_deposit_percent').eq('id', userId).maybeSingle(),
+    supabase.from('invoices').select('invoice_number, estimate_id, subtotal, tax_rate, tax_amount, total, deposit_percent, payment_mode, due_date, deposit_amount').eq('id', invoiceId).maybeSingle(),
+    supabase.from('users').select('company_name, company_address, company_phone, company_email, company_license, default_state').eq('id', userId).maybeSingle(),
   ]);
   if (!proj) throw new Error('Project not found.');
   if (!proj.client_id) throw new Error('Add a client to this job before creating a contract.');
   if (!inv) throw new Error('Generate the invoice first.');
 
-  const [{ data: client }, { data: items }] = await Promise.all([
+  const [{ data: client }, { data: items }, { data: schedule }] = await Promise.all([
     supabase.from('clients').select('full_name, address, address_city, address_state, phone, email').eq('id', proj.client_id).maybeSingle(),
     supabase.from('line_items').select('description, quantity, unit, unit_price').eq('estimate_id', inv.estimate_id).order('item_order', { ascending: true }),
+    supabase.from('invoice_schedule').select('id, label, amount, due_date, sort').eq('invoice_id', invoiceId).order('sort', { ascending: true }),
   ]);
 
   const state = proj.property_state || company?.default_state || 'US';
@@ -369,9 +527,24 @@ export async function createAgreement(userId: string, projectId: string, invoice
   const tpl = (await supabase.from('contract_templates').select('content, terms_blocks').eq('is_default', true).limit(1).maybeSingle()).data;
   if (!tpl?.content) throw new Error('No contract template available.');
 
-  // deposit % is set by the contractor; the invoice snapshots it so invoice & contract always match
-  const depositPct = Number(inv.deposit_percent ?? company?.default_deposit_percent ?? 25);
   const total = Number(inv.total) || 0;
+  // the invoice's stored plan → English document rows (v2 template's {{payment_schedule_table}});
+  // invoice & contract always match because both read the same snapshot
+  const rows = planRows(
+    planFromInvoice({
+      paymentMode: asPaymentMode(inv.payment_mode),
+      dueDate: inv.due_date ?? null,
+      depositPercent: inv.deposit_percent ?? null,
+      depositAmount: inv.deposit_amount != null ? Number(inv.deposit_amount) : null,
+      total,
+      schedule: (schedule || []).map((r: any, i: number) => ({ id: r.id, label: r.label || `Payment ${i + 1}`, amount: Number(r.amount) || 0, dueDate: r.due_date ?? null, sort: r.sort ?? i })),
+    }),
+    total
+  );
+  // legacy-template compat ({{deposit_percent}}/{{deposit_amount}}/{{balance_amount}}): the first
+  // row plays the "deposit" part when the plan has an up-front payment; a full plan yields 0/total.
+  const firstAmt = rows.length > 1 ? rows[0].amount : 0;
+  const depositPct = inv.deposit_percent != null ? Number(inv.deposit_percent) : total > 0 ? Math.round((firstAmt / total) * 100) : 0;
   const html = fillTemplate(tpl.content, {
     date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
     company_name: escC(company?.company_name || 'Your Company'),
@@ -392,9 +565,10 @@ export async function createAgreement(userId: string, projectId: string, invoice
     subtotal: money2(Number(inv.subtotal) || 0),
     tax_rate: String(Number(inv.tax_rate) || 0),
     tax_amount: money2(Number(inv.tax_amount) || 0),
+    payment_schedule_table: paymentScheduleTableHtml(rows),
     deposit_percent: String(depositPct),
-    deposit_amount: money2(total * (depositPct / 100)),
-    balance_amount: money2(total - total * (depositPct / 100)),
+    deposit_amount: money2(firstAmt),
+    balance_amount: money2(round2(total - firstAmt)),
     terms_blocks: renderTermsBlocks(tpl.terms_blocks),
   });
 
@@ -492,11 +666,32 @@ export type JobDetail = {
   // (margin summed on top by the trigger) — kept so Edit can fold it into the prices.
   estimate: { id: string; total: number; subtotal: number; taxRate: number; tax: number; markupPercent: number; legacyMarginRate: number; status: string; notes: string | null } | null;
   items: LineItem[];
-  invoice: { id: string; number: string; status: string; subtotal: number; taxRate: number; tax: number; total: number; created: string; depositPercent: number | null } | null;
+  // F12: paymentMode/dueDate/deposit* + schedule re-hydrate the plan; payments is the ledger and
+  // amountPaid its Σ (a legacy 'Paid' invoice without ledger rows counts as fully paid).
+  invoice: {
+    id: string;
+    number: string;
+    status: string;
+    subtotal: number;
+    taxRate: number;
+    tax: number;
+    total: number;
+    created: string;
+    paymentMode: PaymentMode;
+    dueDate: string | null;
+    depositPercent: number | null;
+    depositAmount: number | null;
+    schedule: ScheduleRow[];
+    payments: PaymentRecord[];
+    amountPaid: number;
+  } | null;
   client: { name: string; addr: string; city: string; email: string; phone: string } | null;
   photoUrls: string[];
   agreement: { id: string; token: string; status: string; signedName: string | null; signedDate: string | null } | null;
 };
+
+// invoices.payment_mode → PaymentMode with a safe fallback for anything unexpected
+const asPaymentMode = (m: unknown): PaymentMode => (m === 'deposit' || m === 'installments' ? m : 'full');
 
 export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
   const estRes = await supabase
@@ -536,13 +731,27 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
 
   const invRes = await supabase
     .from('invoices')
-    .select('id, invoice_number, status, subtotal, tax_rate, tax_amount, total, created_at, deposit_percent')
+    .select('id, invoice_number, status, subtotal, tax_rate, tax_amount, total, created_at, deposit_percent, payment_mode, due_date, deposit_amount')
     .eq('project_id', projectId)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
   if (invRes.error) throw invRes.error;
   const inv = invRes.data;
+
+  // the invoice's agreed plan (installments) + received-payments ledger, in parallel
+  let schedule: ScheduleRow[] = [];
+  let payments: PaymentRecord[] = [];
+  if (inv?.id) {
+    const [schRes, payRes] = await Promise.all([
+      supabase.from('invoice_schedule').select('id, label, amount, due_date, phase_id, sort').eq('invoice_id', inv.id).order('sort', { ascending: true }),
+      supabase.from('invoice_payments').select('id, amount, paid_at, method, schedule_id').eq('invoice_id', inv.id).order('paid_at', { ascending: true }),
+    ]);
+    if (schRes.error) throw schRes.error;
+    if (payRes.error) throw payRes.error;
+    schedule = (schRes.data || []).map((r: any) => ({ id: r.id, label: r.label || '', amount: Number(r.amount) || 0, dueDate: r.due_date ?? null, phaseId: r.phase_id ?? null, sort: r.sort ?? 0 }));
+    payments = (payRes.data || []).map((r: any) => ({ id: r.id, amount: Number(r.amount) || 0, paidAt: r.paid_at, method: r.method ?? null, scheduleId: r.schedule_id ?? null }));
+  }
 
   const agrRes = await supabase
     .from('agreements')
@@ -571,7 +780,24 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
       : null,
     items,
     invoice: inv
-      ? { id: inv.id, number: inv.invoice_number, status: inv.status, subtotal: Number(inv.subtotal ?? 0), taxRate: Number(inv.tax_rate ?? 0), tax: Number(inv.tax_amount ?? 0), total: Number(inv.total ?? 0), created: inv.created_at, depositPercent: inv.deposit_percent ?? null }
+      ? {
+          id: inv.id,
+          number: inv.invoice_number,
+          status: inv.status,
+          subtotal: Number(inv.subtotal ?? 0),
+          taxRate: Number(inv.tax_rate ?? 0),
+          tax: Number(inv.tax_amount ?? 0),
+          total: Number(inv.total ?? 0),
+          created: inv.created_at,
+          paymentMode: asPaymentMode(inv.payment_mode),
+          dueDate: inv.due_date ?? null,
+          depositPercent: inv.deposit_percent ?? null,
+          depositAmount: inv.deposit_amount != null ? Number(inv.deposit_amount) : null,
+          schedule,
+          payments,
+          // legacy rule: an invoice marked Paid before the ledger existed counts as fully paid
+          amountPaid: payments.length ? paidTotal(payments) : String(inv.status).toLowerCase() === 'paid' ? Number(inv.total ?? 0) : 0,
+        }
       : null,
     client,
     photoUrls: Array.isArray(projRes.data?.photo_urls) ? (projRes.data!.photo_urls as string[]) : [],

@@ -13,7 +13,7 @@ import { applyMarkup, buildStarterEstimate, calcTotals, deriveBase, fmt, LineIte
 import { MAX_AI_PHOTOS, requestEstimate, transcribeAudio } from '../lib/ai';
 import { createClient, createJob, fetchClients, fetchCompanyProfile, getMyLocation, lookupZip, Region, updateEstimateItems } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { Avatar, Between, Btn, Card, Chip, CatChip, DecimalInput, Divider, Field, FLOW_RESET, Input, Kav, Nav, NavBtn, Row, SearchBar, SectionTitle, Sheet, Switch, useStore } from '../ui';
+import { Avatar, Between, Btn, Card, Chip, CatChip, DecimalInput, Divider, Field, FLOW_RESET, Input, Kav, Nav, NavBtn, Row, SearchBar, SectionTitle, Sheet, Stepper, Switch, useStore } from '../ui';
 import { registerStrings, useT } from '../lib/i18n';
 
 registerStrings({
@@ -766,15 +766,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
   );
 }
 
-function Stepper({ value, onMinus, onPlus }: { value: string; onMinus: () => void; onPlus: () => void }) {
-  return (
-    <Row style={{ gap: 8 }}>
-      <NavBtn icon="back" size={14} onPress={onMinus} />
-      <Text style={{ fontFamily: fonts.num, fontSize: 15, color: colors.ink, width: 54, textAlign: 'center' }}>{value}</Text>
-      <NavBtn icon="fwd" size={14} onPress={onPlus} />
-    </Row>
-  );
-}
+// Stepper moved to ../ui (shared with the Job screen's payment-plan sheet).
 
 function ItemEditor({ it, onChange, onRemove, onDone }: { it: LineItem; onChange: (p: Partial<LineItem>) => void; onRemove: () => void; onDone: () => void }) {
   const t = useT();

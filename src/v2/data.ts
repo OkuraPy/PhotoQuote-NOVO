@@ -72,6 +72,127 @@ export function deriveStage(estStatus?: string, invStatus?: string): Stage {
   }
 }
 
+/* ---------------- Flexible payment (F12): plan, schedule & ledger helpers (pure) ---------------- */
+export type PaymentMode = 'full' | 'deposit' | 'installments';
+// One agreed payment of the plan (invoice_schedule row). dueDate is date-only 'YYYY-MM-DD';
+// null = due upon completion. label is stored in ENGLISH (documents; the UI translates its own).
+export type ScheduleRow = { id?: string; label: string; amount: number; dueDate: string | null; phaseId?: string | null; sort: number };
+// One received payment (invoice_payments ledger row).
+export type PaymentRecord = { id: string; amount: number; paidAt: string; method: string | null; scheduleId: string | null };
+// What the contractor picked in the payment-plan sheet (and what a stored invoice re-hydrates into).
+export type PaymentPlan = {
+  mode: PaymentMode;
+  dueDate: string | null; // full: the single due date · deposit: when the deposit is due
+  depositPercent: number | null; // deposit entered as a % (null when entered as an absolute $)
+  depositAmount: number; // deposit resolved to $ (0 = no deposit)
+  installments: ScheduleRow[];
+};
+
+// Date-only helpers. NEVER new Date('YYYY-MM-DD'): that parses as UTC midnight and renders the
+// PREVIOUS day in negative-offset timezones (all of the US) — build from parts instead.
+export function parseDateOnly(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y || 1970, (m || 1) - 1, d || 1);
+}
+export function toDateOnly(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+// today (or `from`) + N days as 'YYYY-MM-DD' — the Date constructor normalizes month/year overflow
+export function addDaysISO(days: number, from?: string): string {
+  const b = from ? parseDateOnly(from) : new Date();
+  return toDateOnly(new Date(b.getFullYear(), b.getMonth(), b.getDate() + days));
+}
+
+// Split `total` into n cent-exact parts; the leftover cents land on the LAST part so the parts
+// sum EXACTLY to the total. Installments are portions of the TOTAL — tax is already inside,
+// so they are never re-taxed. Works in integer cents to dodge float dust.
+export function splitInstallments(total: number, n: number): number[] {
+  const cents = Math.round((Number(total) || 0) * 100);
+  const count = Number.isFinite(n) ? Math.floor(n) : 0;
+  if (count <= 1) return [cents / 100];
+  const base = Math.floor(cents / count);
+  const out: number[] = Array(count).fill(base);
+  out[count - 1] = cents - base * (count - 1);
+  return out.map((c) => c / 100);
+}
+
+// The plan rendered as document rows (label · due · amount). Labels are ENGLISH on purpose —
+// these feed the PDF and the contract (owner's rule: client-facing output is always English);
+// the app screens translate their own display copies. A deposit of 0 collapses to one row, and
+// an installments plan with no rows falls back to one row (schedule insert failed → de-facto full).
+export function planRows(plan: PaymentPlan, total: number): { label: string; amount: number; dueDate: string | null }[] {
+  const t = round2(total);
+  if (plan.mode === 'deposit') {
+    const dep = round2(Math.min(Math.max(plan.depositAmount || 0, 0), t));
+    if (dep <= 0) return [{ label: 'Full payment', amount: t, dueDate: null }];
+    return [
+      { label: 'Deposit', amount: dep, dueDate: plan.dueDate },
+      { label: 'Balance', amount: round2(t - dep), dueDate: null },
+    ];
+  }
+  if (plan.mode === 'installments' && plan.installments.length) {
+    return [...plan.installments]
+      .sort((a, b) => a.sort - b.sort)
+      .map((r) => ({ label: r.label, amount: round2(r.amount), dueDate: r.dueDate }));
+  }
+  return [{ label: 'Full payment', amount: t, dueDate: plan.dueDate }];
+}
+
+export const paidTotal = (payments: { amount: number }[]) =>
+  round2(payments.reduce((s, p) => s + (Number(p.amount) || 0), 0));
+export const invoiceBalance = (total: number, paid: number) => round2(Math.max(0, total - paid));
+
+// Ledger → invoice status. Half-cent epsilon so float dust never blocks "Paid"; nothing recorded
+// is always "Unpaid" (a $0 total doesn't self-mark as paid).
+export type InvoicePayStatus = 'Unpaid' | 'Partially Paid' | 'Paid';
+export function statusFromPayments(total: number, paid: number): InvoicePayStatus {
+  if (paid <= 0) return 'Unpaid';
+  if (paid >= total - 0.005) return 'Paid';
+  return 'Partially Paid';
+}
+
+// How much of the total the schedule rows do NOT yet cover (0 = fully allocated; negative = over).
+export const unallocated = (total: number, rows: { amount: number }[]) =>
+  round2(total - rows.reduce((s, r) => s + (Number(r.amount) || 0), 0));
+
+// Rescale a schedule proportionally to a new total (quote edited after invoicing, no payments
+// yet). Cent-exact: every row is re-rounded and the LAST row absorbs the rounding difference.
+// Guards: no rows → []; degenerate old total (or a negative row after rounding) → even split.
+export function rescaleSchedule(rows: ScheduleRow[], oldTotal: number, newTotal: number): ScheduleRow[] {
+  if (!rows.length) return [];
+  const nt = round2(newTotal);
+  const even = () => {
+    const parts = splitInstallments(nt, rows.length);
+    return rows.map((r, i) => ({ ...r, amount: parts[i] }));
+  };
+  if (!(oldTotal > 0)) return even();
+  const out = rows.map((r) => ({ ...r, amount: round2((r.amount * nt) / oldTotal) }));
+  const head = out.slice(0, -1).reduce((s, r) => s + r.amount, 0);
+  out[out.length - 1].amount = round2(nt - head);
+  if (out.some((r) => r.amount < 0)) return even(); // keep the DB's amount >= 0 check safe
+  return out;
+}
+
+// Re-hydrate a PaymentPlan from a stored invoice (fields as fetchJobDetail maps them). A legacy
+// %-only deposit (deposit_amount never materialized) is resolved against the frozen total.
+export function planFromInvoice(inv: {
+  paymentMode: PaymentMode;
+  dueDate: string | null;
+  depositPercent: number | null;
+  depositAmount: number | null;
+  total: number;
+  schedule: ScheduleRow[];
+}): PaymentPlan {
+  return {
+    mode: inv.paymentMode,
+    dueDate: inv.dueDate,
+    depositPercent: inv.depositPercent,
+    depositAmount: round2(inv.depositAmount ?? (inv.depositPercent != null ? (inv.total * inv.depositPercent) / 100 : 0)),
+    installments: inv.schedule,
+  };
+}
+
 export const COMPANY = {
   name: 'Apex Renovations',
   license: 'Lic. #GC-204881',

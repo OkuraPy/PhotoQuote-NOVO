@@ -457,6 +457,18 @@ const navStyles = StyleSheet.create({
   },
 });
 
+/* ============================ stepper ============================ */
+// − value + control (tax/markup %, plan days & counts). The caller pre-formats the value string.
+export function Stepper({ value, onMinus, onPlus, width = 54 }: { value: string; onMinus: () => void; onPlus: () => void; width?: number }) {
+  return (
+    <Row style={{ gap: 8 }}>
+      <NavBtn icon="back" size={14} onPress={onMinus} />
+      <Text style={{ fontFamily: fonts.num, fontSize: 15, color: colors.ink, width, textAlign: 'center' }}>{value}</Text>
+      <NavBtn icon="fwd" size={14} onPress={onPlus} />
+    </Row>
+  );
+}
+
 /* ============================ bottom tab bar ============================ */
 export function TabBar({ active, onNav }: { active: string; onNav: (k: string) => void }) {
   const t = useT();

@@ -4,6 +4,33 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-07 16:20] — feat: v2 — ONDA 2/F12: PAGAMENTO FLEXÍVEL (3 modos, ledger de pagamentos, fim do Net-15 fixo)
+- **O que mudou**: fatura deixa de ser "Net-15 chumbado + status binário". Ao gerar (ou editar o plano), o
+  empreiteiro escolhe em um sheet leigo-proof: **Tudo no final** (vencimento real, stepper de dias), **Entrada +
+  saldo** (% OU $ absoluto, aceita 0) ou **Parcelas** (2–12, cent-exatas, indicador "falta alocar" trava o confirm).
+  Ledger `invoice_payments` registra pagamentos parciais (Cash/Check/Card/ACH/Other) e o status vira derivado:
+  Unpaid → **Partially Paid** → Paid (epsilon $0,005; "Mark as paid" da timeline virou Record payment com o saldo).
+  FIX do bug itens-vivos×totais-congelados: editar orçamento re-sincroniza a fatura (só sem pagamentos; senão
+  banner "Quote changed after invoicing"). PDF ganha Payment schedule + Paid/Balance due (inglês SEMPRE); contrato
+  v2 com `{{payment_schedule_table}}` (chaves antigas mantidas p/ templates legados). Reenvio nunca sobrescreve
+  status pago (`Sent` só sobre `Unpaid`).
+- **Arquivos**: `src/v2/data.ts` (helpers puros: splitInstallments/planRows/statusFromPayments/rescaleSchedule/
+  planFromInvoice/datas TZ-proof), `src/v2/lib/api.ts`, `src/v2/lib/send.ts`, `src/v2/screens/Job.tsx`
+  (PaymentPlanSheet + RecordPaymentSheet + InvoiceTab reescrita), `src/v2/ui.tsx` (Stepper exportado),
+  `src/v2/screens/Flow.tsx` (import), `src/v2/lib/__tests__/payments.test.ts` (24 testes novos),
+  migrations `20260708090000_invoices_flexible_payment` + `20260708090100_contract_template_payment_schedule`
+  (**APLICADAS em prod ANTES deste commit**; backfill: 8 faturas legadas → mode full + due_date=criação+15;
+  nenhum ledger fabricado; template v2 é default único, verificado).
+- **Decisão técnica**: parcela é porção do TOTAL (imposto dentro, nunca re-tributa); centavos de resto na última
+  parcela; falha no insert do schedule degrada o mode p/ 'full' no banco (PostgREST sem transação — nunca afirmar
+  parcelamento inexistente); Paid legado sem ledger vale como pago integral e nunca é rebaixado; labels/documentos
+  em inglês (regra do dono), UI traduz por mapa (en/es/pt).
+- **Revisão**: implementador (agente, retomado após queda por limite de sessão) + revisor adversarial: **APROVADO,
+  0 achados bloqueantes** (fuzz 3.000 iterações no rescale; md5 do template conferido contra prod; RLS/backfill/
+  guard de status validados no banco). 11 ressalvas não-bloqueantes registradas p/ Onda 3 (top: degradação de
+  schedule é muda; re-salvar plano re-data vencimentos passados; fatura $0 nunca "quita"). tsc limpo, jest 48/48.
+- **Bug corrigido**: totais congelados da fatura divergindo dos itens vivos pós-edição (agora re-sincroniza ou avisa).
+
 ### [2026-07-07 12:10] — fix: v2 — fallback hardcoded do Supabase no client (suspeito nº 1 da tela branca)
 - **O que mudou**: `src/services/supabase.ts` fazia `createClient(extra?.supabaseUrl || '')` — e o supabase-js
   LANÇA "supabaseUrl is required." com string vazia, em MODULE-SCOPE (o client é construído no import). Se no
