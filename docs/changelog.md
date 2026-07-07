@@ -4,6 +4,23 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-07 10:15] — docs: ADENDO 07/07 no V2_100_PLAN — diagnóstico de lançamento (Android, fluxo, faturas)
+- **O que mudou**: `docs/V2_100_PLAN.md` ganhou o adendo com os 3 diagnósticos pedidos pelo dono: **F10 Android-ready**
+  (2 blockers certos: botão voltar SAI DO APP — stack caseiro sem BackHandler; falta `android.package` — build nem gera;
+  + vírgula decimal quebrando preço em locale ES/PT; + lista do que provar no 1º device Android), **F11 números
+  honestos/fluxo real** (P0: a margem "hidden from client" vaza como Total≠Subtotal+Tax no PDF/fatura/CONTRATO ASSINADO
+  — fix recomendado: embutir markup nos preços; sem caminho pra negócio perdido/cancelado; idioma sem auto-detect;
+  "Your company" no 1º PDF; topo do Job desatualizado pós-Edit) e **F12 pagamento flexível** (proposta completa:
+  payment_mode + invoice_schedule + invoice_payments, 3 modos leigo-proof, PDF/contrato/portal; bug registrado:
+  InvoiceTab com itens ao vivo × totais congelados). Portal ganhou plano próprio em
+  `photoquote-client-portal/docs/PORTAL_100_PLAN.md` (restyle de 01/06 nunca publicado + contrato sem estilo em prod;
+  segurança: HTML sem sanitização na assinatura, bucket de assinaturas com escrita/sobrescrita anônima, show_values
+  não aplicado na RPC, IP forjável, sem rate-limit, 2 contratos de teste ativos; features: aprovar orçamento, fatura
+  no portal, pagar depósito, PDF assinado, ES/EN).
+- **Arquivos**: `docs/V2_100_PLAN.md` (adendo), portal: `docs/PORTAL_100_PLAN.md` (novo, repo do portal, não commitado lá)
+- **Decisão técnica**: nada de código alterado neste commit — diagnóstico consolidado de 5 agentes + evidência de
+  produção (RPCs/buckets/policies lidos no banco; screenshots mobile da Vercel). Execução aguarda GO do dono por frente.
+
 ### [2026-07-04 20:30] — feat: v2 — V2_100 F5 (acabamento): ações reais do cliente + foto no card + fim dos botões mortos
 - **O que mudou**: (1) **Call/Text/Email** na ficha do cliente FUNCIONAM (`Linking` tel:/sms:/mailto:, telefone sanitizado; desabilitados quando falta o dado); (2) **"New quote for X"** agora VINCULA o cliente — ele chega pré-selecionado no Attach (aplicado só no início do fluxo: remontagem no back-nav não reverte uma troca de cliente feita depois); (3) **JobCard mostra a primeira foto real** do projeto (campo `thumb` no fetchJobs; placeholder mantido sem foto); (4) **botões decorativos REMOVIDOS** (nenhum tinha handler): sino da Home, filtro dos Jobs (os chips continuam), share do Estimate, more do Job, linha Team e toggle Notifications do Profile — some a sensação de "botão que não faz nada".
 - **Arquivos**: `src/v2/data.ts`, `src/v2/lib/api.ts`, `src/v2/screens/{Tabs,Misc,Flow,Job}.tsx`
