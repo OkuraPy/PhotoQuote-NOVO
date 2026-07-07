@@ -56,11 +56,30 @@ EU?.setGlobalHandler?.((e: any, isFatal?: boolean) => {
 
 function Root() {
   // synchronous on first render: the entire app module graph (expo included) initializes inside
-  // this try — a module-scope throw lands on the error screen instead of aborting the process
+  // this try — a module-scope throw lands on the error screen instead of aborting the process.
+  // Build 25 painted `require('./App')` returning UNDEFINED in the release bundle (fine in Expo
+  // Go; the factory exists in the bundle) — so probe BOTH the deep path and the root wrapper,
+  // use whichever yields a component, and paint typeof/keys of each when neither does.
   const [boot] = React.useState(() => {
     try {
       require('expo'); // side-effects the expo template entry normally runs first
-      return { App: require('./App').default as React.ComponentType, err: null as string | null };
+      const probe: string[] = [];
+      const grab = (label: string, load: () => any): React.ComponentType | null => {
+        try {
+          const mod = load();
+          probe.push(`${label}: ${typeof mod}${mod ? ' keys=[' + Object.keys(mod).join(',').slice(0, 80) + ']' : ''}`);
+          const C = mod && (mod.default ?? mod);
+          return typeof C === 'function' ? (C as React.ComponentType) : null;
+        } catch (e) {
+          probe.push(`${label} threw: ${String((e as any)?.message || e)}`);
+          return null;
+        }
+      };
+      // deep path first: App.tsx is a one-line wrapper around src/v2/App, and the root './App'
+      // edge is exactly where the release bundle resolved undefined
+      const App = grab('./src/v2/App', () => require('./src/v2/App')) ?? grab('./App', () => require('./App'));
+      if (!App) throw new Error('App module resolved empty.\n' + probe.join('\n'));
+      return { App, err: null as string | null };
     } catch (e) {
       return { App: null, err: describeError(e) };
     }
