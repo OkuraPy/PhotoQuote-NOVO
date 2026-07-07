@@ -4,6 +4,18 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-07 12:10] — fix: v2 — fallback hardcoded do Supabase no client (suspeito nº 1 da tela branca)
+- **O que mudou**: `src/services/supabase.ts` fazia `createClient(extra?.supabaseUrl || '')` — e o supabase-js
+  LANÇA "supabaseUrl is required." com string vazia, em MODULE-SCOPE (o client é construído no import). Se no
+  build standalone o `Constants.expoConfig.extra` voltar vazio (caminho do manifest difere do Expo Go, ainda mais
+  sem o expo-updates, removido no build 21), o JS morre na cadeia de imports ANTES de pintar qualquer coisa —
+  exatamente a tela branca (New Arch) / SIGABRT no ExceptionsManagerQueue (Old Arch, build 22), e explica por que
+  o Expo Go sempre funcionou (manifest do Metro carrega o extra do .env). Fallbacks hardcoded (URL + anon key,
+  que é PÚBLICA por design; RLS protege) garantem que o client sempre constrói.
+- **Arquivos**: `src/services/supabase.ts` (o v2 reusa esse client via re-export)
+- **Decisão técnica**: vai junto com o visor de boot no build 24 — se essa era a causa, o app ABRE; se houver
+  outra, o visor mostra o erro na tela. Qualquer resultado é informativo (aberto / erro legível / branco=nativo).
+
 ### [2026-07-07 12:00] — feat: v2 — visor de boot no index.ts (fim da tela branca MUDA no TestFlight)
 - **O que mudou**: dono confirmou (áudio) que o build 23 — minify OFF + New Arch OFF — AINDA abre branco no
   TestFlight, e branco PURO (nem o Loading esmeralda, nem o ErrorBoundary rosa aparecem) ⇒ o JS morre ANTES de
