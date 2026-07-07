@@ -4,6 +4,25 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-07 21:20] — fix: v2 — **CAUSA RAIZ DA SAGA (builds 18-27) ACHADA E MORTA**: expo-asset@56 fantasma
+- **O que mudou**: o build 27 (ErrorUtils destravado) PINTOU O ERRO REAL na tela do dono:
+  `Error: Cannot find native module 'ExpoAsset'`. Forense: o xcode log da EAS confirma que o pod ExpoAsset
+  NUNCA compilou; `npm ls` revelou **DUAS versões de expo-asset** — a correta 12.0.13 aninhada dentro do expo,
+  e uma **56.0.15 "do futuro" HOISTED no topo** do node_modules (que ainda trazia expo-constants@56.0.16 de
+  carona). Vetor: `expo-audio@1.1.1` declara `expo-asset: "*"` como PEER dependency → npm moderno instala
+  peers automaticamente e pegou a MAIS NOVA do registry (canary do SDK futuro). O Metro servia o JS do 56
+  (que chama requireNativeModule('ExpoAsset') de API nova), o autolinking pulou o pod no conflito → binário
+  sem o nativo → throw em module-scope na init do grafo `expo` → mascarado pelo guardedLoadModule do metro
+  como "require undefined" → 3 semanas de tela branca/crash mudo. **No Expo Go nunca quebrou porque o Go
+  embarca o ExpoAsset nativo de fábrica.**
+- **Fix**: `npx expo install expo-asset` (dependência DIRETA ~12.0.13) — o peer `*` do expo-audio se satisfaz
+  com ela, o npm dedupa a árvore inteira (verificado: um único expo-asset 12.0.13, um único expo-constants
+  18.0.13, zero 56.x). Visor de boot MANTIDO (foi ele que quebrou o caso) e New Arch mantida ON (paridade com
+  Expo Go; SDK 55 exige). tsc limpo, jest 67/67. **Build 28** com tudo.
+- **Arquivos**: `package.json`, `package-lock.json`, `docs/changelog.md`.
+- **Lição**: peerDependency `*` + auto-install de peers do npm = roleta de versão; conferir `npm ls` de TODO
+  módulo nativo expo quando um build standalone divergir do Expo Go.
+
 ### [2026-07-07 20:30] — fix: v2 — build 27: erro REAL destravado (truque do ErrorUtils) + New Architecture LIGADA
 - **O que mudou**: pesquisa profunda (agente web, fontes: require.js do metro v0.83.3, RN#18179, changelog
   @expo/metro-config sdk-54, docs New Architecture) PROVOU o mecanismo: `guardedLoadModule` do metro-runtime —
