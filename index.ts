@@ -61,7 +61,15 @@ function Root() {
   // Go; the factory exists in the bundle) — so probe BOTH the deep path and the root wrapper,
   // use whichever yields a component, and paint typeof/keys of each when neither does.
   const [boot] = React.useState(() => {
+    // metro-runtime's guardedLoadModule: a require running OUTSIDE the entry init chain routes
+    // any factory exception to ErrorUtils.reportFatalError and RETURNS UNDEFINED — that was the
+    // build-25/26 "Cannot read property 'default' of undefined" mask. With ErrorUtils unset for
+    // the duration of these requires, metro falls into its rethrow branch and the REAL error
+    // (message + stack of the module that actually threw) lands in our catch, synchronously.
+    const G: any = global;
+    const savedEU = G.ErrorUtils;
     try {
+      G.ErrorUtils = undefined;
       require('expo'); // side-effects the expo template entry normally runs first
       const probe: string[] = [];
       const grab = (label: string, load: () => any): React.ComponentType | null => {
@@ -71,20 +79,24 @@ function Root() {
           const C = mod && (mod.default ?? mod);
           return typeof C === 'function' ? (C as React.ComponentType) : null;
         } catch (e) {
-          probe.push(`${label} threw: ${String((e as any)?.message || e)}`);
+          probe.push(`${label} threw: ${describeError(e)}`);
           return null;
         }
       };
-      // deep path first: App.tsx is a one-line wrapper around src/v2/App, and the root './App'
-      // edge is exactly where the release bundle resolved undefined
       const App = grab('./src/v2/App', () => require('./src/v2/App')) ?? grab('./App', () => require('./App'));
       if (!App) throw new Error('App module resolved empty.\n' + probe.join('\n'));
       return { App, err: null as string | null };
     } catch (e) {
       return { App: null, err: describeError(e) };
+    } finally {
+      G.ErrorUtils = savedEU;
     }
   });
-  const [fatal, setFatal] = React.useState<string | null>(boot.err ?? pending);
+  // `pending` first: it holds the REAL error metro reported via ErrorUtils (build 25 masked it
+  // by giving boot.err precedence — the synthetic "resolved empty" hid the actual exception)
+  const [fatal, setFatal] = React.useState<string | null>(
+    pending && boot.err ? pending + '\n\n--- boot ---\n' + boot.err : pending ?? boot.err
+  );
   React.useEffect(() => {
     paint = (m) => setFatal((cur) => cur ?? m);
     if (!boot.err) appMounted = true;

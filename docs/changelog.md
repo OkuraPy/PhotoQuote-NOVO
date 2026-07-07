@@ -4,6 +4,21 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-07 20:30] — fix: v2 — build 27: erro REAL destravado (truque do ErrorUtils) + New Architecture LIGADA
+- **O que mudou**: pesquisa profunda (agente web, fontes: require.js do metro v0.83.3, RN#18179, changelog
+  @expo/metro-config sdk-54, docs New Architecture) PROVOU o mecanismo: `guardedLoadModule` do metro-runtime —
+  require rodando FORA da cadeia de init do entry desvia exceção de factory p/ `ErrorUtils.reportFatalError` e
+  RETORNA UNDEFINED. O "Cannot read property 'default' of undefined" era MÁSCARA; **o erro real foi capturado
+  pelo próprio visor (handler global → `pending`) e NÃO era exibido — bug de precedência `boot.err ?? pending`
+  no index.ts (o build 25 tinha a resposta na mão)**. Build 27: (1) precedência invertida (pending = erro real
+  PRIMEIRO, boot.err anexado); (2) truque documentado: `global.ErrorUtils = undefined` durante os requires do
+  boot → metro cai no branch de RETHROW → erro real com stack cai no catch sincronamente; (3)
+  **`newArchEnabled: true`** — Expo Go é new-arch-ONLY, o app do dono roda PERFEITO lá = new arch comprovada
+  no device; nosso build era o único ambiente legacy (SDK 54 é o último que permite legacy; discriminador
+  apontado pela pesquisa). Refutados pela pesquisa: inlineRequires (default OFF no sdk-54), verboseName em
+  prod, hermesc×não-minificado, live-bindings (fixes já no 54.0.16), env vars EAS.
+- **Arquivos**: `index.ts`, `app.json` (newArchEnabled), `docs/changelog.md`.
+
 ### [2026-07-07 20:05] — fix: v2 — build 26: sonda+desvio no entry (commit c0811ac)
 - **O que mudou**: O VISOR DO 25 ENTREGOU — dono mandou 3 prints da tela vinho com o erro POR ESCRITO:
   `TypeError: Cannot read property 'default' of undefined` no useState do Root ⇒ **`require('./App')` retorna
