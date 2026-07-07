@@ -4,6 +4,21 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-07 12:00] — feat: v2 — visor de boot no index.ts (fim da tela branca MUDA no TestFlight)
+- **O que mudou**: dono confirmou (áudio) que o build 23 — minify OFF + New Arch OFF — AINDA abre branco no
+  TestFlight, e branco PURO (nem o Loading esmeralda, nem o ErrorBoundary rosa aparecem) ⇒ o JS morre ANTES de
+  montar o V2App (throw em module-scope na cadeia de imports) OU o bundle nem executa (camada nativa). O `index.ts`
+  agora é um "visor de boot": try/catch no require('./App') + ErrorUtils.setGlobalHandler que, em release, engole o
+  fatal (o handler default aborta ANTES de pintar qualquer coisa — era o SIGABRT mudo do build 22) e PINTA o
+  erro/stack na tela (fundo vinho). Se mesmo assim ficar branco → bundle não executou → problema nativo, outra
+  investigação. Inofensivo em produção (só aparece em fatal); dev mantém RedBox.
+- **Arquivos**: `index.ts` (sem JSX — entry é .ts), `docs/changelog.md`
+- **Decisão técnica**: parar a roleta de builds mudando variável às cegas (18 crash expo-updates → 19-21 branco →
+  22 exceção JS c/ Old Arch → 23 branco de novo SEM minify) e fazer o device REPORTAR a causa. Build 24 vai com o
+  visor. Respondido ao dono: criar app NOVO no App Store Connect não muda nada (o registro da Apple não roda
+  código; o mesmo binário daria a mesma tela) e o defeito NÃO veio das mudanças recentes (o build 23 é de 18/06;
+  teclado/margem/etc só existem no túnel, que funciona).
+
 ### [2026-07-07 11:40] — feat: v2 — ONDA 2/F11: margem EMBUTIDA nos preços (documentos do cliente fecham a conta)
 - **O que mudou**: o markup interno deixa de ser somado "por fora" (parcela invisível que fazia subtotal + tax ≠ total
   nos documentos do cliente) e passa a ser EMBUTIDO nos unit prices, como o multiplicador regional. `LineItem` ganha
