@@ -4,6 +4,19 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-07 20:05] — fix: v2 — build 26: sonda+desvio no entry (commit c0811ac)
+- **O que mudou**: O VISOR DO 25 ENTREGOU — dono mandou 3 prints da tela vinho com o erro POR ESCRITO:
+  `TypeError: Cannot read property 'default' of undefined` no useState do Root ⇒ **`require('./App')` retorna
+  UNDEFINED no bundle de release** (em prod o metro require perde as guardas __DEV__ e devolve undefined em vez
+  de lançar). Diagnóstico da tela também matou a hipótese do manifest: `expoConfig.extra` chega POPULADO
+  (anonKey/url/projectId visíveis no print). Forense: export:embed local gera os mesmos 907 módulos da EAS
+  (logs baixados; npm ci com lockfile ✓; números de linha do Hermes são sintéticos, comparação 16 vs 3444 era
+  inválida) e a factory do módulo 571 (App.tsx) existe e está correta — o defeito é de RUNTIME Hermes/metro em
+  release. `index.ts` agora sonda `./src/v2/App` (fundo; App.tsx é wrapper de 1 linha) e `./App`, usa o que
+  render componente e pinta typeof/keys de ambos se nenhum servir. Pesquisa paralela (agente web) varrendo
+  issues metro 0.83/hermes/expo 54 por "require undefined em produção".
+- **Arquivos**: `index.ts`; build 26 = d161fd7a (submission 0e624a4c automática).
+
 ### [2026-07-07 18:40] — fix: v2 — visor de boot v2 (build 24 AINDA crashou; agora nada morre calado)
 - **O que mudou**: crash logs `.ips` do dono (builds 23 E 24, hoje) mostram SIGABRT idêntico na
   ExceptionsManagerQueue <1s após o launch — exceção JS fatal na avaliação inicial, com a mensagem REMOVIDA
