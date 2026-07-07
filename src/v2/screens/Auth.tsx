@@ -1,6 +1,6 @@
 // PhotoQuote v2 — Auth & Onboarding screens, wired to real Supabase auth.
-import React, { useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Icon } from '../Icon';
 import { colors, fonts } from '../theme';
 import { Btn, Field, Input, Kav, Nav, Row } from '../ui';
@@ -136,7 +136,9 @@ export function LoginScreen({ go }: NavProp) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
+  const pwRef = useRef<TextInput>(null);
   const submit = async () => {
+    if (busy) return; // "go" on the keyboard could double-fire before the button disables
     if (!email.trim() || !password) { setErr(t('auth.enterEmailPassword')); return; }
     setBusy(true); setErr('');
     const { error } = await signIn(email, password);
@@ -147,7 +149,7 @@ export function LoginScreen({ go }: NavProp) {
 
   return (
     <Kav>
-      <ScrollView contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 20, paddingBottom: 30 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 20, paddingBottom: 30 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false}>
       <View style={{ marginTop: 48, marginBottom: 36 }}>
         <View style={{ width: 54, height: 54, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}>
           <Icon name="camera" size={26} color="#fff" />
@@ -156,11 +158,11 @@ export function LoginScreen({ go }: NavProp) {
         <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.muted, marginTop: 8 }}>{t('auth.photoToQuote')}</Text>
       </View>
       <Field label={t('auth.email')}>
-        <Input value={email} onChangeText={setEmail} placeholder={t('auth.emailPlaceholder')} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} />
+        <Input value={email} onChangeText={setEmail} placeholder={t('auth.emailPlaceholder')} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} textContentType="emailAddress" autoComplete="email" returnKeyType="next" blurOnSubmit={false} onSubmitEditing={() => pwRef.current?.focus()} />
       </Field>
       <Field label={t('auth.password')}>
         <View>
-          <Input value={password} onChangeText={setPassword} placeholder={t('auth.passwordPlaceholder')} secureTextEntry={!show} style={{ paddingRight: 48 }} />
+          <Input ref={pwRef} value={password} onChangeText={setPassword} placeholder={t('auth.passwordPlaceholder')} secureTextEntry={!show} textContentType="password" autoComplete="password" returnKeyType="go" onSubmitEditing={submit} style={{ paddingRight: 48 }} />
           <Pressable onPress={() => setShow(!show)} style={{ position: 'absolute', right: 14, top: 13 }}>
             <Icon name="eye" size={20} color={colors.faint} />
           </Pressable>
@@ -233,14 +235,14 @@ export function SignupScreen({ back }: NavProp) {
   return (
     <Kav>
       <Nav title={t('auth.createAccount')} onBack={back} />
-      <ScrollView style={pad} contentContainerStyle={{ paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+      <ScrollView style={pad} contentContainerStyle={{ paddingBottom: 40 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.muted, marginTop: 4, lineHeight: 22 }}>
           {t('auth.signupIntro')}
         </Text>
         <View style={{ height: 20 }} />
-        <Field label={t('auth.fullName')}><Input value={name} onChangeText={setName} placeholder={t('auth.fullNamePlaceholder')} /></Field>
-        <Field label={t('auth.email')}><Input value={email} onChangeText={setEmail} placeholder={t('auth.emailPlaceholder')} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} /></Field>
-        <Field label={t('auth.password')}><Input value={password} onChangeText={setPassword} placeholder={t('auth.createPasswordPlaceholder')} secureTextEntry /></Field>
+        <Field label={t('auth.fullName')}><Input value={name} onChangeText={setName} placeholder={t('auth.fullNamePlaceholder')} autoCapitalize="words" textContentType="name" autoComplete="name" /></Field>
+        <Field label={t('auth.email')}><Input value={email} onChangeText={setEmail} placeholder={t('auth.emailPlaceholder')} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} textContentType="emailAddress" autoComplete="email" returnKeyType="next" /></Field>
+        <Field label={t('auth.password')}><Input value={password} onChangeText={setPassword} placeholder={t('auth.createPasswordPlaceholder')} secureTextEntry textContentType="newPassword" autoComplete="password-new" /></Field>
         {err ? <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.error, marginBottom: 8 }}>{err}</Text> : null}
         <Btn title={busy ? t('auth.creating') : t('auth.createAccount')} onPress={submit} disabled={busy} style={{ marginTop: 4 }} />
         <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, textAlign: 'center', marginTop: 16, lineHeight: 19 }}>

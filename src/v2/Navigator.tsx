@@ -1,7 +1,7 @@
 // PhotoQuote v2 — auth gate + lightweight navigation stacks + shared store.
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { ActivityIndicator, BackHandler, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from './theme';
 import { FLOW_RESET, StoreCtx, TabBar, V2Store } from './ui';
@@ -51,6 +51,18 @@ type Route = { name: string; params?: any };
 // generic stack hook used by both flows
 function useStack(initial: string) {
   const [stack, setStack] = useState<Route[]>([{ name: initial, params: {} }]);
+  // Android hardware back: pop the stack; at a root return false so the system
+  // minimizes the app. Re-registered when canPop flips, so the check is never stale.
+  // (The Sheet's Modal intercepts back natively via onRequestClose while open.)
+  const canPop = stack.length > 1;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!canPop) return false;
+      setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
+      return true;
+    });
+    return () => sub.remove();
+  }, [canPop]);
   return {
     stack,
     setStack,

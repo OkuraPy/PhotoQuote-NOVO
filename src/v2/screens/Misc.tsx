@@ -256,7 +256,7 @@ export function ClientEditScreen({ back, params }: NavProp) {
   return (
     <Kav>
       <Nav title={editing ? t('misc.editClient') : t('misc.newClient')} center onBack={back} />
-      <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <Field label={t('misc.name')}><Input value={name} onChangeText={setName} placeholder={t('misc.namePlaceholder')} autoFocus={!editing} /></Field>
         <Field label={t('misc.phone')} opt><Input value={phone} onChangeText={setPhone} placeholder="(555) 000-0000" keyboardType="phone-pad" /></Field>
         <Field label={t('misc.email')} opt><Input value={email} onChangeText={setEmail} placeholder={t('misc.emailPlaceholder')} keyboardType="email-address" autoCapitalize="none" /></Field>
@@ -278,6 +278,9 @@ export function ClientEditScreen({ back, params }: NavProp) {
     </Kav>
   );
 }
+
+// es/pt keyboards type "8,25" — normalize comma to dot before parsing
+const deComma = (s: string) => s.replace(/,/g, '.');
 
 export function CompanyScreen({ back }: NavProp) {
   const t = useT();
@@ -328,9 +331,9 @@ export function CompanyScreen({ back }: NavProp) {
     if (!user) return;
     setBusy(true);
     try {
-      const depNum = deposit.trim() === '' ? null : Math.max(0, Math.min(100, parseInt(deposit, 10) || 0));
-      const taxNum = taxRate.trim() === '' ? null : Math.max(0, parseFloat(taxRate) || 0);
-      const marginNum = margin.trim() === '' ? null : Math.max(0, parseFloat(margin) || 0);
+      const depNum = deposit.trim() === '' ? null : Math.max(0, Math.min(100, parseInt(deComma(deposit), 10) || 0));
+      const taxNum = taxRate.trim() === '' ? null : Math.max(0, parseFloat(deComma(taxRate)) || 0);
+      const marginNum = margin.trim() === '' ? null : Math.max(0, parseFloat(deComma(margin)) || 0);
       await updateCompanyProfile(user.id, { company_name: name, company_license: license, company_phone: phone, company_email: email, company_address: address, default_deposit_percent: depNum, default_tax_percent: taxNum, default_margin_percent: marginNum, logo_url: logoUrl || null });
       qc.invalidateQueries({ queryKey: ['company'] });
       back();
@@ -343,7 +346,7 @@ export function CompanyScreen({ back }: NavProp) {
   return (
     <Kav>
       <Nav title={t('misc.businessDetails')} center onBack={back} />
-      <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <View style={{ alignItems: 'center', marginBottom: 18 }}>
           <Pressable onPress={pickLogo} style={{ width: 96, height: 96, borderRadius: 24, backgroundColor: colors.primaryTint, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: 1, borderColor: colors.border }}>
             {logoUrl ? <Image source={{ uri: logoUrl }} style={{ width: 96, height: 96 }} resizeMode="cover" /> : <Icon name="image" size={30} color={colors.primary} />}
@@ -389,7 +392,7 @@ export function ChangePasswordScreen({ back }: NavProp) {
   return (
     <Kav>
       <Nav title={t('misc.changePassword')} center onBack={back} />
-      <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <Field label={t('misc.newPassword')}><Input value={pw} onChangeText={setPw} secureTextEntry placeholder={t('misc.atLeast6')} autoFocus /></Field>
         <Field label={t('misc.confirmNewPassword')}><Input value={pw2} onChangeText={setPw2} secureTextEntry placeholder={t('misc.repeatPassword')} /></Field>
       </ScrollView>

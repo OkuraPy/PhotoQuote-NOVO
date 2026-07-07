@@ -850,7 +850,7 @@ export function AttachScreen({ go, back }: NavProp) {
   return (
     <Kav>
       <Nav title={t('flow.addClient')} sub={t('flow.optionalDoLater')} center onBack={back} />
-      <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <SectionTitle title={t('flow.client')} />
         {!sel ? (
           <>

@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Pressable,
@@ -283,10 +284,11 @@ export function Field({ label, opt, children }: { label?: string; opt?: boolean;
   );
 }
 
-export function Input({ style, ...props }: TextInputProps & { style?: StyleProp<TextStyle> }) {
+export const Input = React.forwardRef<TextInput, TextInputProps & { style?: StyleProp<TextStyle> }>(function Input({ style, ...props }, ref) {
   const [focus, setFocus] = useState(false);
   return (
     <TextInput
+      ref={ref}
       placeholderTextColor={colors.faint}
       onFocus={() => setFocus(true)}
       onBlur={() => setFocus(false)}
@@ -309,7 +311,7 @@ export function Input({ style, ...props }: TextInputProps & { style?: StyleProp<
       {...props}
     />
   );
-}
+});
 
 // Numeric input with its own text buffer so the user can type "6." / "6.50"
 // without an eager parseFloat/String round-trip stripping it (ported from the v1 DecimalInput fix).
@@ -331,7 +333,16 @@ export function DecimalInput({ value, onChangeValue, style, placeholder }: { val
       onFocus={() => setFocus(true)}
       onBlur={() => setFocus(false)}
       onChangeText={(t) => {
-        const clean = t.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+        const raw = t.replace(/[^0-9.,]/g, '');
+        let clean: string;
+        if (raw.includes('.') && raw.includes(',')) {
+          // pasted with thousands separators ("1.234,56" / "1,234.56") — the LAST separator is the decimal
+          const sep = Math.max(raw.lastIndexOf('.'), raw.lastIndexOf(','));
+          clean = `${raw.slice(0, sep).replace(/[.,]/g, '')}.${raw.slice(sep + 1).replace(/[.,]/g, '')}`;
+        } else {
+          // live typing: es/pt comma acts as the dot; keep only the first decimal point
+          clean = raw.replace(/,/g, '.').replace(/(\..*)\./g, '$1');
+        }
         setText(clean);
         const n = parseFloat(clean);
         onChangeValue(isNaN(n) ? 0 : n);
@@ -499,18 +510,23 @@ export function Kav({ children, style }: { children: React.ReactNode; style?: St
 
 /* ============================ bottom sheet ============================ */
 export function Sheet({ open, onClose, title, sub, children }: { open: boolean; onClose: () => void; title?: string; sub?: string; children: React.ReactNode }) {
+  const insets = useSafeAreaInsets();
   return (
-    <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={open} transparent animationType="slide" statusBarTranslucent navigationBarTranslucent onRequestClose={onClose}>
       <Kav>
       <Pressable style={{ flex: 1, backgroundColor: 'rgba(12,17,22,0.42)' }} onPress={onClose} />
-      <View
+      {/* tapping blank space inside the sheet dismisses the keyboard — number pads on iOS have
+          no return key, so without this the user gets stuck behind the keyboard */}
+      <Pressable
+        onPress={Keyboard.dismiss}
         style={{
           backgroundColor: colors.card,
           borderTopLeftRadius: 24,
           borderTopRightRadius: 24,
           paddingHorizontal: 20,
           paddingTop: 10,
-          paddingBottom: 28,
+          // translucent nav bars draw UNDER the sheet — keep the last control above them
+          paddingBottom: 16 + Math.max(insets.bottom, 12),
           ...shadow.up,
         }}
       >
@@ -518,7 +534,7 @@ export function Sheet({ open, onClose, title, sub, children }: { open: boolean; 
         {title ? <Text style={{ fontFamily: fonts.extrabold, fontSize: 18, color: colors.ink, marginBottom: 4 }}>{title}</Text> : null}
         {sub ? <Text style={{ fontFamily: fonts.semibold, fontSize: 13.5, color: colors.muted, marginBottom: 16 }}>{sub}</Text> : null}
         {children}
-      </View>
+      </Pressable>
       </Kav>
     </Modal>
   );

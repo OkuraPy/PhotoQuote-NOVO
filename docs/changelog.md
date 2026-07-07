@@ -4,6 +4,26 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-07 11:30] — feat: v2 — ONDA 1: Android-ready + "sair do teclado" + segurança do portal no banco
+- **O que mudou (app)**: (1) **BackHandler** no stack caseiro — o botão/gesto voltar do Android agora VOLTA em vez de
+  fechar o app (pop quando stack>1; minimiza no root; Sheet continua interceptando via onRequestClose); (2)
+  **`android.package` + `versionCode`** no app.json — o build Android passa a ser possível (nunca existiu);
+  (3) **vírgula decimal**: DecimalInput aceita "6,50" (e cola de "1.234,56"/"1,234.56" tratando o ÚLTIMO separador
+  como decimal), Company tolera vírgula nos %; (4) **"sair do teclado"** (dor relatada pelo dono): tocar em área
+  vazia dos Sheets fecha o teclado (numérico do iOS não tem tecla de retorno!), arrastar fecha nos formulários
+  (keyboardDismissMode on-drag em ClientEdit/Company/ChangePassword/Attach/Login/Signup), rodapé do Sheet respeita
+  os insets (nav bar translúcida do Android); (5) autofill/submit no Auth (textContentType/autoComplete,
+  next→foca senha via forwardRef no Input, go→entra, guarda anti duplo-submit).
+- **O que mudou (banco, migration `portal_security_hardening` APLICADA em prod)**: fim da SOBRESCRITA anônima no
+  bucket contract-signatures (adulteração de assinatura); `get_project_by_share_token` zera estimateTotal quando
+  show_values=false; `add_client_comment` com caps (2000/80) + flood guard (20/10min) + author forçado 'Client';
+  2 agreements de TESTE com token previsível anulados (status 'void').
+- **Arquivos**: `app.json`, `src/v2/{Navigator,ui}.tsx`, `src/v2/screens/{Auth,Misc,Flow}.tsx`,
+  `supabase/migrations/20260707100000_portal_security_hardening.sql`
+- **Revisão**: implementação por agente + revisor adversarial; ressalvas corrigidas (insets no Sheet, milhar no
+  DecimalInput, busy guard, foco encadeado). Conhecidos aceitos: back em tab≠home minimiza (não volta pra home);
+  DecimalInput exibe ponto para quem digita vírgula (cosmético). `tsc` limpo, `npm test` 15/15.
+
 ### [2026-07-07 10:40] — fix: v2 — IA gera itens SEMPRE em inglês (regra do dono: cliente final é americano)
 - **O que mudou**: `ai-estimate` v6 — instrução fixa no prompt: os lineItems (description/unit) saem SEMPRE em inglês
   americano, independente do idioma da anotação/áudio do empreiteiro; a `notes` interna da IA sai no MESMO idioma do
