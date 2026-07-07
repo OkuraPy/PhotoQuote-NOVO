@@ -1,24 +1,16 @@
-import { registerRootComponent } from 'expo';
 import React from 'react';
-import { ScrollView, Text } from 'react-native';
+import { AppRegistry, ScrollView, Text } from 'react-native';
 
-// Boot visor. Builds 18–23 died silently in TestFlight (white screen or a bare SIGABRT with no
-// JS message in the .ips), while the same JS boots fine in Expo Go — so the failure lives in the
-// release build layer and the device itself must tell us what threw. This captures BOTH failure
-// shapes and paints the error on screen:
-//   • a module-init throw anywhere in the App import chain (the require below),
-//   • a later fatal JS error (global handler — in release the default handler aborts before
-//     anything paints, so we swallow fatals and show them instead; dev keeps the RedBox).
-// If the screen STILL goes white with this in place, the JS bundle never executed at all —
-// that means native layer, not JS. Harmless to keep in production: it only shows on fatals.
-let bootError: unknown = null;
-let App: React.ComponentType | null = null;
-try {
-  App = require('./App').default;
-} catch (e) {
-  bootError = e;
-}
-
+// Boot visor v2. Build 24 still died with the SAME ExceptionsManagerQueue SIGABRT as 23 and the
+// v1 visor painted nothing — so the fatal fires OUTSIDE what v1 could catch: either inside the
+// top-level `import 'expo'` (which ran before the handler installed) or reported with a falsy
+// isFatal that fell through to RN's aborting default handler. v2 closes both holes:
+//   • this module imports ONLY react + react-native primitives (loaded by the RN prelude —
+//     nothing here can throw); `expo` and the whole app graph initialize lazily inside a
+//     try on first render, so ANY module-scope throw is caught and painted;
+//   • in release, EVERY error reported before the app mounts is painted (fatal or not);
+//     after a successful mount only fatals are, and non-fatals keep the default behavior.
+// If a build with this STILL closes instantly, JS never ran at all → pure native crash.
 const describeError = (e: any): string => {
   const name = e?.name ? String(e.name) + ': ' : '';
   const msg = e?.message !== undefined ? String(e.message) : String(e);
@@ -26,13 +18,36 @@ const describeError = (e: any): string => {
   return name + msg + stack;
 };
 
-let showFatal: ((text: string) => void) | null = null;
+// Diagnostics for the error screen: settles whether the embedded config/extra reaches runtime.
+const diagnostics = (): string => {
+  const parts: string[] = [];
+  try {
+    const C = require('expo-constants').default;
+    parts.push('expoConfig.extra: ' + JSON.stringify(C?.expoConfig?.extra ?? null)?.slice(0, 300));
+  } catch (e) {
+    parts.push('expo-constants unavailable: ' + String((e as any)?.message || e));
+  }
+  try {
+    const h = (global as any).HermesInternal?.getRuntimeProperties?.();
+    if (h) parts.push('hermes: ' + (h['OSS Release Version'] || 'yes'));
+  } catch {}
+  return parts.join('\n');
+};
+
+let paint: ((msg: string) => void) | null = null;
+let pending: string | null = null;
+let appMounted = false;
+const show = (m: string) => {
+  if (pending == null) pending = m;
+  paint?.(pending);
+};
+
 const EU = (global as any).ErrorUtils;
 const prevHandler = EU?.getGlobalHandler?.();
 EU?.setGlobalHandler?.((e: any, isFatal?: boolean) => {
   try {
-    if (isFatal && !__DEV__) {
-      showFatal?.(describeError(e));
+    if (!__DEV__ && (isFatal || !appMounted)) {
+      show(describeError(e));
       return; // keep the process alive so the error stays readable on screen
     }
   } catch {}
@@ -40,13 +55,24 @@ EU?.setGlobalHandler?.((e: any, isFatal?: boolean) => {
 });
 
 function Root() {
-  const [fatal, setFatal] = React.useState<string | null>(bootError ? describeError(bootError) : null);
+  // synchronous on first render: the entire app module graph (expo included) initializes inside
+  // this try — a module-scope throw lands on the error screen instead of aborting the process
+  const [boot] = React.useState(() => {
+    try {
+      require('expo'); // side-effects the expo template entry normally runs first
+      return { App: require('./App').default as React.ComponentType, err: null as string | null };
+    } catch (e) {
+      return { App: null, err: describeError(e) };
+    }
+  });
+  const [fatal, setFatal] = React.useState<string | null>(boot.err ?? pending);
   React.useEffect(() => {
-    showFatal = (t) => setFatal((cur) => cur ?? t);
+    paint = (m) => setFatal((cur) => cur ?? m);
+    if (!boot.err) appMounted = true;
     return () => {
-      showFatal = null;
+      paint = null;
     };
-  }, []);
+  }, [boot.err]);
   if (fatal) {
     return React.createElement(
       ScrollView,
@@ -63,10 +89,16 @@ function Root() {
         Text,
         { style: { color: '#FECACA', fontSize: 12, lineHeight: 17 }, selectable: true },
         fatal
+      ),
+      React.createElement(
+        Text,
+        { style: { color: '#FCA5A5', fontSize: 11, lineHeight: 15, marginTop: 16 }, selectable: true },
+        diagnostics()
       )
     );
   }
-  return App ? React.createElement(App) : null;
+  return boot.App ? React.createElement(boot.App) : null;
 }
 
-registerRootComponent(Root);
+// same registration expo's registerRootComponent performs (AppDelegate moduleName = 'main')
+AppRegistry.registerComponent('main', () => Root);

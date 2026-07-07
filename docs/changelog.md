@@ -4,6 +4,24 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-07 18:40] — fix: v2 — visor de boot v2 (build 24 AINDA crashou; agora nada morre calado)
+- **O que mudou**: crash logs `.ips` do dono (builds 23 E 24, hoje) mostram SIGABRT idêntico na
+  ExceptionsManagerQueue <1s após o launch — exceção JS fatal na avaliação inicial, com a mensagem REMOVIDA
+  pela Apple. O visor v1 não pintou nada ⇒ o throw dispara FORA do alcance dele: ou dentro do `import 'expo'`
+  do topo (rodava ANTES do handler instalar) ou reportado com isFatal falsy caindo no handler default (que
+  aborta). Forense dos IPAs: executáveis 23/24 byte-idênticos (a diferença é SÓ o bundle JS) ⇒ o JS executa;
+  fallback do supabase matou UM lançador module-scope, mas há outro. **Visor v2**: o entry importa APENAS
+  react + react-native (carregados pelo prelude, não lançam); `expo` e TODO o grafo do app inicializam em
+  require lazy dentro de try no primeiro render (throw em module-scope de QUALQUER módulo → tela vinho);
+  em release, TODO erro reportado antes do mount é pintado (fatal ou não); a tela de erro ainda imprime
+  `Constants.expoConfig.extra` (fecha a dúvida do manifest vazio) + versão do Hermes. Registro direto via
+  AppRegistry('main') — mesmo efeito do registerRootComponent.
+- **Arquivos**: `index.ts`
+- **Decisão técnica**: com o v2, o espaço de resultados do build 25 é binário: tela vinho com o erro POR
+  ESCRITO (leitura direta da causa) ou app funcionando. Fechar ainda instantâneo = JS nem rodou = crash
+  100% nativo (hipótese hoje descartada pelos frames do bridge nos .ips). Simbolicação foi tentada e é
+  inviável (binário stripped, 190 símbolos). tsc limpo, jest 67/67.
+
 ### [2026-07-07 17:15] — feat: v2 — ONDA 3: fluxo real (lost/archive, aprovar direto, auto-idioma, guards) + ressalvas F12
 - **O que mudou**: (1) **Perdido/Arquivar** — menu "…" no Job marca Lost (confirmação) ou Archived e reabre;
   eixo ORTOGONAL ao pipeline (projects.status, coluna que o v2 não usava; deriveStage intocado): fechado sai da
