@@ -4,7 +4,7 @@ import { ActivityIndicator, Alert, Image, Pressable, Share, ScrollView, Text, Vi
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
-import { calcTotals, fmt, LineItem, split, STAGES } from '../data';
+import { applyMarkup, calcTotals, fmt, LineItem, split, STAGES } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { addPhaseComment, addPhasePhotos, agreementLink, createAgreement, createInvoice, createPhase, deletePhase, deriveStage, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, JobDetail, progressLink, ProgressPhase, PhaseStatus, updateEstimateStatus, updateInvoiceStatus, updatePhase } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -54,6 +54,7 @@ registerStrings({
   'job.taxable': { en: 'Taxable', es: 'Gravable', pt: 'Tributável' },
   'job.noTax': { en: 'No tax', es: 'Sin impuesto', pt: 'Sem imposto' },
   'job.subtotal': { en: 'Subtotal', es: 'Subtotal', pt: 'Subtotal' },
+  'job.markupIncluded': { en: 'Markup ({pct}%) included', es: 'Margen ({pct}%) incluido', pt: 'Margem ({pct}%) incluída' },
   'job.tax': { en: 'Tax ({rate}% on {amount})', es: 'Impuesto ({rate}% sobre {amount})', pt: 'Imposto ({rate}% sobre {amount})' },
   'job.total': { en: 'Total', es: 'Total', pt: 'Total' },
   // InvoiceTab
@@ -200,7 +201,8 @@ export function JobScreen({ go, back, params }: NavProp) {
   // new job (not yet persisted): show the AI estimate the user just generated, held in the store
   const items = detail?.items?.length ? detail.items : job ? [] : store.items;
   const taxRate = est?.taxRate ?? store.taxRate ?? 8.25;
-  const computed = calcTotals(items, taxRate, est?.marginRate ?? store.marginRate ?? 0);
+  // margin always 0: new scheme embeds it in prices; legacy display trusts the SAVED totals below
+  const computed = calcTotals(items, taxRate, 0);
   // stored DB totals are the source of truth (trigger); fall back to computed for mock/no-estimate
   const quoteTotals: Totals = est
     ? { subtotal: est.subtotal, taxableSubtotal: computed.taxableSubtotal, tax: est.tax, total: est.total, taxRate }
@@ -346,13 +348,20 @@ export function JobScreen({ go, back, params }: NavProp) {
           <QuoteTab
             items={items}
             totals={quoteTotals}
+            markupPercent={est?.markupPercent ?? 0}
             go={go}
             photos={detail?.photoUrls || []}
             onEdit={
               est && projectId
                 ? () => {
-                    // hydrate the flow store with THIS job's items — the editor must never show a stale capture
-                    up({ items: detail!.items, taxRate: quoteTotals.taxRate, marginRate: est.marginRate ?? 0, editing: null });
+                    // hydrate the flow store with THIS job's items — the editor must never show a stale capture.
+                    // Legacy estimate (margin summed on top): FOLD the margin into the prices so the editor
+                    // and every future document reconcile; saving rewrites it as embedded markup.
+                    // New scheme: detail.items already carry basePrice (derived from markup_percent).
+                    const legacy = est.legacyMarginRate > 0;
+                    // legacy items carry no basePrice, so applyMarkup folds from the current price
+                    const items = legacy ? applyMarkup(detail!.items, est.legacyMarginRate) : detail!.items;
+                    up({ items, taxRate: quoteTotals.taxRate, marginRate: legacy ? est.legacyMarginRate : est.markupPercent, editing: null });
                     go('estimate', { editJob: { projectId, estimateId: est.id } });
                   }
                 : undefined
@@ -399,7 +408,7 @@ function TotRow({ label, value, bold, color }: { label: string; value: string; b
   );
 }
 
-function QuoteTab({ items, totals, go, photos, onEdit }: { items: LineItem[]; totals: Totals; go: NavProp['go']; photos: string[]; onEdit?: () => void }) {
+function QuoteTab({ items, totals, markupPercent = 0, go, photos, onEdit }: { items: LineItem[]; totals: Totals; markupPercent?: number; go: NavProp['go']; photos: string[]; onEdit?: () => void }) {
   const t = useT();
   return (
     <View style={{ marginTop: 16 }}>
@@ -433,6 +442,10 @@ function QuoteTab({ items, totals, go, photos, onEdit }: { items: LineItem[]; to
       </View>
       <Card style={{ padding: 16, marginTop: 16 }}>
         <TotRow label={t('job.subtotal')} value={fmt(totals.subtotal)} />
+        {markupPercent > 0 ? (
+          // internal-only info: the markup is already inside the prices — it adds nothing here
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 11.5, color: colors.faint, paddingVertical: 2 }}>{t('job.markupIncluded', { pct: markupPercent })}</Text>
+        ) : null}
         <TotRow label={t('job.tax', { rate: totals.taxRate, amount: fmt(totals.taxableSubtotal) })} value={fmt(totals.tax)} />
         <Between style={{ paddingTop: 11, marginTop: 7, borderTopWidth: 1.5, borderTopColor: colors.borderStrong }}>
           <Text style={{ fontFamily: fonts.extrabold, fontSize: 13, color: colors.ink }}>{t('job.total')}</Text>

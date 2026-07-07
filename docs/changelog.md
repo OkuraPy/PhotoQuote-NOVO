@@ -4,6 +4,27 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-07 11:40] — feat: v2 — ONDA 2/F11: margem EMBUTIDA nos preços (documentos do cliente fecham a conta)
+- **O que mudou**: o markup interno deixa de ser somado "por fora" (parcela invisível que fazia subtotal + tax ≠ total
+  nos documentos do cliente) e passa a ser EMBUTIDO nos unit prices, como o multiplicador regional. `LineItem` ganha
+  `basePrice`; o stepper recalcula os preços finais a partir da base (nunca compõe); edição manual digita o preço
+  FINAL (base derivada); persistência grava unit_price FINAL + margin_rate/margin_percent = 0 + nova coluna
+  `estimates.markup_percent` para re-hidratar no Edit; estimate LEGADO (margin_rate>0) é "foldado" ao abrir no Edit
+  preservando o total; QuoteTab mostra "Markup (X%) included" informativo. PDF/fatura/contrato reconciliam:
+  total = subtotal + tax.
+- **Arquivos**: `src/v2/data.ts` (applyMarkup/deriveBase), `src/v2/lib/api.ts`, `src/v2/screens/{Flow,Job}.tsx`,
+  `src/v2/lib/__tests__/data.test.ts`, `supabase/migrations/20260707120000_estimates_markup_percent.sql`
+  (**APLICADA em prod ANTES deste commit** — coluna aditiva, app antigo intacto).
+- **Decisão técnica**: o preço final persistido (unit_price) é a fonte de verdade; `markup_percent` só registra o %
+  embutido e `base = round2(final/(1+pct))` recupera EXATAMENTE a base original — garantia provada por teste de
+  varredura (bases × percentuais). Fold do legado reusa `applyMarkup` (itens sem basePrice). Save→Edit→Save é
+  idempotente: o preço nunca infla por ciclo.
+- **Revisão**: revisor adversarial APROVOU (0 bugs bloqueantes; idempotência, fold, race IA×perfil e NaN/null todos
+  traçados). Ressalva de teste atendida pré-commit: `deriveBase` extraído para data.ts (fim da duplicação
+  api.ts/Flow.tsx) + 5 testes novos (24/24 verdes, tsc limpo).
+- **Bug corrigido**: P0 do diagnóstico 07/07 — "margem vaza": o total incluía margem que nenhum documento do cliente
+  mostrava (PDF/fatura/CONTRATO ASSINADO com conta que não fecha).
+
 ### [2026-07-07 11:30] — feat: v2 — ONDA 1: Android-ready + "sair do teclado" + segurança do portal no banco
 - **O que mudou (app)**: (1) **BackHandler** no stack caseiro — o botão/gesto voltar do Android agora VOLTA em vez de
   fechar o app (pop quando stack>1; minimiza no root; Sheet continua interceptando via onRequestClose); (2)

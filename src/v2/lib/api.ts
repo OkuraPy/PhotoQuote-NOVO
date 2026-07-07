@@ -4,7 +4,7 @@ import * as Location from 'expo-location';
 import * as Crypto from 'expo-crypto';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from './supabase';
-import { Client, deriveStage, Job, LineItem, Photo } from '../data';
+import { Client, deriveBase, deriveStage, Job, LineItem, Photo } from '../data';
 export { deriveStage }; // re-exported for screens (lives in ../data so it's unit-testable)
 
 /* ---------------- Location: real ZIP (Zippopotam, keyless) + GPS (expo-location) ---------------- */
@@ -142,9 +142,12 @@ export async function countClientProjects(clientId: string): Promise<number> {
 }
 
 /* ---------------- Create a job (project + estimate + line items) ---------------- */
-// Persists a freshly-generated estimate. The estimate's tax_rate/margin_rate are set BEFORE the
-// line items so the `update_estimate_totals` trigger (fires on line_item insert) computes the
-// subtotal/tax/margin/total itself — keeping the DB the single source of truth for money.
+// Persists a freshly-generated estimate. The estimate's rates are set BEFORE the line items so
+// the `update_estimate_totals` trigger (fires on line_item insert) computes subtotal/tax/total
+// itself — keeping the DB the single source of truth for money.
+// Embedded-markup scheme: unit_price arrives FINAL (markup already folded in by the app), so
+// margin_rate/margin_percent are written as 0 (the trigger adds nothing) and the applied % is
+// kept in markup_percent only as metadata to recover basePrice when editing.
 export async function createJob(input: {
   userId: string;
   clientId: string | null; // null = client-less draft (client is optional)
@@ -190,8 +193,9 @@ export async function createJob(input: {
       service_type: serviceType,
       tax_rate: input.taxRate,
       tax_percent: input.taxRate,
-      margin_rate: input.marginRate,
-      margin_percent: input.marginRate,
+      margin_rate: 0,
+      margin_percent: 0,
+      markup_percent: input.marginRate,
       confidence: input.confidence ?? 0,
       ai_confidence_score: input.confidence ?? null,
       title,
@@ -235,9 +239,10 @@ export async function createJob(input: {
 // Not transactional (PostgREST): if the insert fails after the delete the estimate is left
 // empty on the server, but the app still holds the items in memory so Save can be retried.
 export async function updateEstimateItems(estimateId: string, items: LineItem[], taxRate: number, marginRate: number): Promise<void> {
+  // embedded markup: prices are final → margin zeroed for the trigger, % kept as metadata
   const { error: rErr } = await supabase
     .from('estimates')
-    .update({ tax_rate: taxRate, tax_percent: taxRate, margin_rate: marginRate, margin_percent: marginRate })
+    .update({ tax_rate: taxRate, tax_percent: taxRate, margin_rate: 0, margin_percent: 0, markup_percent: marginRate })
     .eq('id', estimateId);
   if (rErr) throw rErr;
   const { error: dErr } = await supabase.from('line_items').delete().eq('estimate_id', estimateId);
@@ -483,7 +488,9 @@ export async function uploadCompanyLogo(userId: string, uri: string): Promise<st
 
 /* ---------------- Job detail (real estimate + line items + invoice) ---------------- */
 export type JobDetail = {
-  estimate: { id: string; total: number; subtotal: number; taxRate: number; tax: number; marginRate: number; status: string; notes: string | null } | null;
+  // markupPercent = new scheme (% already embedded in unit prices); legacyMarginRate = old scheme
+  // (margin summed on top by the trigger) — kept so Edit can fold it into the prices.
+  estimate: { id: string; total: number; subtotal: number; taxRate: number; tax: number; markupPercent: number; legacyMarginRate: number; status: string; notes: string | null } | null;
   items: LineItem[];
   invoice: { id: string; number: string; status: string; subtotal: number; taxRate: number; tax: number; total: number; created: string; depositPercent: number | null } | null;
   client: { name: string; addr: string; city: string; email: string; phone: string } | null;
@@ -494,7 +501,7 @@ export type JobDetail = {
 export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
   const estRes = await supabase
     .from('estimates')
-    .select('id, total, grand_total, subtotal, tax_rate, tax_amount, margin_rate, status, notes, estimate_notes')
+    .select('id, total, grand_total, subtotal, tax_rate, tax_amount, margin_rate, markup_percent, status, notes, estimate_notes')
     .eq('project_id', projectId)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -503,6 +510,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
   const est = estRes.data;
 
   let items: LineItem[] = [];
+  const markupPct = Number(est?.markup_percent ?? 0);
   if (est?.id) {
     const liRes = await supabase
       .from('line_items')
@@ -510,15 +518,20 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
       .eq('estimate_id', est.id)
       .order('item_order', { ascending: true });
     if (liRes.error) throw liRes.error;
-    items = (liRes.data || []).map((it: any, i: number) => ({
-      id: i,
-      cat: it.category || 'Item',
-      desc: it.description || '',
-      qty: Number(it.quantity) || 0,
-      unit: it.unit || 'job',
-      price: Number(it.unit_price) || 0,
-      taxable: it.taxable !== false,
-    }));
+    items = (liRes.data || []).map((it: any, i: number) => {
+      const price = Number(it.unit_price) || 0;
+      return {
+        id: i,
+        cat: it.category || 'Item',
+        desc: it.description || '',
+        qty: Number(it.quantity) || 0,
+        unit: it.unit || 'job',
+        price,
+        // new scheme: unit_price carries the markup — recover the pre-markup base for editing
+        ...(markupPct > 0 ? { basePrice: deriveBase(price, markupPct) } : {}),
+        taxable: it.taxable !== false,
+      };
+    });
   }
 
   const invRes = await supabase
@@ -554,7 +567,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
 
   return {
     estimate: est
-      ? { id: est.id, total: Number(est.total ?? est.grand_total ?? 0), subtotal: Number(est.subtotal ?? 0), taxRate: Number(est.tax_rate ?? 0), tax: Number(est.tax_amount ?? 0), marginRate: Number(est.margin_rate ?? 0), status: est.status, notes: est.notes ?? est.estimate_notes ?? null }
+      ? { id: est.id, total: Number(est.total ?? est.grand_total ?? 0), subtotal: Number(est.subtotal ?? 0), taxRate: Number(est.tax_rate ?? 0), tax: Number(est.tax_amount ?? 0), markupPercent: markupPct, legacyMarginRate: Number(est.margin_rate ?? 0), status: est.status, notes: est.notes ?? est.estimate_notes ?? null }
       : null,
     items,
     invoice: inv

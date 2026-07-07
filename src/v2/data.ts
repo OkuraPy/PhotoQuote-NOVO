@@ -18,9 +18,26 @@ export type LineItem = {
   desc: string;
   qty: number;
   unit: string;
-  price: number;
+  price: number; // final unit price (markup already embedded when marginRate > 0)
+  basePrice?: number; // pre-markup unit price; absent = price IS the base
   taxable: boolean;
 };
+
+export const round2 = (x: number) => Math.round(x * 100) / 100;
+
+// Embedded markup: fold `pct`% into each unit price (same idea as the regional multiplier).
+// Always recomputes from basePrice, so re-applying with a different pct never compounds.
+export function applyMarkup(items: LineItem[], pct: number): LineItem[] {
+  return items.map((it) => {
+    const base = it.basePrice ?? it.price;
+    return { ...it, basePrice: base, price: round2(base * (1 + pct / 100)) };
+  });
+}
+
+// Inverse of applyMarkup for a single price: recover the pre-markup base from a FINAL price.
+// Used when a manual edit types the final price and when re-hydrating stored items
+// (unit_price is final; estimates.markup_percent says what was embedded).
+export const deriveBase = (price: number, pct: number) => round2(price / (1 + pct / 100));
 
 // A captured/picked photo waiting to be analyzed (local file uri from the camera or library).
 export type Photo = { uri: string };

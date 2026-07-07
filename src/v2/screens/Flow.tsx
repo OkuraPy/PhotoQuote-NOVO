@@ -9,7 +9,7 @@ import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } fr
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { buildStarterEstimate, calcTotals, fmt, LineItem, SERVICE_TYPES, split } from '../data';
+import { applyMarkup, buildStarterEstimate, calcTotals, deriveBase, fmt, LineItem, SERVICE_TYPES, split } from '../data';
 import { MAX_AI_PHOTOS, requestEstimate, transcribeAudio } from '../lib/ai';
 import { createClient, createJob, fetchClients, fetchCompanyProfile, getMyLocation, lookupZip, Region, updateEstimateItems } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -68,6 +68,7 @@ registerStrings({
   'flow.taxRate': { en: 'Tax rate', es: 'Tasa de impuesto', pt: 'Taxa de imposto' },
   'flow.internalMarkup': { en: 'Internal markup', es: 'Margen interno', pt: 'Margem interna' },
   'flow.hiddenFromClient': { en: 'Hidden from client', es: 'Oculto para el cliente', pt: 'Oculto do cliente' },
+  'flow.markupIncluded': { en: 'Markup included in item prices', es: 'Margen incluido en los precios de los elementos', pt: 'Margem incluída nos preços dos itens' },
   'flow.continue': { en: 'Continue', es: 'Continuar', pt: 'Continuar' },
   'flow.saveChanges': { en: 'Save changes', es: 'Guardar cambios', pt: 'Salvar alterações' },
   'flow.newLineItem': { en: 'New line item', es: 'Nuevo elemento', pt: 'Novo item' },
@@ -523,11 +524,17 @@ export function EstimateScreen({ go, back, params }: NavProp) {
     const p = companyProfile as any;
     if (needsAI && p && !defaultsRef.current) {
       defaultsRef.current = true;
-      const patch: Partial<{ taxRate: number; marginRate: number }> = {};
-      // only seed while still at the initial defaults — never clobber a manual edit made before the profile loaded
-      if (store.taxRate === 8.25 && p.default_tax_percent != null) patch.taxRate = Number(p.default_tax_percent);
-      if (store.marginRate === 0 && p.default_margin_percent != null) patch.marginRate = Number(p.default_margin_percent);
-      if (Object.keys(patch).length) up(patch);
+      up((st) => {
+        const patch: Partial<{ taxRate: number; marginRate: number; items: LineItem[] }> = {};
+        // only seed while still at the initial defaults — never clobber a manual edit made before the profile loaded
+        if (st.taxRate === 8.25 && p.default_tax_percent != null) patch.taxRate = Number(p.default_tax_percent);
+        if (st.marginRate === 0 && p.default_margin_percent != null) {
+          patch.marginRate = Number(p.default_margin_percent);
+          // AI may have landed before the profile — fold the default markup into the existing prices
+          if (st.items.length) patch.items = applyMarkup(st.items, patch.marginRate);
+        }
+        return patch;
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyProfile, needsAI]);
@@ -537,7 +544,8 @@ export function EstimateScreen({ go, back, params }: NavProp) {
     setReason('');
     const r = await requestEstimate({ photos: store.photos, services: store.svcs, description: store.descText, regionMult: store.regionMult });
     if (r.ok) {
-      up((st) => ({ items: r.items, confidence: r.confidence, aiNotes: r.notes, aiSig: (st.photos || []).map((p) => p.uri).join('|') }));
+      // markup goes INTO the unit prices (region is already applied by requestEstimate)
+      up((st) => ({ items: applyMarkup(r.items, st.marginRate ?? 0), confidence: r.confidence, aiNotes: r.notes, aiSig: (st.photos || []).map((p) => p.uri).join('|') }));
       setPhase('done');
     } else if ('error' in r) {
       setReason(r.error);
@@ -559,7 +567,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
   const analyzing = phase === 'analyzing';
   const conf = Math.round(store.confidence || 0);
   const showEstimate = phase === 'done' || analyzing;
-  const t = calcTotals(items, taxRate, marginRate);
+  const t = calcTotals(items, taxRate, 0); // markup is already embedded in the unit prices
   const [d, c] = split(t.total);
   // edit mode: persist the edited items back into the SAME estimate (trigger recomputes totals)
   const queryClient = useQueryClient();
@@ -579,10 +587,13 @@ export function EstimateScreen({ go, back, params }: NavProp) {
     }
   };
 
+  // manual edit types the FINAL price — derive the pre-markup base so the stepper stays exact
+  const priced = (patch: Partial<LineItem>): Partial<LineItem> =>
+    patch.price !== undefined ? { ...patch, basePrice: deriveBase(patch.price, marginRate) } : patch;
   const updateItem = (id: number, patch: Partial<LineItem>) => up((st) => ({ items: st.items.map((it) => (it.id === id ? { ...it, ...patch } : it)) }));
   const removeItem = (id: number) => up((st) => ({ items: st.items.filter((it) => it.id !== id), editing: null }));
   const addItem = () => {
-    const it: LineItem = { id: Date.now(), cat: 'Labor', desc: tr('flow.newLineItem'), qty: 1, unit: 'ea', price: 0, taxable: false };
+    const it: LineItem = { id: Date.now(), cat: 'Labor', desc: tr('flow.newLineItem'), qty: 1, unit: 'ea', price: 0, basePrice: 0, taxable: false };
     up((st) => ({ items: [...st.items, it], editing: it }));
   };
 
@@ -620,7 +631,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
               <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 3, lineHeight: 18 }}>{reason}</Text>
               <Row style={{ gap: 10, marginTop: 12 }}>
                 <Btn variant="soft" sm icon="sparkles" title={tr('flow.tryAgain')} onPress={runAI} style={{ paddingHorizontal: 16 }} />
-                <Btn variant="ghost" sm title={tr('flow.starterEstimate')} onPress={() => { up((st) => ({ items: buildStarterEstimate(st.svcs, st.regionMult), confidence: 0, aiNotes: tr('flow.starterEstimateNote'), aiSig: (st.photos || []).map((p) => p.uri).join('|') })); setPhase('done'); }} style={{ paddingHorizontal: 16 }} />
+                <Btn variant="ghost" sm title={tr('flow.starterEstimate')} onPress={() => { up((st) => ({ items: applyMarkup(buildStarterEstimate(st.svcs, st.regionMult), st.marginRate ?? 0), confidence: 0, aiNotes: tr('flow.starterEstimateNote'), aiSig: (st.photos || []).map((p) => p.uri).join('|') })); setPhase('done'); }} style={{ paddingHorizontal: 16 }} />
               </Row>
             </View>
           </Card>
@@ -716,9 +727,19 @@ export function EstimateScreen({ go, back, params }: NavProp) {
                   <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted }}>{tr('flow.hiddenFromClient')}</Text>
                 </View>
               </Row>
-              <Stepper value={`${marginRate}%`} onMinus={() => up({ marginRate: Math.max(0, marginRate - 5) })} onPlus={() => up({ marginRate: marginRate + 5 })} />
+              <Stepper
+                value={`${marginRate}%`}
+                onMinus={() => up((st) => { const next = Math.max(0, st.marginRate - 5); return { marginRate: next, items: applyMarkup(st.items, next) }; })}
+                onPlus={() => up((st) => { const next = st.marginRate + 5; return { marginRate: next, items: applyMarkup(st.items, next) }; })}
+              />
             </Between>
           </Card>
+        ) : null}
+        {!analyzing && marginRate > 0 ? (
+          <Row style={{ gap: 6, marginTop: 10, paddingHorizontal: 6 }}>
+            <Icon name="lock" size={12} color={colors.faint} />
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted }}>{tr('flow.markupIncluded')}</Text>
+          </Row>
         ) : null}
         </>
         ) : null}
@@ -735,7 +756,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
         {editing ? (
           <ItemEditor
             it={editing}
-            onChange={(p) => { updateItem(editing.id, p); up({ editing: { ...editing, ...p } }); }}
+            onChange={(p) => { const q = priced(p); updateItem(editing.id, q); up({ editing: { ...editing, ...q } }); }}
             onRemove={() => removeItem(editing.id)}
             onDone={() => up({ editing: null })}
           />

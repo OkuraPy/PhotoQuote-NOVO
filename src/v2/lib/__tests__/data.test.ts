@@ -1,8 +1,91 @@
-import { buildStarterEstimate, calcTotals, deriveStage } from '../../data';
+import { applyMarkup, buildStarterEstimate, calcTotals, deriveBase, deriveStage } from '../../data';
 import type { LineItem } from '../../data';
 
 const item = (over: Partial<LineItem> = {}): LineItem => ({
   id: 1, cat: 'Labor', desc: '', qty: 1, unit: 'hr', price: 100, taxable: false, ...over,
+});
+
+describe('applyMarkup', () => {
+  it('pct 0 is identity on prices (but records the base)', () => {
+    const [out] = applyMarkup([item({ price: 65 })], 0);
+    expect(out.price).toBe(65);
+    expect(out.basePrice).toBe(65);
+  });
+
+  it('folds the pct into the unit price, rounded to cents', () => {
+    const [a, b] = applyMarkup([item({ price: 65 }), item({ price: 4.5 })], 15);
+    expect(a.price).toBe(74.75); // 65 * 1.15
+    expect(a.basePrice).toBe(65);
+    expect(b.price).toBe(5.18); // 4.5 * 1.15 = 5.175 → 5.18
+    expect(b.basePrice).toBe(4.5);
+  });
+
+  it('re-applying with a different pct does NOT compound (recomputes from basePrice)', () => {
+    const once = applyMarkup([item({ price: 100 })], 15);
+    const [again] = applyMarkup(once, 20);
+    expect(again.basePrice).toBe(100);
+    expect(again.price).toBe(120); // from the base, not from 115
+  });
+
+  it('an item without basePrice gains one; existing basePrice is kept', () => {
+    const [withBase] = applyMarkup([item({ price: 115, basePrice: 100 })], 10);
+    expect(withBase.basePrice).toBe(100);
+    expect(withBase.price).toBe(110);
+    const src = item({ price: 80 });
+    const [fresh] = applyMarkup([src], 25);
+    expect(fresh.basePrice).toBe(80);
+    expect(fresh.price).toBe(100);
+    expect(src.price).toBe(80); // pure: input untouched
+    expect(src.basePrice).toBeUndefined();
+  });
+});
+
+describe('deriveBase (re-hydration: stored final price + markup_percent → base)', () => {
+  it('recovers the pre-markup base from a final price', () => {
+    expect(deriveBase(74.75, 15)).toBe(65);
+    expect(deriveBase(120, 20)).toBe(100);
+    expect(deriveBase(65, 0)).toBe(65); // pct 0 is identity
+  });
+
+  it('round-trips exactly: markup → save → re-hydrate → markup never drifts a cent', () => {
+    const bases = [0.01, 4.5, 33.33, 65, 69.57, 99.99, 123.45, 1000];
+    const pcts = [0, 5, 7.5, 10, 15, 20, 33, 50, 100];
+    for (const base of bases) {
+      for (const pct of pcts) {
+        const [made] = applyMarkup([item({ price: base })], pct);
+        // persistence keeps made.price (final) + pct; Edit derives the base back…
+        expect(deriveBase(made.price, pct)).toBe(base);
+        // …and a later stepper pass recomputes the SAME final from that derived base
+        const [again] = applyMarkup([item({ price: made.price, basePrice: deriveBase(made.price, pct) })], pct);
+        expect(again.price).toBe(made.price);
+      }
+    }
+  });
+
+  it('manual edit types the FINAL price; changing the markup recomputes from the derived base', () => {
+    // user types $80 at 15% markup → base 69.57; stepper to 20% → 83.48 (from the base, not from 80)
+    const base = deriveBase(80, 15);
+    expect(base).toBe(69.57);
+    const [out] = applyMarkup([item({ price: 80, basePrice: base })], 20);
+    expect(out.price).toBe(83.48);
+  });
+});
+
+describe('legacy margin fold (margin-on-top estimate opened in Edit)', () => {
+  it('folding via applyMarkup preserves the legacy total when per-item rounding is clean', () => {
+    const items = [item({ qty: 2, price: 100, taxable: true }), item({ id: 2, qty: 10, price: 50 })];
+    const legacy = calcTotals(items, 8.25, 20); // old scheme: margin on top of sub+tax → 859.80
+    const folded = calcTotals(applyMarkup(items, 20), 8.25, 0); // new scheme: embedded, margin 0
+    expect(folded.total).toBeCloseTo(legacy.total, 8);
+    expect(folded.margin).toBe(0);
+  });
+
+  it('per-item cent rounding drifts the total at most half a cent × total quantity', () => {
+    const items = [item({ qty: 100, price: 33.33 })]; // 33.33 × 1.2 = 39.996 → 40.00/unit
+    const legacy = calcTotals(items, 0, 20).total; // 3999.60
+    const folded = calcTotals(applyMarkup(items, 20), 0, 0).total; // 4000.00
+    expect(Math.abs(folded - legacy)).toBeLessThanOrEqual(0.005 * 100);
+  });
 });
 
 describe('calcTotals', () => {
