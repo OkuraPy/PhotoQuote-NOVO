@@ -18,7 +18,8 @@ If they do NOT (e.g. landscape, food, people, electronics, random scene), reply 
 {"rejected":true,"reason":"<short reason>"}
 Otherwise, base the estimate on what you actually SEE. Reply ONLY with valid JSON:
 {"lineItems":[{"category":"Labor"|"Materials"|"Service"|"Equipment","description":"<specific item>","quantity":<number>,"unit":"<hr|sq|gal|ls|ea|bag|...>","unitPrice":<number USD>,"taxable":<boolean>}],"confidence":<0-100>,"notes":"<what you saw / assumptions>"}
-Rules: 4-10 line items covering prep, main work, finishing and cleanup. Materials are usually taxable, labor usually not. Add items for visible damage (water, mold, cracks). Use realistic US prices. Output JSON only.`;
+Rules: 4-10 line items covering prep, main work, finishing and cleanup. Materials are usually taxable, labor usually not. Add items for visible damage (water, mold, cracks). Use realistic US prices.
+The estimate goes to a US client: ALWAYS write every lineItem field (description, unit) in US English — even when the contractor's notes are in Portuguese, Spanish or any other language. Write "notes" in the SAME language as the contractor's notes (English if none). Output JSON only.`;
 
 // user id from the (already Supabase-verified) JWT, for the ai_jobs log
 function userIdFromJwt(req: Request): string | null {

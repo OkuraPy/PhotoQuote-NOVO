@@ -4,6 +4,16 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-07 10:40] — fix: v2 — IA gera itens SEMPRE em inglês (regra do dono: cliente final é americano)
+- **O que mudou**: `ai-estimate` v6 — instrução fixa no prompt: os lineItems (description/unit) saem SEMPRE em inglês
+  americano, independente do idioma da anotação/áudio do empreiteiro; a `notes` interna da IA sai no MESMO idioma do
+  empreiteiro. Fecha o furo: brasileiro ditando em PT podia receber itens em português no PDF do cliente americano.
+  Decisão registrada: documentos do cliente (PDF/fatura/contrato) ficam SEMPRE em inglês — descartada a ideia de
+  localizar o buildHtml (P2.6 do adendo).
+- **Testado AO VIVO**: descrição em português + foto real → 7 itens em inglês + notes em português (e a IA ainda avisou
+  honestamente que a foto não batia com a descrição). Deploy v6 com verify_jwt mantido.
+- **Arquivos**: `supabase/functions/ai-estimate/index.ts`
+
 ### [2026-07-07 10:15] — docs: ADENDO 07/07 no V2_100_PLAN — diagnóstico de lançamento (Android, fluxo, faturas)
 - **O que mudou**: `docs/V2_100_PLAN.md` ganhou o adendo com os 3 diagnósticos pedidos pelo dono: **F10 Android-ready**
   (2 blockers certos: botão voltar SAI DO APP — stack caseiro sem BackHandler; falta `android.package` — build nem gera;
