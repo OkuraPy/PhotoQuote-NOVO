@@ -44,6 +44,7 @@ registerStrings({
   // CLIENT, and client-facing output is always English (owner's rule). See CLIENT_SHARE below.
   'job.yourCompany': { en: 'Your company', es: 'Tu empresa', pt: 'Sua empresa' },
   'job.zeroRow': { en: 'Every payment needs an amount above $0.', es: 'Cada pago necesita un monto mayor a $0.', pt: 'Cada pagamento precisa de um valor acima de $0.' },
+  'job.sendQuote': { en: 'Send quote', es: 'Enviar cotización', pt: 'Enviar orçamento' },
   // QuoteTab
   'job.photos': { en: 'Photos · {n}', es: 'Fotos · {n}', pt: 'Fotos · {n}' },
   'job.lineItems': { en: 'Line items', es: 'Conceptos', pt: 'Itens' },
@@ -568,6 +569,7 @@ export function JobScreen({ go, back, params }: NavProp) {
                   }
                 : undefined
             }
+            onSend={est && projectId && !closed ? () => requireCompany(() => up({ sheet: true })) : undefined}
           />
         )}
         {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} company={company} invoice={inv} quoteTotal={est?.total} genning={savingPlan} onGen={openGenerateInvoice} onRecordPayment={() => setPaySheet(true)} onEditPlan={() => setPlanSheet('edit')} setSheet={(b: boolean) => (b ? requireCompany(() => up({ sheet: true })) : up({ sheet: false }))} />}
@@ -596,7 +598,13 @@ export function JobScreen({ go, back, params }: NavProp) {
             // invoice PDF/text: the payment plan + what's already paid (English by design)
             payment:
               kind === 'invoice' && inv && invoicePlan
-                ? { rows: planRows(invoicePlan, inv.total).map((r) => ({ label: r.label, amount: r.amount, due: r.dueDate })), paid: inv.amountPaid, balance }
+                ? {
+                    rows: planRows(invoicePlan, inv.total).map((r) => ({ label: r.label, amount: r.amount, due: r.dueDate })),
+                    paid: inv.amountPaid,
+                    balance,
+                    // itemized ledger (field feedback 07/07): the doc should show WHAT was received
+                    received: inv.payments.map((p) => ({ date: p.paidAt, method: p.method, amount: p.amount })),
+                  }
                 : undefined,
           });
           if (kind === 'quote') setEstimateStatus('Sent', 'Sent');
@@ -666,7 +674,7 @@ function TotRow({ label, value, bold, color }: { label: string; value: string; b
   );
 }
 
-function QuoteTab({ items, totals, markupPercent = 0, go, photos, onEdit }: { items: LineItem[]; totals: Totals; markupPercent?: number; go: NavProp['go']; photos: string[]; onEdit?: () => void }) {
+function QuoteTab({ items, totals, markupPercent = 0, go, photos, onEdit, onSend }: { items: LineItem[]; totals: Totals; markupPercent?: number; go: NavProp['go']; photos: string[]; onEdit?: () => void; onSend?: () => void }) {
   const t = useT();
   return (
     <View style={{ marginTop: 16 }}>
@@ -710,6 +718,11 @@ function QuoteTab({ items, totals, markupPercent = 0, go, photos, onEdit }: { it
           <Text style={{ fontFamily: fonts.num, fontSize: 24, color: colors.ink, letterSpacing: -0.5 }}>{fmt(totals.total)}</Text>
         </Between>
       </Card>
+      {onSend ? (
+        // always available: the quote can be re-sent after the first send or after an edit
+        // (field feedback 07/07 — the NEXT card moves on and used to strand the send action)
+        <Btn title={t('job.sendQuote')} icon="send" variant="ghost" onPress={onSend} style={{ marginTop: 12 }} />
+      ) : null}
     </View>
   );
 }

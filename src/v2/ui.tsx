@@ -41,13 +41,13 @@ registerStrings({
   'ui.sendTitle.contract': { en: 'Send contract', es: 'Enviar contrato', pt: 'Enviar contrato' },
   'ui.sendSub': { en: 'Pick how you want to deliver it.', es: 'Elige cómo quieres enviarlo.', pt: 'Escolha como quer enviar.' },
   'ui.send.email': { en: 'Email', es: 'Correo', pt: 'E-mail' },
-  'ui.send.emailDesc': { en: 'Send a link + PDF to the client', es: 'Envía un enlace + PDF al cliente', pt: 'Envie um link + PDF ao cliente' },
+  'ui.send.emailDesc': { en: 'Opens your email app with the details as text', es: 'Abre tu app de correo con los detalles en texto', pt: 'Abre seu app de e-mail com os detalhes em texto' },
   'ui.send.sms': { en: 'SMS', es: 'SMS', pt: 'SMS' },
-  'ui.send.smsDesc': { en: 'Text a secure link to view & approve', es: 'Envía un enlace seguro por SMS para ver y aprobar', pt: 'Mande um link seguro por SMS para ver e aprovar' },
+  'ui.send.smsDesc': { en: 'Text message with the details', es: 'Mensaje de texto con los detalles', pt: 'Mensagem de texto com os detalhes' },
   'ui.send.whatsapp': { en: 'WhatsApp', es: 'WhatsApp', pt: 'WhatsApp' },
   'ui.send.whatsappDesc': { en: 'Share via WhatsApp message', es: 'Comparte por mensaje de WhatsApp', pt: 'Compartilhe por mensagem do WhatsApp' },
-  'ui.send.pdf': { en: 'Save PDF', es: 'Guardar PDF', pt: 'Salvar PDF' },
-  'ui.send.pdfDesc': { en: 'Export a branded PDF document', es: 'Exporta un PDF con tu marca', pt: 'Exporte um PDF com sua marca' },
+  'ui.send.pdf': { en: 'Send as PDF', es: 'Enviar como PDF', pt: 'Enviar como PDF' },
+  'ui.send.pdfDesc': { en: 'Creates the PDF and opens sharing — WhatsApp, email, save…', es: 'Crea el PDF y abre el compartir — WhatsApp, correo, guardar…', pt: 'Cria o PDF e abre o compartilhar — WhatsApp, e-mail, salvar…' },
 });
 
 /* ============================ shared store ============================ */
@@ -555,11 +555,13 @@ export function Sheet({ open, onClose, title, sub, children }: { open: boolean; 
 export function SendSheet({ open, onClose, what = 'quote', onSent }: { open: boolean; onClose: () => void; what?: string; onSent?: (t: string) => void }) {
   const tr = useT();
   // key = the logical value passed to onSent/sendDoc (must stay English); label/desc are translated
+  // PDF first: it's the document clients expect (field feedback 07/07) — the share sheet it opens
+  // is the only way to attach a FILE (wa.me/mailto links are text-only by platform design)
   const opts: { key: string; ico: string; col: string; bg: string; k: string }[] = [
+    { key: 'Save PDF', ico: 'pdf', col: colors.primary, bg: colors.primaryTint, k: 'pdf' },
+    { key: 'WhatsApp', ico: 'whatsapp', col: colors.success, bg: colors.successTint, k: 'whatsapp' },
     { key: 'Email', ico: 'mail', col: colors.info, bg: colors.infoTint, k: 'email' },
     { key: 'SMS', ico: 'msg', col: colors.success, bg: colors.successTint, k: 'sms' },
-    { key: 'WhatsApp', ico: 'whatsapp', col: colors.success, bg: colors.successTint, k: 'whatsapp' },
-    { key: 'Save PDF', ico: 'pdf', col: colors.muted, bg: '#EEF1F4', k: 'pdf' },
   ];
   return (
     <Sheet open={open} onClose={onClose} title={tr('ui.sendTitle.' + what)} sub={tr('ui.sendSub')}>

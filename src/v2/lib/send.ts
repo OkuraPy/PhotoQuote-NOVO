@@ -27,8 +27,13 @@ export type SendData = {
   client: { name?: string; email?: string; phone?: string; addr?: string; city?: string } | null;
   items: { cat: string; desc: string; qty: number; unit: string; price: number; taxable: boolean }[];
   totals: { subtotal: number; tax: number; total: number; taxRate: number };
-  // invoice payment plan + ledger summary (labels/dates already English — planRows output)
-  payment?: { rows: { label: string; amount: number; due: string | null }[]; paid: number; balance: number };
+  // invoice payment plan + ledger (labels/dates already English — planRows/DB method keys)
+  payment?: {
+    rows: { label: string; amount: number; due: string | null }[];
+    paid: number;
+    balance: number;
+    received?: { date: string; method: string | null; amount: number }[];
+  };
 };
 
 function buildHtml(d: SendData): string {
@@ -85,6 +90,14 @@ function buildHtml(d: SendData): string {
       .join('')}</table>`
         : ''
     }
+    ${
+      d.payment?.received?.length
+        ? `<div class="lab" style="margin-top:24px">Payments received</div>
+    <table>${d.payment.received
+      .map((p) => `<tr><td><div class="desc">${escapeHtml(dueTxt(p.date))}${p.method ? `<span class="muted"> · ${escapeHtml(p.method)}</span>` : ''}</div></td><td class="amt ok">${fmt(p.amount)}</td></tr>`)
+      .join('')}</table>`
+        : ''
+    }
     <div class="tot">
       <div class="row"><span>Subtotal</span><b>${fmt(d.totals.subtotal)}</b></div>
       <div class="row"><span>Tax (${escapeHtml(d.totals.taxRate)}%)</span><b>${fmt(d.totals.tax)}</b></div>
@@ -106,6 +119,10 @@ function buildText(d: SendData): string {
     ? `\n${
         d.payment.rows.length > 1
           ? '\nPayment schedule:\n' + d.payment.rows.map((r) => `• ${r.label} — ${fmt(r.amount)} (${r.due ? 'due ' + dueTxt(r.due) : 'upon completion'})`).join('\n') + '\n'
+          : ''
+      }${
+        d.payment.received?.length
+          ? 'Payments received:\n' + d.payment.received.map((p) => `• ${dueTxt(p.date)}${p.method ? ' · ' + p.method : ''} — ${fmt(p.amount)}`).join('\n') + '\n'
           : ''
       }${d.payment.paid > 0 ? `Paid ${fmt(d.payment.paid)} · ` : ''}Balance due ${fmt(d.payment.balance)}`
     : '';

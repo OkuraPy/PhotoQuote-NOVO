@@ -4,6 +4,29 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-08 02:15] — fix: v2 — HOTFIX do feedback real (B1 fotos/B2 reenvio/B3 PDF/M1 ledger) → build 29
+- **B1 — FOTOS NÃO SUBIAM (raiz achada e morta SEM precisar de app novo)**: reproduzi o 400 dos logs com
+  curl + JWT real → **403 RLS embrulhado em 400, SÓ com `x-upsert: true`** (sem upsert: 200 nos 3 buckets).
+  Causa: o upsert do storage precisa de policy de **SELECT** pra enxergar a linha existente, e
+  project-photos/phase-photos/company-logos só tinham INSERT/UPDATE/DELETE → **upload do app NUNCA funcionou**
+  (createJob engolia o erro em silêncio — explica os 0/56 photo_urls da auditoria de 16/06; a ProgressTab
+  só tornou o erro visível). Fix: migration `storage_select_own_photos_upsert_fix` (3 policies SELECT
+  "own", aditiva/re-rodável) **APLICADA em prod e PROVADA** (upsert 2× no mesmo path → 200/200; path fixo
+  photo_0.jpg → 200; sondas deletadas). **O build 28 do Gladson passou a subir fotos na hora.**
+- **B2 — reenvio de quote**: QuoteTab ganhou botão persistente "Send quote" (ghost, ícone send) abaixo dos
+  totais — disponível sempre que há estimate salvo e o job não está fechado (guard de empresa aplicado).
+  Fim do beco: enviou 1×/editou → reenvia pra outro canal quando quiser.
+- **B3 — PDF no envio**: opção do SendSheet renomeada "Save PDF"→**"Send as PDF"** (cria o PDF e abre o
+  compartilhar do sistema — único jeito de ANEXAR arquivo; wa.me/mailto são texto por design da plataforma),
+  movida pra PRIMEIRA posição com cor primária; descrições de Email/SMS corrigidas (prometiam "link+PDF"
+  que nunca existiu).
+- **M1 — ledger no documento**: `SendData.payment.received[]` (data · método · valor) → PDF ganha seção
+  "Payments received" (valores em verde) e o texto idem, antes do Paid/Balance. onSent monta do
+  inv.payments (métodos já em inglês no banco).
+- **Arquivos**: `src/v2/ui.tsx` (SendSheet), `src/v2/screens/Job.tsx` (QuoteTab onSend + received + i18n),
+  `src/v2/lib/send.ts`, migration `20260708xxxx_storage_select_own_photos_upsert_fix.sql`. tsc limpo,
+  jest 67/67. **Build 29** na sequência (dono acordado aguardando).
+
 ### [2026-07-07 21:20] — fix: v2 — **CAUSA RAIZ DA SAGA (builds 18-27) ACHADA E MORTA**: expo-asset@56 fantasma
 - **O que mudou**: o build 27 (ErrorUtils destravado) PINTOU O ERRO REAL na tela do dono:
   `Error: Cannot find native module 'ExpoAsset'`. Forense: o xcode log da EAS confirma que o pod ExpoAsset
