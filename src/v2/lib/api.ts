@@ -453,7 +453,11 @@ export async function recordInvoicePayment(
 
 // Persist a status change to the DB (replaces the old in-memory-only stage override).
 export async function updateEstimateStatus(estimateId: string, status: string) {
-  const { error } = await supabase.from('estimates').update({ status }).eq('id', estimateId);
+  // 'Sent' only stamps a quote the client hasn't approved yet — re-sending a copy must never
+  // regress Approved/In Progress/Completed back to Sent (mirror of the invoice guard below)
+  let q = supabase.from('estimates').update({ status }).eq('id', estimateId);
+  if (status === 'Sent') q = q.not('status', 'in', '("Approved","In Progress","Completed")');
+  const { error } = await q;
   if (error) throw error;
 }
 

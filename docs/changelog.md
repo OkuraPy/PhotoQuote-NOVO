@@ -4,6 +4,18 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-08 02:50] — fix: v2 — guard anti-regressão de stage no reenvio (achado do revisor) → build 30
+- **O que mudou**: o revisor adversarial auditou o hotfix da madrugada (dono pediu "revisa tudo") e APROVOU
+  com 1 bug real: o novo botão de reenvio (B2) tornava alcançável reenviar um quote **Approved** → o onSent
+  estampava `Sent` de novo sem guard → **pipeline regredia Approved→Sent** no banco e na UI (a fatura já
+  tinha o guard equivalente; o estimate não). Fix em 2 camadas: onSent só estampa 'Sent' quando o stage é
+  Draft/Quoted, e `updateEstimateStatus` ganhou o guard espelho da invoice (update filtrado — 'Sent' não
+  sobrescreve Approved/In Progress/Completed, para qualquer caller). Demais itens do audit: B1/B3/M1 limpos
+  (paths conferidos contra as policies, portal inalterado, i18n coerente, ledger com escape e null-safety);
+  registrados sem ação: PDF cancelado ainda estampa Sent (pré-existente), migration 021000 fora de ordem
+  cronológica vs 090000 (inócuo), send.ts sem teste unitário (dívida). tsc limpo, jest 67/67.
+- **Arquivos**: `src/v2/lib/api.ts`, `src/v2/screens/Job.tsx`. **Build 30** (dono autorizou previamente).
+
 ### [2026-07-08 02:15] — fix: v2 — HOTFIX do feedback real (B1 fotos/B2 reenvio/B3 PDF/M1 ledger) → build 29
 - **B1 — FOTOS NÃO SUBIAM (raiz achada e morta SEM precisar de app novo)**: reproduzi o 400 dos logs com
   curl + JWT real → **403 RLS embrulhado em 400, SÓ com `x-upsert: true`** (sem upsert: 200 nos 3 buckets).

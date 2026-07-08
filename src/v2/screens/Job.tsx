@@ -607,7 +607,9 @@ export function JobScreen({ go, back, params }: NavProp) {
                   }
                 : undefined,
           });
-          if (kind === 'quote') setEstimateStatus('Sent', 'Sent');
+          // stamp 'Sent' only while the quote is still pre-approval — re-sending a copy of an
+          // Approved (or further) quote must not regress the pipeline (api guards this too)
+          if (kind === 'quote' && (stage === 'Draft' || stage === 'Quoted')) setEstimateStatus('Sent', 'Sent');
           else if (kind === 'invoice') setInvoiceStatus('Sent'); // api ignores it unless still 'Unpaid'
         }}
       />
