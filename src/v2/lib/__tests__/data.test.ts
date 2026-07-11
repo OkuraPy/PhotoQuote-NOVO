@@ -1,5 +1,5 @@
-import { applyMarkup, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, homeMetrics } from '../../data';
-import type { ClosedKind, LineItem } from '../../data';
+import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, homeMetrics, jobSiteLine, needsPhaseSync, phaseNameFromItem, seedPhasePlan, syncPhasePlan, toggleDocPhoto } from '../../data';
+import type { ClosedKind, LineItem, SyncPhase } from '../../data';
 import type { Stage } from '../../theme';
 
 const item = (over: Partial<LineItem> = {}): LineItem => ({
@@ -173,6 +173,171 @@ describe('buildStarterEstimate', () => {
   it('guards against a non-positive multiplier', () => {
     const base = buildStarterEstimate(['Painting'], 1);
     expect(buildStarterEstimate(['Painting'], 0)[0].price).toBe(base[0].price);
+  });
+});
+
+describe('jobSiteLine (G5: one-line work address for documents)', () => {
+  it('joins address, city, zip in the contract {{service_address}} order', () => {
+    expect(jobSiteLine({ address: '123 Main St', city: 'Miami, FL', zip: '33101' })).toBe('123 Main St, Miami, FL, 33101');
+  });
+
+  it('skips empty / null / whitespace-only parts', () => {
+    expect(jobSiteLine({ address: '123 Main St', city: '', zip: null })).toBe('123 Main St');
+    expect(jobSiteLine({ address: '  ', city: 'Austin, TX', zip: undefined })).toBe('Austin, TX');
+  });
+
+  it('empty for a missing site or a site with nothing filled', () => {
+    expect(jobSiteLine(null)).toBe('');
+    expect(jobSiteLine(undefined)).toBe('');
+    expect(jobSiteLine({ address: '', city: '', zip: '' })).toBe('');
+  });
+});
+
+describe('balanceAfterPayment (G3: the "Remaining balance" a receipt prints)', () => {
+  const ledger = [
+    { id: 'p1', amount: 500 },
+    { id: 'p2', amount: 100 },
+    { id: 'p3', amount: 340.9 },
+  ];
+
+  it('sums the ledger only up to and including the receipt\'s payment', () => {
+    expect(balanceAfterPayment(940.9, ledger, 'p1')).toBe(440.9);
+    expect(balanceAfterPayment(940.9, ledger, 'p2')).toBe(340.9);
+    expect(balanceAfterPayment(940.9, ledger, 'p3')).toBe(0); // paid in full
+  });
+
+  it('an unknown id falls back to the CURRENT balance (whole ledger)', () => {
+    expect(balanceAfterPayment(1000, ledger, 'nope')).toBe(59.1);
+  });
+
+  it('never goes negative (overpayment / legacy-paid edge)', () => {
+    expect(balanceAfterPayment(400, ledger, 'p2')).toBe(0);
+  });
+
+  it('cent-exact under float dust', () => {
+    expect(balanceAfterPayment(0.3, [{ id: 'a', amount: 0.1 }, { id: 'b', amount: 0.2 }], 'a')).toBe(0.2);
+  });
+});
+
+describe('toggleDocPhoto (G2: curated photos that print on the quote)', () => {
+  const all = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+
+  it('selects and deselects, keeping the photo-strip order', () => {
+    expect(toggleDocPhoto([], all, 'c')).toEqual(['c']);
+    expect(toggleDocPhoto(['c'], all, 'a')).toEqual(['a', 'c']); // strip order, not tap order
+    expect(toggleDocPhoto(['a', 'c'], all, 'c')).toEqual(['a']);
+  });
+
+  it('refuses to grow past the cap (null = no-op tap), but always allows deselecting', () => {
+    const six = ['a', 'b', 'c', 'd', 'e', 'f'];
+    expect(toggleDocPhoto(six, all, 'g')).toBeNull();
+    expect(toggleDocPhoto(six, all, 'f')).toEqual(['a', 'b', 'c', 'd', 'e']);
+  });
+
+  it('rejects a url that is not a project photo and drops stale selections', () => {
+    expect(toggleDocPhoto([], all, 'nope')).toBeNull();
+    // 'gone' no longer exists in the project — silently dropped from the result
+    expect(toggleDocPhoto(['gone', 'b'], all, 'a')).toEqual(['a', 'b']);
+  });
+
+  it('honors a custom cap', () => {
+    expect(toggleDocPhoto(['a'], all, 'b', 1)).toBeNull();
+    expect(toggleDocPhoto([], all, 'b', 1)).toEqual(['b']);
+  });
+});
+
+describe('phases from the quote (G4: seed / sync pure planning)', () => {
+  const ph = (over: Partial<SyncPhase> & { id: string; name: string }): SyncPhase => ({
+    autoSeeded: true, status: 'not_started', hasContent: false, ...over,
+  });
+
+  describe('phaseNameFromItem', () => {
+    it('trims, collapses whitespace and falls back to "Phase"', () => {
+      expect(phaseNameFromItem('  Tear-off   &  disposal ')).toBe('Tear-off & disposal');
+      expect(phaseNameFromItem('')).toBe('Phase');
+      expect(phaseNameFromItem('   ')).toBe('Phase');
+    });
+
+    it('truncates at ~80 chars with an ellipsis', () => {
+      const long = 'x'.repeat(120);
+      const out = phaseNameFromItem(long);
+      expect(out.length).toBe(80);
+      expect(out.endsWith('…')).toBe(true);
+      expect(phaseNameFromItem('x'.repeat(80)).endsWith('…')).toBe(false); // exactly 80 fits
+    });
+  });
+
+  describe('seedPhasePlan', () => {
+    it('one phase per item, in item order', () => {
+      expect(seedPhasePlan([{ desc: 'Demo' }, { desc: 'Paint' }])).toEqual([
+        { name: 'Demo', order: 0 },
+        { name: 'Paint', order: 1 },
+      ]);
+    });
+
+    it('dedupes duplicate names with " (2)", " (3)"…', () => {
+      expect(seedPhasePlan([{ desc: 'Paint' }, { desc: 'Paint' }, { desc: 'Paint' }]).map((p) => p.name)).toEqual(['Paint', 'Paint (2)', 'Paint (3)']);
+    });
+
+    it('never collides with an item literally NAMED like a dedupe suffix', () => {
+      // reviewer finding: ['Paint','Paint','Paint (2)'] used to yield two "Paint (2)" phases
+      const names = seedPhasePlan([{ desc: 'Paint' }, { desc: 'Paint' }, { desc: 'Paint (2)' }]).map((p) => p.name);
+      expect(new Set(names).size).toBe(names.length); // all unique — name-keyed sync stays 1:1
+    });
+
+    it('empty input → empty plan', () => {
+      expect(seedPhasePlan([])).toEqual([]);
+    });
+  });
+
+  describe('syncPhasePlan', () => {
+    const items = [{ desc: 'Demo' }, { desc: 'Paint' }];
+
+    it('removes an untouched auto-seeded phase whose item is gone; creates the missing one', () => {
+      const plan = syncPhasePlan([ph({ id: '1', name: 'Demo' }), ph({ id: '2', name: 'Old work' })], items, 5);
+      expect(plan.removeIds).toEqual(['2']);
+      expect(plan.create).toEqual([{ name: 'Paint', order: 5 }]);
+    });
+
+    it('NEVER removes: manual phases, started phases, or phases with photos/comments', () => {
+      const phases = [
+        ph({ id: 'm', name: 'Manual thing', autoSeeded: false }),
+        ph({ id: 's', name: 'Started', status: 'in_progress' }),
+        ph({ id: 'c', name: 'Has photos', hasContent: true }),
+      ];
+      const plan = syncPhasePlan(phases, items, 0);
+      expect(plan.removeIds).toEqual([]); // none of them, despite none matching an item
+      expect(plan.create.map((c) => c.name)).toEqual(['Demo', 'Paint']);
+    });
+
+    it('an existing phase with the item name blocks the create — even a manual one', () => {
+      const plan = syncPhasePlan([ph({ id: 'x', name: 'Paint', autoSeeded: false })], items, 0);
+      expect(plan.create.map((c) => c.name)).toEqual(['Demo']);
+    });
+
+    it('in-sync = empty plan', () => {
+      const plan = syncPhasePlan([ph({ id: '1', name: 'Demo' }), ph({ id: '2', name: 'Paint' })], items);
+      expect(plan).toEqual({ removeIds: [], create: [] });
+    });
+  });
+
+  describe('needsPhaseSync', () => {
+    const items = [{ desc: 'Demo' }];
+
+    it('false for a purely manual phase list, even when out of sync', () => {
+      expect(needsPhaseSync([ph({ id: 'm', name: 'Other', autoSeeded: false })], items)).toBe(false);
+    });
+
+    it('true when the seeding drifted from the items (either direction)', () => {
+      expect(needsPhaseSync([ph({ id: '1', name: 'Gone item' })], items)).toBe(true); // remove + create
+      expect(needsPhaseSync([ph({ id: '1', name: 'Demo' })], [{ desc: 'Demo' }, { desc: 'New' }])).toBe(true); // create only
+    });
+
+    it('false when everything matches — and a protected drift with no real action stays quiet', () => {
+      expect(needsPhaseSync([ph({ id: '1', name: 'Demo' })], items)).toBe(false);
+      // started phase, item still present → nothing removable, nothing to create → no button
+      expect(needsPhaseSync([ph({ id: '1', name: 'Demo', status: 'in_progress' })], items)).toBe(false);
+    });
   });
 });
 

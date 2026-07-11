@@ -67,6 +67,9 @@ export type V2Store = {
   aSel: any;
   aZip: string;
   aLoc: { city: string; region: string } | null;
+  jobStreet: string; // job-site street address (G5) — GPS pre-fills it, the Attach step edits it
+  custNote: string; // client-facing note that prints on documents (G1) — English when translated
+  custNoteSrc: string; // original pt/es text when custNote came from the AI translation ('' = none)
   regionMult: number; // regional cost multiplier applied to the estimate (1.0 = national avg)
   regionState: string;
   jobTab: string;
@@ -98,6 +101,9 @@ export const FLOW_RESET = {
   aSel: null,
   aZip: '',
   aLoc: null,
+  jobStreet: '',
+  custNote: '',
+  custNoteSrc: '',
   regionMult: 1,
   regionState: '',
 } satisfies Partial<V2Store>;

@@ -86,6 +86,21 @@ export async function requestEstimate(input: {
   };
 }
 
+/* ---------------- Client-note translation (G1b, via Edge Function) ---------------- */
+// pt/es note → professional US-English for the document's "Notes" section. The caller shows the
+// result for review; on any failure it simply keeps the text as written (never blocks saving).
+export async function translateNote(text: string): Promise<{ ok: true; translated: string; detected: string } | { ok: false; error: string }> {
+  const { data, error } = await supabase.functions.invoke('translate-note', { body: { text } });
+  if (error) {
+    const detail = await readErrorBody(error);
+    return { ok: false, error: detail || error.message || 'Could not translate the note.' };
+  }
+  if (data?.error) return { ok: false, error: data.error };
+  const translated = String(data?.translated || '').trim();
+  if (!translated) return { ok: false, error: 'Empty translation.' };
+  return { ok: true, translated, detected: String(data?.detected || '') };
+}
+
 /* ---------------- Voice → text (OpenAI transcription via Edge Function) ---------------- */
 const MIME_BY_EXT: Record<string, string> = { m4a: 'audio/m4a', wav: 'audio/wav', caf: 'audio/x-caf', mp3: 'audio/mpeg', mp4: 'audio/mp4' };
 

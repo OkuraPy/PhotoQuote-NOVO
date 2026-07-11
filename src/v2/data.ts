@@ -42,6 +42,33 @@ export const deriveBase = (price: number, pct: number) => round2(price / (1 + pc
 // A captured/picked photo waiting to be analyzed (local file uri from the camera or library).
 export type Photo = { uri: string };
 
+/* ---------------- Document photos (G2): curated subset of the job photos ---------------- */
+export const DOC_PHOTO_CAP = 6;
+// Toggle one photo in the document selection. The result keeps the PHOTO-STRIP order (selection
+// is re-ordered by `all`), silently drops selections whose photo no longer exists, and refuses
+// to grow past the cap or select an unknown url — returning null so the caller treats the tap
+// as a no-op instead of writing a bad selection.
+export function toggleDocPhoto(selected: string[], all: string[], url: string, cap = DOC_PHOTO_CAP): string[] | null {
+  const sel = new Set(selected.filter((u) => all.includes(u)));
+  if (sel.has(url)) {
+    sel.delete(url);
+  } else {
+    if (!all.includes(url) || sel.size >= cap) return null;
+    sel.add(url);
+  }
+  return all.filter((u) => sel.has(u));
+}
+
+// One-line job-site address for documents (G5) — same field order the contract template's
+// {{service_address}} uses ([address, city, zip]), so every document says the same thing.
+export function jobSiteLine(site?: { address?: string | null; city?: string | null; zip?: string | null } | null): string {
+  if (!site) return '';
+  return [site.address, site.city, site.zip]
+    .map((s) => String(s || '').trim())
+    .filter(Boolean)
+    .join(', ');
+}
+
 // §9 official formula — mirrors the planned calc-totals Edge Function
 export function calcTotals(items: LineItem[], taxRate: number, marginRate = 0) {
   const subtotal = items.reduce((s, i) => s + i.qty * i.price, 0);
@@ -176,6 +203,18 @@ export function planRows(plan: PaymentPlan, total: number): { label: string; amo
 
 export const paidTotal = (payments: { amount: number }[]) =>
   round2(payments.reduce((s, p) => s + (Number(p.amount) || 0), 0));
+
+// Remaining balance right AFTER a given ledger payment (G3 receipts): total − Σ(payments up to
+// and including it, in ledger order). Re-issuing an OLD receipt shows the balance as of that
+// payment, not today's. An unknown id sums the whole ledger (= current balance) — safe fallback.
+export function balanceAfterPayment(total: number, payments: { id: string; amount: number }[], paymentId: string): number {
+  let sum = 0;
+  for (const p of payments) {
+    sum += Number(p.amount) || 0;
+    if (p.id === paymentId) break;
+  }
+  return round2(Math.max(0, total - sum));
+}
 export const invoiceBalance = (total: number, paid: number) => round2(Math.max(0, total - paid));
 
 // Ledger → invoice status. Half-cent epsilon so float dust never blocks "Paid"; nothing recorded
@@ -249,6 +288,66 @@ export function planFromInvoice(inv: {
     depositAmount: round2(inv.depositAmount ?? (inv.depositPercent != null ? (inv.total * inv.depositPercent) / 100 : 0)),
     installments: inv.schedule,
   };
+}
+
+/* ---------------- Phases seeded from the quote (G4) — pure planning helpers ---------------- */
+// A phase's name mirrors its line item's description, single-spaced and truncated to stay
+// readable on the phase card. Empty descriptions fall back to a plain "Phase".
+export const PHASE_NAME_MAX = 80;
+export function phaseNameFromItem(desc: string, max = PHASE_NAME_MAX): string {
+  const clean = String(desc || '').trim().replace(/\s+/g, ' ');
+  if (!clean) return 'Phase';
+  return clean.length <= max ? clean : clean.slice(0, max - 1).trimEnd() + '…';
+}
+
+// One phase per line item, in item order. Duplicate names get " (2)", " (3)"… so the
+// name-keyed sync below can match phases ↔ items one-to-one.
+export function seedPhasePlan(items: { desc: string }[]): { name: string; order: number }[] {
+  const counts = new Map<string, number>();
+  const taken = new Set<string>();
+  return (items || []).map((it, i) => {
+    const base = phaseNameFromItem(it.desc);
+    let n = (counts.get(base) || 0) + 1;
+    let name = n === 1 ? base : `${base} (${n})`;
+    // an item may literally be NAMED "Paint (2)" — keep bumping until the final name is free,
+    // so the name-keyed sync always has a one-to-one mapping
+    while (taken.has(name)) {
+      n += 1;
+      name = `${base} (${n})`;
+    }
+    counts.set(base, n);
+    taken.add(name);
+    return { name, order: i };
+  });
+}
+
+export type SyncPhase = { id: string; name: string; autoSeeded: boolean; status: string; hasContent: boolean };
+// Set-logic sync of the seeded phases with the CURRENT quote items, keyed by NAME:
+//  - remove: auto-seeded ∧ still not_started ∧ no photos/comments ∧ no item with that name anymore
+//  - create: item names that have NO phase (of any kind) with that name yet
+// Everything else — manual phases, started work, phases with photos or comments — is NEVER
+// touched, even when its item disappeared (field history beats tidiness).
+export function syncPhasePlan(
+  phases: SyncPhase[],
+  items: { desc: string }[],
+  nextOrder = 0
+): { removeIds: string[]; create: { name: string; order: number }[] } {
+  const target = seedPhasePlan(items).map((p) => p.name);
+  const targetSet = new Set(target);
+  const phaseNames = new Set(phases.map((p) => p.name));
+  const removeIds = phases
+    .filter((p) => p.autoSeeded && p.status === 'not_started' && !p.hasContent && !targetSet.has(p.name))
+    .map((p) => p.id);
+  const create = target.filter((n) => !phaseNames.has(n)).map((n, i) => ({ name: n, order: nextOrder + i }));
+  return { removeIds, create };
+}
+
+// "Sync with quote" only shows when it would actually DO something, and only on jobs that used
+// the seeding at all — a purely manual phase list never gets the button.
+export function needsPhaseSync(phases: SyncPhase[], items: { desc: string }[]): boolean {
+  if (!phases.some((p) => p.autoSeeded)) return false;
+  const plan = syncPhasePlan(phases, items);
+  return plan.removeIds.length > 0 || plan.create.length > 0;
 }
 
 export const COMPANY = {

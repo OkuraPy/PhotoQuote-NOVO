@@ -10,11 +10,11 @@ import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { applyMarkup, buildStarterEstimate, calcTotals, deriveBase, fmt, LineItem, SERVICE_TYPES, split } from '../data';
-import { MAX_AI_PHOTOS, requestEstimate, transcribeAudio } from '../lib/ai';
+import { MAX_AI_PHOTOS, requestEstimate, transcribeAudio, translateNote } from '../lib/ai';
 import { createClient, createJob, fetchClients, fetchCompanyProfile, getMyLocation, lookupZip, Region, updateEstimateItems } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { Avatar, Between, Btn, Card, Chip, CatChip, DecimalInput, Divider, Field, FLOW_RESET, Input, Kav, Nav, NavBtn, Row, SearchBar, SectionTitle, Sheet, Stepper, Switch, useStore } from '../ui';
-import { registerStrings, useT } from '../lib/i18n';
+import { Avatar, Between, Btn, Card, Chip, CatChip, DecimalInput, Divider, Field, FLOW_RESET, Input, Kav, LinkBtn, Nav, NavBtn, Row, SearchBar, SectionTitle, Sheet, Stepper, Switch, useStore } from '../ui';
+import { getLocale, registerStrings, useT } from '../lib/i18n';
 
 registerStrings({
   // Camera screen
@@ -95,7 +95,23 @@ registerStrings({
   'flow.fullForm': { en: 'Full form', es: 'Formulario completo', pt: 'Formulário completo' },
   'flow.quickAddNameOnly': { en: 'Quick add — name only', es: 'Añadir rápido — solo nombre', pt: 'Adição rápida — só o nome' },
   'flow.pulledAutomatically': { en: '{addr}, {city} · pulled automatically', es: '{addr}, {city} · obtenido automáticamente', pt: '{addr}, {city} · obtido automaticamente' },
-  'flow.jobLocation': { en: 'Job location', es: 'Ubicación del trabajo', pt: 'Local do trabalho' },
+  'flow.jobSiteAddress': { en: 'Job site address', es: 'Dirección de la obra', pt: 'Endereço da obra' },
+  'flow.jobSitePlaceholder': { en: 'Street address where the work happens', es: 'Dirección donde se hará el trabajo', pt: 'Endereço onde o trabalho será feito' },
+  'flow.printsOnDocs': { en: 'Prints on the quote, invoice and contract.', es: 'Aparece en la cotización, la factura y el contrato.', pt: 'Sai no orçamento, na fatura e no contrato.' },
+  'flow.sameAsClientAddress': { en: 'Same as client address', es: 'Igual que la dirección del cliente', pt: 'Mesmo endereço do cliente' },
+
+  // Client note (G1) — prints on the documents (the DOCUMENT text itself is always English)
+  'flow.notesForClient': { en: 'Notes for the client', es: 'Notas para el cliente', pt: 'Observações para o cliente' },
+  'flow.notesPlaceholder': { en: 'e.g. Price includes two coats. Color to be confirmed with the owner.', es: 'p. ej. El precio incluye dos manos. Color por confirmar con el propietario.', pt: 'ex.: O preço inclui duas demãos. Cor a confirmar com o proprietário.' },
+  // Note translation (G1b) — documents are always English; the AI helps a pt/es contractor get there
+  'flow.translateToEnglish': { en: 'Translate to English', es: 'Traducir al inglés', pt: 'Traduzir para o inglês' },
+  'flow.translating': { en: 'Translating…', es: 'Traduciendo…', pt: 'Traduzindo…' },
+  'flow.originalLabel': { en: 'Original', es: 'Original', pt: 'Original' },
+  'flow.englishEditable': { en: 'English — edit if needed', es: 'Inglés — edítalo si hace falta', pt: 'Inglês — edite se precisar' },
+  'flow.useThis': { en: 'Use this', es: 'Usar esto', pt: 'Usar este' },
+  'flow.keepMyText': { en: 'Keep my text', es: 'Mantener mi texto', pt: 'Manter meu texto' },
+  'flow.translateFailed': { en: 'Couldn’t translate — the note will print exactly as written.', es: 'No se pudo traducir; la nota se imprimirá tal como está escrita.', pt: 'Não foi possível traduzir — a observação sairá exatamente como está escrita.' },
+  'flow.translatedFrom': { en: 'Translated from: {orig}', es: 'Traducido de: {orig}', pt: 'Traduzido de: {orig}' },
   'flow.nothingToSaveTitle': { en: 'Nothing to save', es: 'Nada que guardar', pt: 'Nada para salvar' },
   'flow.nothingToSaveBody': { en: 'Generate a quote first.', es: 'Genera una cotización primero.', pt: 'Gere um orçamento primeiro.' },
   'flow.notSignedInTitle': { en: 'Not signed in', es: 'No has iniciado sesión', pt: 'Não conectado' },
@@ -159,7 +175,15 @@ export function CameraScreen({ go, back, params }: NavProp) {
   const [gpsBusy, setGpsBusy] = useState(false);
   const setRegion = (r: Region | null) =>
     r
-      ? up({ aZip: r.zip, aLoc: { city: [r.city, r.state].filter(Boolean).join(', '), region: r.label }, regionMult: r.multiplier, regionState: r.state })
+      ? up({
+          aZip: r.zip,
+          aLoc: { city: [r.city, r.state].filter(Boolean).join(', '), region: r.label },
+          regionMult: r.multiplier,
+          regionState: r.state,
+          // GPS knows the street (ZIP lookup doesn't) — pre-fill the job-site address (G5).
+          // Tapping GPS is an explicit "use my location", so it may overwrite a typed street.
+          ...(r.street ? { jobStreet: r.street } : {}),
+        })
       : up({ aLoc: null, regionMult: 1, regionState: '' });
   const onZip = async (z: string) => {
     const clean = z.replace(/\D/g, '').slice(0, 5);
@@ -577,7 +601,11 @@ export function EstimateScreen({ go, back, params }: NavProp) {
     if (!editJob) return;
     setSavingEdit(true);
     try {
-      await updateEstimateItems(editJob.estimateId, store.items, taxRate, marginRate);
+      const note = (store.custNote || '').trim();
+      await updateEstimateItems(editJob.estimateId, store.items, taxRate, marginRate, {
+        customerNote: note || null,
+        customerNoteSrc: (note && (store.custNoteSrc || '').trim()) || null, // no note → no original either
+      });
       await queryClient.invalidateQueries({ queryKey: ['jobDetail', editJob.projectId] });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
       back();
@@ -742,6 +770,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
             <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted }}>{tr('flow.markupIncluded')}</Text>
           </Row>
         ) : null}
+        {!analyzing ? <ClientNoteCard /> : null}
         </>
         ) : null}
       </ScrollView>
@@ -800,6 +829,111 @@ function ItemEditor({ it, onChange, onRemove, onDone }: { it: LineItem; onChange
   );
 }
 
+/* ---------------- CLIENT NOTE (G1): prints on the quote / invoice / contract ---------------- */
+// store.custNote is what gets SAVED as estimates.customer_note; store.custNoteSrc keeps the
+// original wording when the note was translated (G1b). Clearing the note clears the original too.
+function ClientNoteCard() {
+  const t = useT();
+  const { store, up } = useStore();
+  return (
+    <Card pad style={{ marginTop: 16 }}>
+      <Row style={{ gap: 9, alignItems: 'flex-start' }}>
+        <Icon name="msg" size={16} color={colors.muted} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{t('flow.notesForClient')}</Text>
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 1 }}>{t('flow.printsOnDocs')}</Text>
+        </View>
+      </Row>
+      <TextInput
+        multiline
+        maxLength={2000}
+        placeholder={t('flow.notesPlaceholder')}
+        placeholderTextColor={colors.faint}
+        value={store.custNote || ''}
+        onChangeText={(v) => up(v.trim() ? { custNote: v } : { custNote: v, custNoteSrc: '' })}
+        style={{ minHeight: 72, borderRadius: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, padding: 13, fontSize: 14.5, fontFamily: fonts.semibold, color: colors.ink, marginTop: 12, textAlignVertical: 'top' }}
+      />
+      <NoteTranslator />
+    </Card>
+  );
+}
+
+// G1b: pt/es locale only — documents are always English, so offer an AI translation of the note.
+// The result is shown for review (original read-only + editable English); one tap applies it.
+// Any failure quietly keeps the text as written: translation is a helper, never a gate.
+function NoteTranslator() {
+  const t = useT();
+  const { store, up } = useStore();
+  const [mode, setMode] = useState<'idle' | 'busy' | 'review' | 'failed'>('idle');
+  const [original, setOriginal] = useState('');
+  const [english, setEnglish] = useState('');
+
+  const note = (store.custNote || '').trim();
+  const applied = !!(store.custNoteSrc || '').trim(); // a translation was already applied
+  if (getLocale() === 'en') return null; // typing in English already — nothing to translate
+
+  const run = async () => {
+    const src = note;
+    setMode('busy');
+    const r = await translateNote(src);
+    if (r.ok) {
+      setOriginal(src);
+      setEnglish(r.translated);
+      setMode('review');
+    } else {
+      setMode('failed'); // discreet warning below; the note prints as written
+    }
+  };
+
+  if (mode === 'review') {
+    return (
+      <View style={{ marginTop: 12 }}>
+        <Text style={{ fontFamily: fonts.bold, fontSize: 12, color: colors.muted }}>{t('flow.originalLabel')}</Text>
+        <View style={{ backgroundColor: colors.bg, borderRadius: 12, padding: 12, marginTop: 6 }}>
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.ink2, lineHeight: 19 }}>{original}</Text>
+        </View>
+        <Text style={{ fontFamily: fonts.bold, fontSize: 12, color: colors.primary, marginTop: 12 }}>{t('flow.englishEditable')}</Text>
+        <TextInput
+          multiline
+          value={english}
+          onChangeText={setEnglish}
+          style={{ minHeight: 72, borderRadius: 13, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.card, padding: 13, fontSize: 14.5, fontFamily: fonts.semibold, color: colors.ink, marginTop: 6, textAlignVertical: 'top' }}
+        />
+        <Row style={{ gap: 10, marginTop: 12 }}>
+          <Btn variant="ghost" sm title={t('flow.keepMyText')} onPress={() => setMode('idle')} style={{ flex: 0.8 }} />
+          <Btn sm icon="check" title={t('flow.useThis')} disabled={!english.trim()} onPress={() => { up({ custNote: english.trim(), custNoteSrc: original }); setMode('idle'); }} style={{ flex: 1 }} />
+        </Row>
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ marginTop: 12 }}>
+      {mode === 'failed' ? (
+        <Row style={{ gap: 6, marginBottom: 8 }}>
+          <Icon name="flag" size={12} color={colors.warning} />
+          <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 12, color: colors.muted }}>{t('flow.translateFailed')}</Text>
+        </Row>
+      ) : null}
+      {applied ? (
+        <Text numberOfLines={2} style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginBottom: note ? 8 : 0 }}>
+          {t('flow.translatedFrom', { orig: store.custNoteSrc })}
+        </Text>
+      ) : null}
+      {note ? (
+        mode === 'busy' ? (
+          <Row style={{ gap: 8 }}>
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{t('flow.translating')}</Text>
+          </Row>
+        ) : (
+          <LinkBtn icon="sparkles" title={t('flow.translateToEnglish')} onPress={run} />
+        )
+      ) : null}
+    </View>
+  );
+}
+
 /* ---------------- ATTACH CLIENT ---------------- */
 export function AttachScreen({ go, back }: NavProp) {
   const t = useT();
@@ -831,18 +965,23 @@ export function AttachScreen({ go, back }: NavProp) {
     setSaving(true);
     try {
       const clientId = skipClient ? null : await resolveClientId(); // client is optional
-      const client = skipClient ? null : sel; // for address/city autofill
+      const client = skipClient ? null : sel; // city fallback only — the address is the JOB SITE's
       const jobTitle = store.svcs[0] ? t('flow.jobSuffix', { service: store.svcs[0] }) : t('flow.newEstimate');
       const { projectId } = await createJob({
         userId: user.id,
         clientId,
         name: jobTitle,
-        address: client?.addr || undefined,
-        city: client?.city || loc?.city || undefined,
+        // G5: projects.address is the WORK address (typed/GPS). Fallback to the client's street
+        // when the field is left empty — a legal document must never lose the address it used
+        // to carry (reviewer finding: gallery flow without GPS would print a street-less contract).
+        address: (store.jobStreet || '').trim() || client?.addr || undefined,
+        city: loc?.city || client?.city || undefined,
         taxRate: store.taxRate ?? 8.25,
         marginRate: store.marginRate ?? 0,
         confidence: store.confidence,
         notes: store.aiNotes,
+        customerNote: (store.custNote || '').trim() || undefined,
+        customerNoteSrc: ((store.custNote || '').trim() && (store.custNoteSrc || '').trim()) || undefined,
         services: store.svcs,
         items: store.items,
         photos: store.photos,
@@ -921,19 +1060,23 @@ export function AttachScreen({ go, back }: NavProp) {
           </Card>
         )}
 
+        {/* job-site address (G5): what prints on the documents — GPS pre-fills, always editable */}
+        <SectionTitle title={t('flow.jobSiteAddress')} />
+        <Input placeholder={t('flow.jobSitePlaceholder')} value={store.jobStreet || ''} onChangeText={(v) => up({ jobStreet: v })} />
+        <Row style={{ marginTop: 9, justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 12, color: colors.muted }}>{t('flow.printsOnDocs')}</Text>
+          {sel && !sel.quick && sel.addr ? <LinkBtn icon="user" title={t('flow.sameAsClientAddress')} onPress={() => up({ jobStreet: sel.addr })} /> : null}
+        </Row>
         {loc ? (
-          <>
-            <SectionTitle title={t('flow.jobLocation')} />
-            <Card pad style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.primaryTint, borderWidth: 0 }}>
-              <Icon name="mapPin" size={17} color={colors.primary} />
-              <Text style={{ flex: 1, fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{loc.city}</Text>
-              {store.regionMult !== 1 ? (
-                <View style={{ paddingVertical: 5, paddingHorizontal: 9, borderRadius: radii.pill, backgroundColor: colors.accentTint, borderWidth: 1, borderColor: colors.accentBorder }}>
-                  <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: colors.accentInk }}>{loc.region} {store.regionMult > 1 ? '+' : ''}{Math.round((store.regionMult - 1) * 100)}%</Text>
-                </View>
-              ) : null}
-            </Card>
-          </>
+          <Card pad style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.primaryTint, borderWidth: 0, marginTop: 12 }}>
+            <Icon name="mapPin" size={17} color={colors.primary} />
+            <Text style={{ flex: 1, fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{loc.city}</Text>
+            {store.regionMult !== 1 ? (
+              <View style={{ paddingVertical: 5, paddingHorizontal: 9, borderRadius: radii.pill, backgroundColor: colors.accentTint, borderWidth: 1, borderColor: colors.accentBorder }}>
+                <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, color: colors.accentInk }}>{loc.region} {store.regionMult > 1 ? '+' : ''}{Math.round((store.regionMult - 1) * 100)}%</Text>
+              </View>
+            ) : null}
+          </Card>
         ) : null}
       </ScrollView>
       <View style={actionbar}>

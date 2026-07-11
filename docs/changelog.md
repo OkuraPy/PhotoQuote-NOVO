@@ -4,6 +4,31 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-12 00:30] — feat: v2 — ONDA A COMPLETA: os 6 pedidos do uso real (G1-G5 + G4) → build 31
+- **O que mudou**: (G5) **endereço da OBRA** — campo "Job site address" no passo do cliente (GPS reverso
+  pré-preenche a rua, que antes era descartada; atalho "same as client"); projects.address volta à semântica
+  de obra COM fallback pro endereço do cliente (achado do revisor: galeria sem GPS não pode gerar contrato
+  sem rua); PDF/fatura ganham bloco "Job site" e o {{service_address}} do contrato sai certo. (G1)
+  **observações no documento** — customer_note/customer_note_src novas (a nota interna da IA em PT segue
+  ISOLADA e jamais imprime); card na tela do orçamento (cap 2000); seção "Notes" no PDF e bloco no contrato.
+  (G1b) **IA tradutora** — edge function translate-note (gpt-4o-mini, JSON, log ai_jobs) DEPLOYADA e PROVADA
+  ao vivo (PT→EN profissional); cartão duplo original+inglês editável; fallback imprime como escrito. (G2)
+  **fotos no documento** — doc_photo_urls (subset ≤6, 4 por padrão); faixa do QuoteTab selecionável com
+  check; grade 2 colunas no PDF do quote. (G3) **recibo** — RCPT-YYYY-NNNN (RPC clone do padrão endurecido),
+  mint-once race-safe, PDF próprio ("Amount received", saldo restante/"Paid in full"), oferta pós-pagamento
+  + reemissão pelo ledger. (G4) **fases do orçamento** — botão "Create phases from quote" no vazio, prompt
+  pós-fatura, "Sync with quote" protegendo fase iniciada/com conteúdo/manual (auto_seeded).
+- **Banco/Infra**: 5 migrations aditivas APLICADAS em prod (customer_note, template customer_notes_block,
+  doc_photo_urls, receipt_numbering, auto_seeded); translate-note v1 deployada (verify_jwt ON);
+  transcribe-audio v3 (fix base64url no decode do JWT pro log — bug herdado corrigido nas duas).
+- **Revisão**: implementador (agente, 90/90 testes) + revisor adversarial: **APROVADO** com 1 achado médio
+  e 4 baixos — TODOS corrigidos pré-commit: fallback do endereço; tiebreaker created_at no ledger (recibo
+  reemitido estável); maxLength 2000 na nota; base64url nas edge functions; dedupe de fases imune a item
+  literalmente chamado "X (2)" (+1 teste). tsc limpo, **jest 91/91**.
+- **Arquivos**: data.ts, api.ts, send.ts, ai.ts, ui.tsx, Flow.tsx, Job.tsx, data.test.ts, 5 migrations,
+  2 edge functions. Ressalvas registradas: fotos remotas no expo-print validar em device (plano B base64
+  especificado); nota editada pós-tradução deixa legenda stale (cosmético).
+
 ### [2026-07-08 02:50] — fix: v2 — guard anti-regressão de stage no reenvio (achado do revisor) → build 30
 - **O que mudou**: o revisor adversarial auditou o hotfix da madrugada (dono pediu "revisa tudo") e APROVOU
   com 1 bug real: o novo botão de reenvio (B2) tornava alcançável reenviar um quote **Approved** → o onSent

@@ -25,7 +25,7 @@ function b64ToBytes(b64: string): Uint8Array {
 function userIdFromJwt(req: Request): string | null {
   try {
     const tok = (req.headers.get('Authorization') || '').replace('Bearer ', '');
-    const payload = JSON.parse(atob(tok.split('.')[1] || ''));
+    const payload = JSON.parse(atob((tok.split('.')[1] || '').replace(/-/g, '+').replace(/_/g, '/')));
     return payload?.sub || null;
   } catch {
     return null;

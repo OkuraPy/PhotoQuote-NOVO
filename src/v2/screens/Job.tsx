@@ -4,9 +4,9 @@ import { ActivityIndicator, Alert, Image, Pressable, Share, ScrollView, Text, Vi
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
-import { addDaysISO, applyMarkup, calcTotals, ClosedKind, daysFromToday, fmt, invoiceBalance, LineItem, parseDateOnly, PaymentMode, PaymentPlan, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, unallocated } from '../data';
+import { addDaysISO, applyMarkup, balanceAfterPayment, calcTotals, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { addPhaseComment, addPhasePhotos, agreementLink, createAgreement, createInvoice, createPhase, deletePhase, deriveStage, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, JobDetail, progressLink, ProgressPhase, PhaseStatus, recordInvoicePayment, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
+import { addPhaseComment, addPhasePhotos, agreementLink, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deriveStage, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, JobDetail, progressLink, ProgressPhase, PhaseStatus, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { sendDoc } from '../lib/send';
 import { registerStrings, useT } from '../lib/i18n';
@@ -47,6 +47,7 @@ registerStrings({
   'job.sendQuote': { en: 'Send quote', es: 'Enviar cotización', pt: 'Enviar orçamento' },
   // QuoteTab
   'job.photos': { en: 'Photos · {n}', es: 'Fotos · {n}', pt: 'Fotos · {n}' },
+  'job.onDocument': { en: 'On document · {n}/{cap} — tap a photo to include it', es: 'En el documento · {n}/{cap} — toca una foto para incluirla', pt: 'No documento · {n}/{cap} — toque numa foto para incluí-la' },
   'job.lineItems': { en: 'Line items', es: 'Conceptos', pt: 'Itens' },
   'job.edit': { en: 'Edit', es: 'Editar', pt: 'Editar' },
   'job.taxable': { en: 'Taxable', es: 'Gravable', pt: 'Tributável' },
@@ -68,6 +69,8 @@ registerStrings({
   'job.issuedOnly': { en: 'Issued', es: 'Emitida', pt: 'Emitida' },
   'job.from': { en: 'From', es: 'De', pt: 'De' },
   'job.billTo': { en: 'Bill to', es: 'Facturar a', pt: 'Faturar para' },
+  'job.jobSite': { en: 'Job site', es: 'Obra', pt: 'Obra' },
+  'job.notes': { en: 'Notes', es: 'Notas', pt: 'Observações' },
   'job.totalDue': { en: 'Total due', es: 'Total a pagar', pt: 'Total a pagar' },
   'job.paid': { en: 'Paid', es: 'Pagado', pt: 'Pago' },
   'job.balanceDue': { en: 'Balance due', es: 'Saldo pendiente', pt: 'Saldo devedor' },
@@ -111,6 +114,13 @@ registerStrings({
   'job.method.other': { en: 'Other', es: 'Otro', pt: 'Outro' },
   'job.receivedToday': { en: 'Received today · {date}', es: 'Recibido hoy · {date}', pt: 'Recebido hoje · {date}' },
   'job.couldNotRecordPayment': { en: 'Could not record the payment', es: 'No se pudo registrar el pago', pt: 'Não foi possível registrar o pagamento' },
+  // receipt (G3) — the document itself is English; only this app copy is translated
+  'job.paymentRecordedTitle': { en: 'Payment recorded', es: 'Pago registrado', pt: 'Pagamento registrado' },
+  'job.sendReceiptBody': { en: 'Send the client a receipt for {amount}?', es: '¿Enviar al cliente un recibo por {amount}?', pt: 'Enviar ao cliente um recibo de {amount}?' },
+  'job.notNow': { en: 'Not now', es: 'Ahora no', pt: 'Agora não' },
+  'job.sendReceipt': { en: 'Send receipt', es: 'Enviar recibo', pt: 'Enviar recibo' },
+  'job.receiptLink': { en: 'Receipt', es: 'Recibo', pt: 'Recibo' },
+  'job.couldNotCreateReceipt': { en: 'Could not create the receipt', es: 'No se pudo crear el recibo', pt: 'Não foi possível criar o recibo' },
   // ContractTab
   'job.invoiceNeededFirst': { en: 'Invoice needed first', es: 'Primero se necesita la factura', pt: 'Fatura necessária primeiro' },
   'job.contractIntro': { en: 'Generate the invoice, then create a service agreement for the client to sign.', es: 'Genera la factura y luego crea un contrato de servicio para que el cliente lo firme.', pt: 'Gere a fatura e depois crie um contrato de serviço para o cliente assinar.' },
@@ -166,6 +176,12 @@ registerStrings({
   'job.newPhase': { en: 'New phase', es: 'Nueva fase', pt: 'Nova fase' },
   'job.newPhaseSub': { en: 'e.g. Prep & masking, Priming, Top coat, Final walkthrough.', es: 'p. ej. Preparación y enmascarado, Imprimación, Capa final, Revisión final.', pt: 'ex.: Preparação e mascaramento, Primer, Demão final, Vistoria final.' },
   'job.phaseName': { en: 'Phase name', es: 'Nombre de la fase', pt: 'Nome da fase' },
+  // phases from the quote (G4)
+  'job.createPhasesFromQuote': { en: 'Create phases from quote ({n} items)', es: 'Crear fases desde la cotización ({n} conceptos)', pt: 'Criar fases do orçamento ({n} itens)' },
+  'job.createPhasesTitle': { en: 'Track the work in phases?', es: '¿Seguir el trabajo por fases?', pt: 'Acompanhar o trabalho em fases?' },
+  'job.createPhasesBody': { en: 'Create {n} work phases from the quote? Your client can follow them through the shared link.', es: '¿Crear {n} fases de trabajo desde la cotización? Tu cliente puede seguirlas por el enlace compartido.', pt: 'Criar {n} fases de trabalho a partir do orçamento? Seu cliente pode acompanhá-las pelo link compartilhado.' },
+  'job.create': { en: 'Create', es: 'Crear', pt: 'Criar' },
+  'job.syncWithQuote': { en: 'Sync with quote', es: 'Sincronizar con la cotización', pt: 'Sincronizar com o orçamento' },
   'job.commentClient': { en: 'CLIENT', es: 'CLIENTE', pt: 'CLIENTE' },
   'job.commentYou': { en: 'YOU', es: 'TÚ', pt: 'VOCÊ' },
   'job.noCommentsYet': { en: 'No comments yet. Your client can comment from the shared progress link.', es: 'Aún no hay comentarios. Tu cliente puede comentar desde el enlace de progreso compartido.', pt: 'Nenhum comentário ainda. Seu cliente pode comentar pelo link de progresso compartilhado.' },
@@ -307,7 +323,9 @@ export function JobScreen({ go, back, params }: NavProp) {
   // header prefers the REAL client from the DB — right after save the flow store is already
   // reset (aSel/aLoc cleared), so deriving from the store showed "No client" on a fresh job
   const cName = realClient?.name || (job ? job.client : client?.name) || t('job.noClient');
-  const addr = realClient?.addr || (job ? job.addr : client?.addr || store.aLoc?.city) || t('job.noAddress');
+  // job-site line for documents (G5) + the header address, which now prefers the WORK address
+  const jobSite = jobSiteLine(detail?.jobSite);
+  const addr = detail?.jobSite.address || realClient?.addr || (job ? job.addr : client?.addr || store.aLoc?.city) || t('job.noAddress');
   const next = NEXT[stage];
   const queryClient = useQueryClient();
 
@@ -319,6 +337,22 @@ export function JobScreen({ go, back, params }: NavProp) {
   const [savingPay, setSavingPay] = useState(false);
   const invoicePlan = inv ? planFromInvoice(inv) : null;
   const balance = inv ? invoiceBalance(inv.total, inv.amountPaid) : 0;
+
+  /* ----- document photos (G2): which job photos print on the quote PDF ----- */
+  const docPhotos = detail?.docPhotoUrls || [];
+  const onToggleDocPhoto = async (url: string) => {
+    if (!projectId || !detail) return;
+    const next = toggleDocPhoto(docPhotos, detail.photoUrls, url);
+    if (!next) return; // cap reached / unknown url — the tap is a no-op
+    // optimistic: the strip reflects the tap instantly; the server result re-syncs it after
+    queryClient.setQueryData(['jobDetail', projectId], (old?: JobDetail) => (old ? { ...old, docPhotoUrls: next } : old));
+    try {
+      await updateDocPhotos(projectId, next);
+      await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
+    } catch {
+      await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] }); // revert to the DB truth
+    }
+  };
 
   /* ----- close (lost / archive) & reopen — the "more" menu on the nav ----- */
   const [menuOpen, setMenuOpen] = useState(false);
@@ -375,6 +409,8 @@ export function JobScreen({ go, back, params }: NavProp) {
   const confirmPlan = async (plan: PaymentPlan) => {
     if (!user?.id) return;
     const editing = planSheet === 'edit';
+    // freeze for the post-invoice phases prompt below — invalidate refreshes `est` under us
+    const [uid, estId, pid, nItems] = [user.id, est?.id, projectId, items.length];
     setSavingPlan(true);
     try {
       let downgraded = false;
@@ -388,6 +424,32 @@ export function JobScreen({ go, back, params }: NavProp) {
       setTab('invoice');
       // the schedule insert failed and the plan fell back to a single payment — say so, never silently
       if (downgraded) Alert.alert(t('job.planDowngradedTitle'), t('job.planDowngradedBody'));
+      else if (!editing && estId && pid && nItems > 0) {
+        // G4: fresh invoice = the work is about to start — offer to seed the progress phases.
+        // Best-effort and only when there are none yet; a failure just leaves the tab's button.
+        try {
+          if ((await countProjectPhases(pid)) === 0) {
+            Alert.alert(t('job.createPhasesTitle'), t('job.createPhasesBody', { n: nItems }), [
+              { text: t('job.notNow'), style: 'cancel' },
+              {
+                text: t('job.create'),
+                onPress: () => {
+                  void (async () => {
+                    try {
+                      await seedPhasesFromEstimate(uid, pid, estId);
+                      await queryClient.invalidateQueries({ queryKey: ['phases', pid] });
+                    } catch {
+                      /* the "Create phases from quote" button on the Progress tab still covers it */
+                    }
+                  })();
+                },
+              },
+            ]);
+          }
+        } catch {
+          /* never block the invoice flow over the phases nicety */
+        }
+      }
     } catch (e: any) {
       Alert.alert(editing ? t('job.couldNotSavePlan') : t('job.alert.couldNotCreateInvoice'), e?.message || t('job.alert.tryAgain'));
     } finally {
@@ -397,20 +459,61 @@ export function JobScreen({ go, back, params }: NavProp) {
 
   // "Mark paid" became "Record payment": money received goes to the ledger and the status
   // (Unpaid / Partially Paid / Paid) is derived server-side from Σ(payments) vs total.
+  // After a successful record the contractor is offered a receipt for it (G3).
   const confirmPayment = async (amount: number, method: string | null) => {
     if (!user?.id || !inv?.id) return;
+    const invoice = inv; // freeze — detail refetches under the alert below
     setSavingPay(true);
     try {
-      await recordInvoicePayment(user.id, inv.id, { amount, method });
+      const { id: paymentId } = await recordInvoicePayment(user.id, invoice.id, { amount, method });
       await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
       setPaySheet(false);
       clearStage();
+      const balanceAfter = invoiceBalance(invoice.total, invoice.amountPaid + amount);
+      Alert.alert(t('job.paymentRecordedTitle'), t('job.sendReceiptBody', { amount: fmt(amount) }), [
+        { text: t('job.notNow'), style: 'cancel' },
+        {
+          text: t('job.sendReceipt'),
+          onPress: () => requireCompany(() => { void sendReceipt(paymentId, { amount, method, date: toDateOnly(new Date()), balanceAfter }, invoice.number); }),
+        },
+      ]);
     } catch (e: any) {
       Alert.alert(t('job.couldNotRecordPayment'), e?.message || t('job.alert.tryAgain'));
     } finally {
       setSavingPay(false);
     }
+  };
+
+  // Receipt (G3): mint the number once (re-issues reuse it) and go straight to the PDF share
+  // sheet — a receipt is always a PDF, so the SendSheet chooser is skipped on purpose.
+  const [receiptBusy, setReceiptBusy] = useState<string | null>(null);
+  const sendReceipt = async (paymentId: string, p: { amount: number; method: string | null; date: string; balanceAfter: number }, invoiceNumber?: string) => {
+    if (receiptBusy) return;
+    setReceiptBusy(paymentId);
+    try {
+      const number = await ensureReceiptNumber(paymentId);
+      const co = (company as any) || {};
+      await sendDoc('Save PDF', {
+        kind: 'receipt',
+        docLabel: 'Receipt', // client-facing, English by design
+        number,
+        company: { name: co.company_name || t('job.yourCompany'), license: co.company_license, address: co.company_address, phone: co.company_phone, email: co.company_email },
+        client: realClient,
+        items: [],
+        totals: { subtotal: 0, tax: 0, total: p.amount, taxRate: 0 }, // unused by the receipt branch
+        receipt: { number, date: p.date, method: p.method, amount: p.amount, invoiceNumber, balanceAfter: p.balanceAfter },
+      });
+    } catch (e: any) {
+      Alert.alert(t('job.couldNotCreateReceipt'), e?.message || t('job.alert.tryAgain'));
+    } finally {
+      setReceiptBusy(null);
+    }
+  };
+  // re-issue from a ledger row: the balance shown is the one AS OF that payment
+  const onReceiptRow = (p: PaymentRecord) => {
+    if (!inv) return;
+    requireCompany(() => { void sendReceipt(p.id, { amount: p.amount, method: p.method, date: p.paidAt, balanceAfter: balanceAfterPayment(inv.total, inv.payments, p.id) }, inv.number); });
   };
 
   // contract / service agreement → generate (from the invoice) and share the signing link
@@ -552,8 +655,11 @@ export function JobScreen({ go, back, params }: NavProp) {
             items={items}
             totals={quoteTotals}
             markupPercent={est?.markupPercent ?? 0}
+            customerNote={est?.customerNote || null}
             go={go}
             photos={detail?.photoUrls || []}
+            docPhotos={docPhotos}
+            onToggleDocPhoto={detail ? onToggleDocPhoto : undefined}
             onEdit={
               est && projectId
                 ? () => {
@@ -564,7 +670,7 @@ export function JobScreen({ go, back, params }: NavProp) {
                     const legacy = est.legacyMarginRate > 0;
                     // legacy items carry no basePrice, so applyMarkup folds from the current price
                     const items = legacy ? applyMarkup(detail!.items, est.legacyMarginRate) : detail!.items;
-                    up({ items, taxRate: quoteTotals.taxRate, marginRate: legacy ? est.legacyMarginRate : est.markupPercent, editing: null });
+                    up({ items, taxRate: quoteTotals.taxRate, marginRate: legacy ? est.legacyMarginRate : est.markupPercent, editing: null, custNote: est.customerNote || '', custNoteSrc: est.customerNoteSrc || '' });
                     go('estimate', { editJob: { projectId, estimateId: est.id } });
                   }
                 : undefined
@@ -572,9 +678,9 @@ export function JobScreen({ go, back, params }: NavProp) {
             onSend={est && projectId && !closed ? () => requireCompany(() => up({ sheet: true })) : undefined}
           />
         )}
-        {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} company={company} invoice={inv} quoteTotal={est?.total} genning={savingPlan} onGen={openGenerateInvoice} onRecordPayment={() => setPaySheet(true)} onEditPlan={() => setPlanSheet('edit')} setSheet={(b: boolean) => (b ? requireCompany(() => up({ sheet: true })) : up({ sheet: false }))} />}
+        {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} jobSite={jobSite} company={company} invoice={inv} quoteTotal={est?.total} genning={savingPlan} onGen={openGenerateInvoice} onRecordPayment={() => setPaySheet(true)} onEditPlan={() => setPlanSheet('edit')} onReceipt={onReceiptRow} receiptBusyId={receiptBusy} setSheet={(b: boolean) => (b ? requireCompany(() => up({ sheet: true })) : up({ sheet: false }))} />}
         {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={invoiceTotals} plan={invoicePlan} company={company} genning={genningContract} onGenerate={generateContract} />}
-        {tab === 'progress' && <ProgressTab projectId={projectId} estimateId={est?.id || null} userId={user?.id || null} companyName={(company as any)?.company_name || t('job.companyFallback')} />}
+        {tab === 'progress' && <ProgressTab projectId={projectId} estimateId={est?.id || null} userId={user?.id || null} items={items} companyName={(company as any)?.company_name || t('job.companyFallback')} />}
       </ScrollView>
 
       <SendSheet
@@ -593,6 +699,9 @@ export function JobScreen({ go, back, params }: NavProp) {
             number: kind === 'invoice' ? inv?.number : undefined,
             company: { name: co.company_name || t('job.yourCompany'), license: co.company_license, address: co.company_address, phone: co.company_phone, email: co.company_email },
             client: realClient,
+            jobSite: jobSite || undefined, // English job-site line on quote & invoice (G5)
+            customerNote: (kind !== 'contract' && est?.customerNote) || undefined, // "Notes" section (G1)
+            photos: kind === 'quote' && docPhotos.length ? docPhotos : undefined, // curated photos (G2)
             items,
             totals: tt,
             // invoice PDF/text: the payment plan + what's already paid (English by design)
@@ -676,7 +785,7 @@ function TotRow({ label, value, bold, color }: { label: string; value: string; b
   );
 }
 
-function QuoteTab({ items, totals, markupPercent = 0, go, photos, onEdit, onSend }: { items: LineItem[]; totals: Totals; markupPercent?: number; go: NavProp['go']; photos: string[]; onEdit?: () => void; onSend?: () => void }) {
+function QuoteTab({ items, totals, markupPercent = 0, customerNote, go, photos, docPhotos = [], onToggleDocPhoto, onEdit, onSend }: { items: LineItem[]; totals: Totals; markupPercent?: number; customerNote?: string | null; go: NavProp['go']; photos: string[]; docPhotos?: string[]; onToggleDocPhoto?: (url: string) => void; onEdit?: () => void; onSend?: () => void }) {
   const t = useT();
   return (
     <View style={{ marginTop: 16 }}>
@@ -684,10 +793,26 @@ function QuoteTab({ items, totals, markupPercent = 0, go, photos, onEdit, onSend
         <>
           <SectionTitle title={t('job.photos', { n: photos.length })} />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingVertical: 2 }}>
-            {photos.map((u, i) => (
-              <Image key={i} source={{ uri: u }} style={{ width: 96, height: 96, borderRadius: 14, backgroundColor: colors.chipBg }} />
-            ))}
+            {photos.map((u, i) => {
+              const onDoc = docPhotos.includes(u);
+              return (
+                // tap = toggle "prints on the quote PDF" (G2) — green check marks the selected ones
+                <Pressable key={i} onPress={onToggleDocPhoto ? () => onToggleDocPhoto(u) : undefined}>
+                  <Image source={{ uri: u }} style={{ width: 96, height: 96, borderRadius: 14, backgroundColor: colors.chipBg, borderWidth: onDoc ? 2 : 0, borderColor: colors.success }} />
+                  {onDoc ? (
+                    <View style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.success, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: '#fff' }}>
+                      <Icon name="check" size={12} sw={3} color="#fff" />
+                    </View>
+                  ) : null}
+                </Pressable>
+              );
+            })}
           </ScrollView>
+          {onToggleDocPhoto ? (
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 8 }}>
+              {t('job.onDocument', { n: docPhotos.length, cap: DOC_PHOTO_CAP })}
+            </Text>
+          ) : null}
         </>
       ) : null}
       <SectionTitle title={t('job.lineItems')} link={t('job.edit')} onLink={onEdit || (() => go('estimate', {}))} />
@@ -720,6 +845,16 @@ function QuoteTab({ items, totals, markupPercent = 0, go, photos, onEdit, onSend
           <Text style={{ fontFamily: fonts.num, fontSize: 24, color: colors.ink, letterSpacing: -0.5 }}>{fmt(totals.total)}</Text>
         </Between>
       </Card>
+      {customerNote ? (
+        // client-facing note (G1) — the same text the PDF/contract prints in its "Notes" section
+        <Card pad style={{ marginTop: 12 }}>
+          <Row style={{ gap: 7 }}>
+            <Icon name="msg" size={14} color={colors.muted} />
+            <Text style={{ fontFamily: fonts.extrabold, fontSize: 13, color: colors.ink }}>{t('job.notes')}</Text>
+          </Row>
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.ink2, marginTop: 8, lineHeight: 19 }}>{customerNote}</Text>
+        </Card>
+      ) : null}
       {onSend ? (
         // always available: the quote can be re-sent after the first send or after an edit
         // (field feedback 07/07 — the NEXT card moves on and used to strand the send action)
@@ -742,7 +877,7 @@ const METHOD_KEY: Record<string, string> = { Cash: 'job.method.cash', Check: 'jo
 const methodLabel = (t: (k: string) => string, m: string) => (METHOD_KEY[m] ? t(METHOD_KEY[m]) : m);
 const mdDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-function InvoiceTab({ stage, items, totals, client, company, invoice, quoteTotal, genning, onGen, onRecordPayment, onEditPlan, setSheet }: { stage: Stage; items: LineItem[]; totals: Totals; client: JobDetail['client']; company?: any; invoice?: JobDetail['invoice']; quoteTotal?: number; genning: boolean; onGen: () => void; onRecordPayment: () => void; onEditPlan: () => void; setSheet: (b: boolean) => void }) {
+function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, quoteTotal, genning, onGen, onRecordPayment, onEditPlan, onReceipt, receiptBusyId, setSheet }: { stage: Stage; items: LineItem[]; totals: Totals; client: JobDetail['client']; jobSite?: string; company?: any; invoice?: JobDetail['invoice']; quoteTotal?: number; genning: boolean; onGen: () => void; onRecordPayment: () => void; onEditPlan: () => void; onReceipt?: (p: PaymentRecord) => void; receiptBusyId?: string | null; setSheet: (b: boolean) => void }) {
   const t = useT();
   const has = !!invoice || ['Invoiced', 'Paid'].includes(stage);
   const co = company || {};
@@ -807,17 +942,26 @@ function InvoiceTab({ stage, items, totals, client, company, invoice, quoteTotal
           </Between>
         </View>
         {/* parties */}
-        <View style={{ flexDirection: 'row', gap: 14, padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-          <View style={{ flex: 1 }}>
-            <DpLab text={t('job.from')} />
-            <Text style={{ fontFamily: fonts.extrabold, fontSize: 13.5, color: colors.ink, marginTop: 5 }}>{coName}</Text>
-            <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 2, lineHeight: 17 }}>{[co.company_address, [co.default_city, co.default_state].filter(Boolean).join(', '), co.company_phone].filter(Boolean).join('\n')}</Text>
+        <View style={{ padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+          <View style={{ flexDirection: 'row', gap: 14 }}>
+            <View style={{ flex: 1 }}>
+              <DpLab text={t('job.from')} />
+              <Text style={{ fontFamily: fonts.extrabold, fontSize: 13.5, color: colors.ink, marginTop: 5 }}>{coName}</Text>
+              <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 2, lineHeight: 17 }}>{[co.company_address, [co.default_city, co.default_state].filter(Boolean).join(', '), co.company_phone].filter(Boolean).join('\n')}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <DpLab text={t('job.billTo')} />
+              <Text style={{ fontFamily: fonts.extrabold, fontSize: 13.5, color: colors.ink, marginTop: 5 }}>{client?.name || t('job.noClient')}</Text>
+              <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 2, lineHeight: 17 }}>{[client?.addr, client?.city, client?.email].filter(Boolean).join('\n')}</Text>
+            </View>
           </View>
-          <View style={{ flex: 1 }}>
-            <DpLab text={t('job.billTo')} />
-            <Text style={{ fontFamily: fonts.extrabold, fontSize: 13.5, color: colors.ink, marginTop: 5 }}>{client?.name || t('job.noClient')}</Text>
-            <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 2, lineHeight: 17 }}>{[client?.addr, client?.city, client?.email].filter(Boolean).join('\n')}</Text>
-          </View>
+          {jobSite ? (
+            // work address (G5) — full-width row: two columns above stay readable on narrow phones
+            <View style={{ marginTop: 12 }}>
+              <DpLab text={t('job.jobSite')} />
+              <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 2, lineHeight: 17 }}>{jobSite}</Text>
+            </View>
+          ) : null}
         </View>
         {/* rows */}
         <View style={{ paddingHorizontal: 20 }}>
@@ -853,7 +997,16 @@ function InvoiceTab({ stage, items, totals, client, company, invoice, quoteTotal
             <DpLab text={t('job.paymentsReceived')} />
             {invoice.payments.map((p) => (
               <Between key={p.id} style={{ marginTop: 8 }}>
-                <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{mdDate(parseDateOnly(p.paidAt))}{p.method ? ` · ${methodLabel(t, p.method)}` : ''}</Text>
+                <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{mdDate(parseDateOnly(p.paidAt))}{p.method ? ` · ${methodLabel(t, p.method)}` : ''}</Text>
+                {onReceipt ? (
+                  // (re)issue the receipt for this payment — reuses its number once minted (G3)
+                  <Pressable onPress={() => onReceipt(p)} disabled={!!receiptBusyId} hitSlop={8}>
+                    <Row style={{ gap: 4 }}>
+                      <Icon name="receipt" size={13} color={colors.primary} />
+                      <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.primary }}>{receiptBusyId === p.id ? t('job.working') : t('job.receiptLink')}</Text>
+                    </Row>
+                  </Pressable>
+                ) : null}
                 <Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.success }}>{fmt(p.amount)}</Text>
               </Between>
             ))}
@@ -1165,7 +1318,7 @@ const PHASE_STAT: Record<PhaseStatus, [string, string, string]> = {
 };
 const NEXT_PHASE_STATUS: Record<PhaseStatus, PhaseStatus> = { not_started: 'in_progress', in_progress: 'completed', completed: 'not_started' };
 
-function ProgressTab({ projectId, estimateId, userId, companyName }: { projectId: string | null; estimateId: string | null; userId: string | null; companyName: string }) {
+function ProgressTab({ projectId, estimateId, userId, items, companyName }: { projectId: string | null; estimateId: string | null; userId: string | null; items: LineItem[]; companyName: string }) {
   const t = useT();
   const qc = useQueryClient();
   const { data: phases = [], isLoading } = useQuery({ queryKey: ['phases', projectId], queryFn: () => fetchPhases(projectId!), enabled: !!projectId });
@@ -1176,8 +1329,44 @@ function ProgressTab({ projectId, estimateId, userId, companyName }: { projectId
   const [cmPhaseId, setCmPhaseId] = useState<string | null>(null);
   const [cmText, setCmText] = useState('');
   const [cmBusy, setCmBusy] = useState(false);
+  const [seedBusy, setSeedBusy] = useState(false); // shared by seed & sync — both rewrite phases
   const refresh = () => qc.invalidateQueries({ queryKey: ['phases', projectId] });
   const cmPhase = phases.find((p) => p.id === cmPhaseId) || null;
+
+  // G4: seed one phase per quote item (empty tab), and re-align after the quote was edited.
+  // The plan logic is pure (data.ts); only auto-seeded, untouched phases are ever removed.
+  const canSeed = !!userId && !!estimateId && items.length > 0;
+  const seedFromQuote = async () => {
+    if (!canSeed || !projectId || seedBusy) return;
+    setSeedBusy(true);
+    try {
+      await seedPhasesFromEstimate(userId!, projectId, estimateId!);
+      refresh();
+    } catch (e: any) {
+      Alert.alert(t('job.alert.couldNotAddPhase'), e?.message || t('job.alert.tryAgain'));
+    } finally {
+      setSeedBusy(false);
+    }
+  };
+  const showSync =
+    canSeed &&
+    phases.length > 0 &&
+    needsPhaseSync(
+      phases.map((p) => ({ id: p.id, name: p.name, autoSeeded: p.autoSeeded, status: p.status, hasContent: p.photos.length > 0 || p.comments.length > 0 })),
+      items.map((it) => ({ desc: it.desc }))
+    );
+  const syncWithQuote = async () => {
+    if (!canSeed || !projectId || seedBusy) return;
+    setSeedBusy(true);
+    try {
+      await syncPhasesWithEstimate(userId!, projectId, estimateId!);
+      refresh();
+    } catch (e: any) {
+      Alert.alert(t('job.alert.couldNotUpdate'), e?.message || t('job.alert.tryAgain'));
+    } finally {
+      setSeedBusy(false);
+    }
+  };
 
   const addComment = async () => {
     if (!projectId || !cmPhase || !cmText.trim()) return;
@@ -1279,6 +1468,16 @@ function ProgressTab({ projectId, estimateId, userId, companyName }: { projectId
       ) : phases.length === 0 ? (
         <Card pad style={{ alignItems: 'center', paddingVertical: 22 }}>
           <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.muted, textAlign: 'center', lineHeight: 19 }}>{t('job.noPhasesYet')}</Text>
+          {canSeed ? (
+            // one tap turns the quote's line items into the work phases (G4)
+            <Btn
+              icon={seedBusy ? undefined : 'layers'}
+              title={seedBusy ? t('job.working') : t('job.createPhasesFromQuote', { n: items.length })}
+              disabled={seedBusy}
+              onPress={seedFromQuote}
+              style={{ marginTop: 16, alignSelf: 'stretch' }}
+            />
+          ) : null}
         </Card>
       ) : (
         <View style={{ gap: 12 }}>
@@ -1317,6 +1516,13 @@ function ProgressTab({ projectId, estimateId, userId, companyName }: { projectId
           })}
         </View>
       )}
+
+      {showSync ? (
+        // the quote was edited after the seeding — offer to re-align the untouched seeded phases
+        <View style={{ alignItems: 'center', marginTop: 14 }}>
+          <LinkBtn icon="trend" title={seedBusy ? t('job.working') : t('job.syncWithQuote')} onPress={syncWithQuote} />
+        </View>
+      ) : null}
 
       <Btn icon="plus" title={t('job.addPhase')} variant="soft" onPress={() => setSheet(true)} style={{ marginTop: 14 }} />
 

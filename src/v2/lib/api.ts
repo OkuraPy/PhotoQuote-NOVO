@@ -4,11 +4,13 @@ import * as Location from 'expo-location';
 import * as Crypto from 'expo-crypto';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from './supabase';
-import { Client, ClosedKind, closedFromStatus, deriveBase, deriveStage, Job, LineItem, paidTotal, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, Photo, planFromInvoice, planRows, rescaleSchedule, round2, ScheduleRow, statusFromPayments, toDateOnly } from '../data';
+import { Client, ClosedKind, closedFromStatus, deriveBase, deriveStage, DOC_PHOTO_CAP, Job, LineItem, paidTotal, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, Photo, planFromInvoice, planRows, rescaleSchedule, round2, ScheduleRow, seedPhasePlan, statusFromPayments, syncPhasePlan, toDateOnly } from '../data';
 export { deriveStage }; // re-exported for screens (lives in ../data so it's unit-testable)
 
 /* ---------------- Location: real ZIP (Zippopotam, keyless) + GPS (expo-location) ---------------- */
-export type Region = { city: string; state: string; zip: string; multiplier: number; label: string };
+// street is GPS-only (reverse geocode); the ZIP lookup can't know it. It pre-fills the
+// "Job site address" field on the Attach step (G5) — the document address of the WORK, not the client.
+export type Region = { city: string; state: string; zip: string; multiplier: number; label: string; street?: string };
 
 // Regional cost index for a US state (from the server table; national avg = 1.0 if unknown).
 async function regionFor(state: string): Promise<{ multiplier: number; label: string }> {
@@ -41,7 +43,9 @@ export async function getMyLocation(): Promise<Region | null> {
     if (!g) return null;
     const state = g.region || '';
     const r = await regionFor(state);
-    return { city: g.city || g.subregion || '', state, zip: g.postalCode || '', multiplier: r.multiplier, label: r.label };
+    // keep the street too (used to be discarded): "123 Main St" — the job-site line of documents
+    const street = [g.streetNumber, g.street].filter(Boolean).join(' ');
+    return { city: g.city || g.subregion || '', state, zip: g.postalCode || '', multiplier: r.multiplier, label: r.label, street: street || undefined };
   } catch {
     return null;
   }
@@ -152,12 +156,14 @@ export async function createJob(input: {
   userId: string;
   clientId: string | null; // null = client-less draft (client is optional)
   name: string;
-  address?: string;
+  address?: string; // JOB-SITE street (G5) — the work address, no longer the client's home address
   city?: string;
   taxRate: number;
   marginRate: number;
   confidence?: number;
-  notes?: string;
+  notes?: string; // INTERNAL AI note (estimates.notes) — never printed on documents
+  customerNote?: string; // client-facing note that prints on documents (G1, English)
+  customerNoteSrc?: string; // original text when customerNote came from the AI translation
   services?: string[];
   items: LineItem[];
   photos?: Photo[];
@@ -201,6 +207,8 @@ export async function createJob(input: {
       title,
       estimate_notes: input.notes || null,
       notes: input.notes || null,
+      customer_note: input.customerNote || null,
+      customer_note_src: input.customerNoteSrc || null,
     })
     .select('id')
     .single();
@@ -224,10 +232,11 @@ export async function createJob(input: {
     if (liErr) throw liErr;
   }
 
-  // photos are best-effort — the estimate is already safely saved, so a failed upload won't lose it
+  // photos are best-effort — the estimate is already safely saved, so a failed upload won't lose it.
+  // The first 4 also seed doc_photo_urls (G2): photos print on the quote by default (owner's call).
   if (input.photos?.length) {
     const urls = await uploadProjectPhotos(input.userId, proj.id, input.photos);
-    if (urls.length) await supabase.from('projects').update({ photo_urls: urls }).eq('id', proj.id);
+    if (urls.length) await supabase.from('projects').update({ photo_urls: urls, doc_photo_urls: urls.slice(0, 4) }).eq('id', proj.id);
   }
 
   return { projectId: proj.id, estimateId: est.id };
@@ -240,11 +249,25 @@ export async function createJob(input: {
 // empty on the server, but the app still holds the items in memory so Save can be retried.
 // Afterwards the newest invoice is re-synced with the fresh totals when that's still safe
 // (fixes the live-items × frozen-totals mismatch on the invoice tab).
-export async function updateEstimateItems(estimateId: string, items: LineItem[], taxRate: number, marginRate: number): Promise<void> {
+export async function updateEstimateItems(
+  estimateId: string,
+  items: LineItem[],
+  taxRate: number,
+  marginRate: number,
+  // G1: client-facing note saved along with the items; omitted = the columns are left untouched
+  note?: { customerNote: string | null; customerNoteSrc: string | null }
+): Promise<void> {
   // embedded markup: prices are final → margin zeroed for the trigger, % kept as metadata
   const { error: rErr } = await supabase
     .from('estimates')
-    .update({ tax_rate: taxRate, tax_percent: taxRate, margin_rate: 0, margin_percent: 0, markup_percent: marginRate })
+    .update({
+      tax_rate: taxRate,
+      tax_percent: taxRate,
+      margin_rate: 0,
+      margin_percent: 0,
+      markup_percent: marginRate,
+      ...(note ? { customer_note: note.customerNote, customer_note_src: note.customerNoteSrc } : {}),
+    })
     .eq('id', estimateId);
   if (rErr) throw rErr;
   const { error: dErr } = await supabase.from('line_items').delete().eq('estimate_id', estimateId);
@@ -418,11 +441,12 @@ export async function updateInvoicePlan(userId: string, invoiceId: string, plan:
 
 // Append a payment to the ledger, then refresh the invoice status from Σ(ledger) vs total.
 // A legacy invoice already marked Paid WITHOUT ledger rows is never downgraded by a late entry.
+// Returns the new ledger row's id — the "send a receipt?" follow-up (G3) needs it.
 export async function recordInvoicePayment(
   userId: string,
   invoiceId: string,
   p: { amount: number; paidAt?: string; method?: string | null; scheduleId?: string | null }
-): Promise<void> {
+): Promise<{ id: string }> {
   const amount = round2(p.amount);
   if (!(amount > 0)) throw new Error('Enter an amount greater than zero.');
   const [{ data: inv, error: iErr }, { count }] = await Promise.all([
@@ -433,22 +457,56 @@ export async function recordInvoicePayment(
   if (!inv) throw new Error('Invoice not found.');
   const legacyPaid = String(inv.status || '').toLowerCase() === 'paid' && !count;
 
-  const { error } = await supabase.from('invoice_payments').insert({
-    invoice_id: invoiceId,
-    user_id: userId,
-    amount,
-    paid_at: p.paidAt || toDateOnly(new Date()),
-    method: p.method || null,
-    schedule_id: p.scheduleId || null,
-  });
+  const { data: ins, error } = await supabase
+    .from('invoice_payments')
+    .insert({
+      invoice_id: invoiceId,
+      user_id: userId,
+      amount,
+      paid_at: p.paidAt || toDateOnly(new Date()),
+      method: p.method || null,
+      schedule_id: p.scheduleId || null,
+    })
+    .select('id')
+    .single();
   if (error) throw error;
-  if (legacyPaid) return; // fully paid before the ledger existed — keep the status
+  if (legacyPaid) return { id: ins.id }; // fully paid before the ledger existed — keep the status
 
   const { data: pays, error: pErr } = await supabase.from('invoice_payments').select('amount').eq('invoice_id', invoiceId);
   if (pErr) throw pErr;
   const status = statusFromPayments(Number(inv.total) || 0, paidTotal(pays || []));
   const { error: uErr } = await supabase.from('invoices').update({ status }).eq('id', invoiceId);
   if (uErr) throw uErr;
+  return { id: ins.id };
+}
+
+// Mint-once receipt number (G3). Written exactly once per payment; re-issuing reuses it.
+// Race-safe: the guarded update only lands on a NULL cell, so the loser of a concurrent mint
+// re-reads the winner's number (its own RPC draw burns a harmless counter slot); the partial
+// unique index on (user_id, receipt_number) is the hard backstop.
+export async function ensureReceiptNumber(paymentId: string): Promise<string> {
+  const { data: row, error } = await supabase.from('invoice_payments').select('receipt_number').eq('id', paymentId).maybeSingle();
+  if (error) throw error;
+  if (!row) throw new Error('Payment not found.');
+  if (row.receipt_number) return String(row.receipt_number);
+
+  const { data: numData, error: nErr } = await supabase.rpc('next_receipt_number');
+  if (nErr) throw nErr;
+  const number = String(numData);
+
+  const { data: upd, error: uErr } = await supabase
+    .from('invoice_payments')
+    .update({ receipt_number: number })
+    .eq('id', paymentId)
+    .is('receipt_number', null)
+    .select('id');
+  if (uErr) throw uErr;
+  if (upd?.length) return number;
+
+  const { data: again, error: aErr } = await supabase.from('invoice_payments').select('receipt_number').eq('id', paymentId).maybeSingle();
+  if (aErr) throw aErr;
+  if (again?.receipt_number) return String(again.receipt_number);
+  return number; // row vanished mid-race — the freshly minted number is still valid
 }
 
 // Persist a status change to the DB (replaces the old in-memory-only stage override).
@@ -467,6 +525,32 @@ export async function updateInvoiceStatus(invoiceId: string, status: string) {
   let q = supabase.from('invoices').update({ status }).eq('id', invoiceId);
   if (status === 'Sent') q = q.eq('status', 'Unpaid');
   const { error } = await q;
+  if (error) throw error;
+}
+
+// Persist the document-photo selection (G2). Server-side re-validation: only urls that are
+// really project photos survive, in photo-strip order, capped — a stale/raced client selection
+// can never write junk. Returns what was actually stored.
+export async function updateDocPhotos(projectId: string, urls: string[]): Promise<string[]> {
+  const { data: proj, error: pErr } = await supabase.from('projects').select('photo_urls').eq('id', projectId).maybeSingle();
+  if (pErr) throw pErr;
+  const all: string[] = Array.isArray(proj?.photo_urls) ? (proj!.photo_urls as string[]) : [];
+  const clean = all.filter((u) => urls.includes(u)).slice(0, DOC_PHOTO_CAP);
+  const { error } = await supabase.from('projects').update({ doc_photo_urls: clean }).eq('id', projectId);
+  if (error) throw error;
+  return clean;
+}
+
+// Update the job-site address columns (G5). Only the keys present in `site` are written, so a
+// partial edit never nulls the other columns. No UI calls this yet — kept for the edit screen.
+export async function updateJobSite(projectId: string, site: { address?: string | null; city?: string | null; zip?: string | null; state?: string | null }): Promise<void> {
+  const patch: Record<string, unknown> = {};
+  if ('address' in site) patch.address = site.address || null;
+  if ('city' in site) patch.city = site.city || null;
+  if ('zip' in site) patch.zip = site.zip || null;
+  if ('state' in site) patch.property_state = site.state || null;
+  if (!Object.keys(patch).length) return;
+  const { error } = await supabase.from('projects').update(patch).eq('id', projectId);
   if (error) throw error;
 }
 
@@ -534,10 +618,12 @@ export async function createAgreement(userId: string, projectId: string, invoice
   if (!proj.client_id) throw new Error('Add a client to this job before creating a contract.');
   if (!inv) throw new Error('Generate the invoice first.');
 
-  const [{ data: client }, { data: items }, { data: schedule }] = await Promise.all([
+  const [{ data: client }, { data: items }, { data: schedule }, { data: estNote }] = await Promise.all([
     supabase.from('clients').select('full_name, address, address_city, address_state, phone, email').eq('id', proj.client_id).maybeSingle(),
     supabase.from('line_items').select('description, quantity, unit, unit_price').eq('estimate_id', inv.estimate_id).order('item_order', { ascending: true }),
     supabase.from('invoice_schedule').select('id, label, amount, due_date, sort').eq('invoice_id', invoiceId).order('sort', { ascending: true }),
+    // client-facing note (G1) — customer_note ONLY: estimates.notes is internal, never printed
+    supabase.from('estimates').select('customer_note').eq('id', inv.estimate_id).maybeSingle(),
   ]);
 
   const state = proj.property_state || company?.default_state || 'US';
@@ -587,6 +673,11 @@ export async function createAgreement(userId: string, projectId: string, invoice
     deposit_percent: String(depositPct),
     deposit_amount: money2(firstAmt),
     balance_amount: money2(round2(total - firstAmt)),
+    // G1: the client-facing note as its own NOTES section (or nothing at all) — templates gained
+    // the placeholder via migration; fillTemplate blanks it on templates that never did
+    customer_notes_block: (estNote?.customer_note || '').trim()
+      ? `<h3>NOTES</h3><p style="white-space:pre-wrap">${escC(String(estNote!.customer_note).trim())}</p>`
+      : '',
     terms_blocks: renderTermsBlocks(tpl.terms_blocks),
   });
 
@@ -683,7 +774,9 @@ export async function uploadCompanyLogo(userId: string, uri: string): Promise<st
 export type JobDetail = {
   // markupPercent = new scheme (% already embedded in unit prices); legacyMarginRate = old scheme
   // (margin summed on top by the trigger) — kept so Edit can fold it into the prices.
-  estimate: { id: string; total: number; subtotal: number; taxRate: number; tax: number; markupPercent: number; legacyMarginRate: number; status: string; notes: string | null } | null;
+  // notes = INTERNAL AI note (contractor language, never printed); customerNote = client-facing
+  // note that prints on documents (G1); customerNoteSrc = the pre-translation original.
+  estimate: { id: string; total: number; subtotal: number; taxRate: number; tax: number; markupPercent: number; legacyMarginRate: number; status: string; notes: string | null; customerNote: string | null; customerNoteSrc: string | null } | null;
   items: LineItem[];
   // F12: paymentMode/dueDate/deposit* + schedule re-hydrate the plan; payments is the ledger and
   // amountPaid its Σ (a legacy 'Paid' invoice without ledger rows counts as fully paid).
@@ -705,7 +798,11 @@ export type JobDetail = {
     amountPaid: number;
   } | null;
   client: { name: string; addr: string; city: string; email: string; phone: string } | null;
+  // job-site address (projects.address/city/zip/property_state) — the WORK address (G5).
+  // Legacy rows may still hold the client's address there (old createJob wrote client.addr).
+  jobSite: { address: string; city: string; zip: string; state: string };
   photoUrls: string[];
+  docPhotoUrls: string[]; // curated subset of photoUrls that prints on the quote (G2, max 6)
   agreement: { id: string; token: string; status: string; signedName: string | null; signedDate: string | null } | null;
   closed: ClosedKind | null; // lost/archived (projects.status) — orthogonal to the derived stage
 };
@@ -716,7 +813,7 @@ const asPaymentMode = (m: unknown): PaymentMode => (m === 'deposit' || m === 'in
 export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
   const estRes = await supabase
     .from('estimates')
-    .select('id, total, grand_total, subtotal, tax_rate, tax_amount, margin_rate, markup_percent, status, notes, estimate_notes')
+    .select('id, total, grand_total, subtotal, tax_rate, tax_amount, margin_rate, markup_percent, status, notes, estimate_notes, customer_note, customer_note_src')
     .eq('project_id', projectId)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -765,7 +862,9 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
   if (inv?.id) {
     const [schRes, payRes] = await Promise.all([
       supabase.from('invoice_schedule').select('id, label, amount, due_date, phase_id, sort').eq('invoice_id', inv.id).order('sort', { ascending: true }),
-      supabase.from('invoice_payments').select('id, amount, paid_at, method, schedule_id').eq('invoice_id', inv.id).order('paid_at', { ascending: true }),
+      // created_at tiebreaker: paid_at is date-only, and same-day payments must keep a stable
+      // order so a re-issued receipt always shows the same running balance
+      supabase.from('invoice_payments').select('id, amount, paid_at, method, schedule_id').eq('invoice_id', inv.id).order('paid_at', { ascending: true }).order('created_at', { ascending: true }),
     ]);
     if (schRes.error) throw schRes.error;
     if (payRes.error) throw payRes.error;
@@ -784,7 +883,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
 
   // real client for the invoice "Bill to"
   let client: JobDetail['client'] = null;
-  const projRes = await supabase.from('projects').select('client_id, photo_urls, status').eq('id', projectId).maybeSingle();
+  const projRes = await supabase.from('projects').select('client_id, photo_urls, doc_photo_urls, status, address, city, zip, property_state').eq('id', projectId).maybeSingle();
   if (projRes.data?.client_id) {
     const { data: c } = await supabase
       .from('clients')
@@ -796,7 +895,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
 
   return {
     estimate: est
-      ? { id: est.id, total: Number(est.total ?? est.grand_total ?? 0), subtotal: Number(est.subtotal ?? 0), taxRate: Number(est.tax_rate ?? 0), tax: Number(est.tax_amount ?? 0), markupPercent: markupPct, legacyMarginRate: Number(est.margin_rate ?? 0), status: est.status, notes: est.notes ?? est.estimate_notes ?? null }
+      ? { id: est.id, total: Number(est.total ?? est.grand_total ?? 0), subtotal: Number(est.subtotal ?? 0), taxRate: Number(est.tax_rate ?? 0), tax: Number(est.tax_amount ?? 0), markupPercent: markupPct, legacyMarginRate: Number(est.margin_rate ?? 0), status: est.status, notes: est.notes ?? est.estimate_notes ?? null, customerNote: est.customer_note ?? null, customerNoteSrc: est.customer_note_src ?? null }
       : null,
     items,
     invoice: inv
@@ -820,7 +919,14 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
         }
       : null,
     client,
+    jobSite: {
+      address: projRes.data?.address || '',
+      city: projRes.data?.city || '',
+      zip: projRes.data?.zip || '',
+      state: projRes.data?.property_state || '',
+    },
     photoUrls: Array.isArray(projRes.data?.photo_urls) ? (projRes.data!.photo_urls as string[]) : [],
+    docPhotoUrls: Array.isArray(projRes.data?.doc_photo_urls) ? (projRes.data!.doc_photo_urls as string[]) : [],
     agreement: agr ? { id: agr.id, token: agr.token, status: agr.status, signedName: agr.signed_name, signedDate: agr.signed_date } : null,
     closed: closedFromStatus(projRes.data?.status),
   };
@@ -838,6 +944,7 @@ export type ProgressPhase = {
   order: number;
   notes: string | null;
   visibleToClient: boolean;
+  autoSeeded: boolean; // created from a quote line item (G4) — sync may remove it while untouched
   photos: PhasePhoto[];
   comments: PhaseComment[];
 };
@@ -845,7 +952,7 @@ export type ProgressPhase = {
 export async function fetchPhases(projectId: string): Promise<ProgressPhase[]> {
   const { data: phases, error } = await supabase
     .from('project_phases')
-    .select('id, name, status, phase_order, notes, is_visible_to_client')
+    .select('id, name, status, phase_order, notes, is_visible_to_client, auto_seeded')
     .eq('project_id', projectId)
     .order('phase_order', { ascending: true });
   if (error) throw error;
@@ -881,9 +988,95 @@ export async function fetchPhases(projectId: string): Promise<ProgressPhase[]> {
     order: p.phase_order ?? 0,
     notes: p.notes ?? null,
     visibleToClient: p.is_visible_to_client !== false,
+    autoSeeded: !!p.auto_seeded,
     photos: byPhase.get(p.id) || [],
     comments: commentsByPhase.get(p.id) || [],
   }));
+}
+
+export async function countProjectPhases(projectId: string): Promise<number> {
+  const { count } = await supabase.from('project_phases').select('id', { count: 'exact', head: true }).eq('project_id', projectId);
+  return count || 0;
+}
+
+// Seed the progress tab from the quote (G4): one phase per line item, in item order, named after
+// the item's description (deduped by seedPhasePlan). Only meant for an EMPTY progress tab — the
+// count guard makes a double tap (or the post-invoice prompt racing the button) a no-op instead
+// of a duplicate set. Returns how many phases were created.
+export async function seedPhasesFromEstimate(userId: string, projectId: string, estimateId: string): Promise<number> {
+  const existing = await countProjectPhases(projectId);
+  if (existing > 0) return 0;
+  const { data: items, error } = await supabase.from('line_items').select('description').eq('estimate_id', estimateId).order('item_order', { ascending: true });
+  if (error) throw error;
+  const plan = seedPhasePlan((items || []).map((it: any) => ({ desc: it.description || '' })));
+  if (!plan.length) return 0;
+  const rows = plan.map((p) => ({
+    project_id: projectId,
+    estimate_id: estimateId,
+    user_id: userId,
+    name: p.name,
+    phase_order: p.order,
+    status: 'not_started',
+    is_visible_to_client: true,
+    auto_seeded: true,
+  }));
+  const { error: insErr } = await supabase.from('project_phases').insert(rows);
+  if (insErr) throw insErr;
+  return rows.length;
+}
+
+// Re-align the seeded phases with the CURRENT quote items after an edit (G4). All the decision
+// logic lives in syncPhasePlan (pure, unit-tested): it only ever deletes an auto-seeded phase
+// that is still not_started with no photos/comments, and creates phases for items that have no
+// homonymous phase. New phases append after the current max order.
+export async function syncPhasesWithEstimate(userId: string, projectId: string, estimateId: string): Promise<{ removed: number; created: number }> {
+  const [phRes, liRes] = await Promise.all([
+    supabase.from('project_phases').select('id, name, status, phase_order, auto_seeded').eq('project_id', projectId),
+    supabase.from('line_items').select('description').eq('estimate_id', estimateId).order('item_order', { ascending: true }),
+  ]);
+  if (phRes.error) throw phRes.error;
+  if (liRes.error) throw liRes.error;
+  const phases = phRes.data || [];
+
+  // a phase "has content" when any photo or comment hangs off it — those are never removed
+  const ids = phases.map((p: any) => p.id);
+  const withContent = new Set<string>();
+  if (ids.length) {
+    const [photos, comments] = await Promise.all([
+      supabase.from('phase_photos').select('phase_id').in('phase_id', ids),
+      supabase.from('phase_comments').select('phase_id').in('phase_id', ids),
+    ]);
+    (photos.data || []).forEach((r: any) => withContent.add(r.phase_id));
+    (comments.data || []).forEach((r: any) => withContent.add(r.phase_id));
+  }
+
+  const nextOrder = phases.length ? Math.max(...phases.map((p: any) => Number(p.phase_order) || 0)) + 1 : 0;
+  const plan = syncPhasePlan(
+    phases.map((p: any) => ({ id: p.id, name: p.name || '', autoSeeded: !!p.auto_seeded, status: p.status || 'not_started', hasContent: withContent.has(p.id) })),
+    (liRes.data || []).map((it: any) => ({ desc: it.description || '' })),
+    nextOrder
+  );
+
+  if (plan.removeIds.length) {
+    // photos/comments cascade on delete, but removable phases have none by definition
+    const { error } = await supabase.from('project_phases').delete().in('id', plan.removeIds);
+    if (error) throw error;
+  }
+  if (plan.create.length) {
+    const rows = plan.create.map((p) => ({
+      project_id: projectId,
+      estimate_id: estimateId,
+      user_id: userId,
+      name: p.name,
+      phase_order: p.order,
+      status: 'not_started',
+      is_visible_to_client: true,
+      auto_seeded: true,
+    }));
+    const { error } = await supabase.from('project_phases').insert(rows);
+    if (error) throw error;
+  }
+  return { removed: plan.removeIds.length, created: plan.create.length };
 }
 
 // project_phases.estimate_id is NOT NULL — the caller passes the job's estimate id.
