@@ -67,7 +67,10 @@ async function uploadProjectPhotos(userId: string, projectId: string, photos: Ph
         });
         if (!m.base64) return null;
         const path = `${userId}/${projectId}/photo_${i}.jpg`;
-        const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, decode(m.base64), { contentType: 'image/jpeg', upsert: true });
+        // NO upsert: x-upsert demands a SELECT policy the office role doesn't have on the
+        // owner's folder (the recurring B1 class — 3rd bite, caught by the Onda E reviewer).
+        // The path contains a freshly created projectId, so overwrite semantics buy nothing.
+        const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, decode(m.base64), { contentType: 'image/jpeg' });
         if (error) return null;
         const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
         return data?.publicUrl || null;

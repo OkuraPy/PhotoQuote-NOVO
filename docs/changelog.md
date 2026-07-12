@@ -4,6 +4,30 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-12 11:50] — fix: vereditos dos revisores D e E — todos os achados corrigidos
+- **Revisor D (APROVADO c/ ressalva dura)**: A1 — o wipe de storage do delete-account usava list()
+  NÃO-recursivo: pastas voltam como entradas virtuais e remove('pasta') é no-op silencioso → NENHUMA
+  foto aninhada (uid/projeto/…, uid/projeto/fase/…) era apagada, enquanto a privacy policy publicada
+  promete apagamento (bloqueante de SUBMISSÃO à loja). Fix: walk recursivo (id===null ⇒ pasta ⇒ desce;
+  remove em lotes de 100) → **delete-account v2 deployada e RE-PROVADA E2E**: conta descartável com
+  foto aninhada E duplo-aninhada → ambas mortas (400) pós-delete; latência 16,4s→4,7s (resolve M3).
+  M1: PNGs de assinatura (PII do cliente final, bucket público, indexados só por
+  agreements.signature_image_url) ficavam órfãos — agora os paths são coletados ANTES do cascade e
+  removidos. M2: texto da privacy ajustado ("unguessable links" + remoção na exclusão). B1: copy
+  "save up to 25%". B2-B6 registrados (FKs NO ACTION p/ CASCADE em migration futura; gate de office
+  sob dono expirado = quando billing ativar).
+- **Revisor E (REPROVOU → corrigido)**: BLOQUEANTE — 3ª mordida da classe B1: uploadProjectPhotos
+  (api.ts:70) com upsert:true; office subindo na pasta do DONO só tem INSERT → x-upsert exige SELECT
+  → 403-em-400 engolido pelo best-effort → fotos de capa + doc_photo_urls sumiam em TODO job criado
+  pelo office. Provado pelo revisor em prod (Probe A upsert=400/403; Probe B sem upsert=200). Fix:
+  upsert removido (path é projectId recém-criado — overwrite inútil). MÉDIO — UPDATE de estimates/
+  invoices do office sem WITH CHECK permitia mover project_id/estimate_id p/ ref de outro tenant
+  (self-harm, sem leak, mas viola a invariante documentada) → migration 20260712180000 APLICADA com
+  WITH CHECK simétrico ao INSERT. BAIXO (RPC extra p/ field) documentado, inócuo.
+- **Gates**: tsc limpo, jest 108/108; zero resíduos de E2E em prod (contas/objetos/policies tmp).
+- **Lição de arquitetura (3 mordidas)**: TODO upload supabase.storage NUNCA usa upsert:true a menos
+  que exista policy SELECT para o papel que sobe; nomes únicos (uuid/projectId) tornam upsert inútil.
+
 ### [2026-07-12 10:40] — feat: ONDA E — papel OFFICE completo (banco + app)
 - **O que mudou**: o funcionário de ESCRITÓRIO virou realidade. Banco (migration 20260712170000,
   APLICADA): 24 policies novas — office lê FATURAS/pagamentos/cronograma (faltava) e ESCREVE o

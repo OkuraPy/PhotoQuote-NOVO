@@ -5,7 +5,7 @@
 //   - memberships onde é membro (team_members.member_user_id = uid)
 //   - o time dele, se for owner (team_members.owner_id = uid) — as CONTAS dos membros
 //     permanecem (são pessoas reais; ficam sem acesso a nada, viram conta vazia)
-//   - ai_jobs do usuário (FK sem cascade — apagar antes destrava o deleteUser)
+//   - ai_jobs do usuário (sem FK em prod; delete explícito por higiene e à prova de futuro)
 //   - objetos de storage nas pastas {uid}/ dos buckets do app (best-effort)
 //   - auth.users -> CASCADE: public.users -> clients/projects/price_tables -> estimates,
 //     line_items, invoices (+schedule/payments/line_items), agreements, media, fases,
@@ -44,7 +44,24 @@ Deno.serve(async (req: Request) => {
     const uid = callerData?.user?.id;
     if (callerErr || !uid) return json({ error: 'unauthorized' }, 401);
 
-    // memberships (both directions) + ai_jobs (FK without cascade would block deleteUser)
+    // signature PNGs live OUTSIDE {uid}/ (contract-signatures/signatures/…) and their only
+    // index is agreements.signature_image_url — collect the paths BEFORE the cascade eats
+    // the rows, or the client PII becomes unfindable orphans in a public bucket (review M1).
+    let sigPaths: string[] = [];
+    try {
+      const { data: agrs } = await sb
+        .from('agreements')
+        .select('signature_image_url')
+        .eq('user_id', uid)
+        .not('signature_image_url', 'is', null);
+      sigPaths = (agrs || [])
+        .map((a: { signature_image_url: string }) => String(a.signature_image_url).split('/contract-signatures/')[1] || '')
+        .filter((p: string) => p.length > 0);
+    } catch (e) {
+      console.error('[delete-account] signature path collection failed:', e);
+    }
+
+    // memberships (both directions) + ai_jobs (delete explícito por segurança/higiene)
     const { error: m1 } = await sb.from('team_members').delete().eq('member_user_id', uid);
     if (m1) {
       console.error('[delete-account] memberships delete failed:', m1.message);
@@ -61,18 +78,42 @@ Deno.serve(async (req: Request) => {
       return json({ error: 'delete_failed' }, 500);
     }
 
-    // storage: wipe {uid}/ folders (best-effort — an orphan file must never block the deletion)
+    // storage: wipe {uid}/ RECURSIVELY (best-effort — an orphan file must never block the
+    // deletion). list() is NOT recursive: folders come back as virtual entries (id === null)
+    // and removing a "folder" path is a silent no-op — the app's real paths are nested
+    // (uid/project/photo.jpg, uid/project/phase/uuid.jpg), so the old flat wipe deleted
+    // nothing and looped blind for ~16s (review A1/M3, proven live).
+    const listAllFiles = async (bucket: string, prefix: string, out: string[], depth: number): Promise<void> => {
+      if (depth > 6) return; // app nesting is at most uid/project/phase/file
+      for (let page = 0; page < 50; page++) {
+        const { data: objs, error } = await sb.storage.from(bucket).list(prefix, { limit: 100, offset: page * 100 });
+        if (error || !objs || objs.length === 0) break;
+        for (const o of objs as { name: string; id: string | null }[]) {
+          const path = `${prefix}/${o.name}`;
+          if (o.id === null) await listAllFiles(bucket, path, out, depth + 1);
+          else out.push(path);
+        }
+        if (objs.length < 100) break;
+      }
+    };
     for (const bucket of APP_BUCKETS) {
       try {
-        for (let page = 0; page < 40; page++) {
-          const { data: objs } = await sb.storage.from(bucket).list(uid, { limit: 100 });
-          if (!objs || objs.length === 0) break;
-          const paths = objs.map((o: { name: string }) => `${uid}/${o.name}`);
-          const { error: rmErr } = await sb.storage.from(bucket).remove(paths);
-          if (rmErr) break; // best-effort: log-and-move-on
+        const files: string[] = [];
+        await listAllFiles(bucket, uid, files, 0);
+        for (let i = 0; i < files.length; i += 100) {
+          const { error: rmErr } = await sb.storage.from(bucket).remove(files.slice(i, i + 100));
+          if (rmErr) console.error(`[delete-account] remove batch failed (${bucket}):`, rmErr.message);
         }
       } catch (e) {
         console.error(`[delete-account] storage wipe ${bucket} failed:`, e);
+      }
+    }
+    // client signatures collected above (public bucket, PII of the END CLIENT — must go)
+    if (sigPaths.length) {
+      try {
+        await sb.storage.from('contract-signatures').remove(sigPaths);
+      } catch (e) {
+        console.error('[delete-account] signature wipe failed:', e);
       }
     }
 

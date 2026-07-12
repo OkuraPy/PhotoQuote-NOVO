@@ -21,7 +21,7 @@ registerStrings({
   'plans.activePlan': { en: 'Current plan: {plan}', es: 'Plan actual: {plan}', pt: 'Plano atual: {plan}' },
   'plans.monthly': { en: 'Monthly', es: 'Mensual', pt: 'Mensal' },
   'plans.annual': { en: 'Annual', es: 'Anual', pt: 'Anual' },
-  'plans.annualSave': { en: 'save ~25%', es: 'ahorra ~25%', pt: 'economize ~25%' },
+  'plans.annualSave': { en: 'save up to 25%', es: 'ahorra hasta 25%', pt: 'economize até 25%' },
   'plans.perMonth': { en: '/mo', es: '/mes', pt: '/mês' },
   'plans.billedYearly': { en: 'billed {price} yearly', es: 'facturado {price} al año', pt: 'cobrado {price} ao ano' },
   'plans.soloBlurb': { en: 'Everything for one contractor: AI quotes, invoices, payments, e-sign contracts, client portal, job phases.', es: 'Todo para un contratista: presupuestos con IA, facturas, pagos, contratos e-sign, portal del cliente, fases de obra.', pt: 'Tudo para um empreiteiro: orçamentos com IA, faturas, pagamentos, contratos e-sign, portal do cliente, fases da obra.' },
