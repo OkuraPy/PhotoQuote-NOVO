@@ -476,15 +476,19 @@ export function Stepper({ value, onMinus, onPlus, width = 54 }: { value: string;
 }
 
 /* ============================ bottom tab bar ============================ */
-export function TabBar({ active, onNav }: { active: string; onNav: (k: string) => void }) {
+// `hidden` drops tabs a role must not see (field mode hides Clients) — the bar itself stays,
+// so the layout & muscle memory of the remaining tabs don't shift around per role.
+export function TabBar({ active, onNav, hidden }: { active: string; onNav: (k: string) => void; hidden?: string[] }) {
   const t = useT();
   const insets = useSafeAreaInsets();
-  const tabs: [string, string][] = [
-    ['home', 'home'],
-    ['jobs', 'layers'],
-    ['clients', 'users'],
-    ['profile', 'user'],
-  ];
+  const tabs: [string, string][] = (
+    [
+      ['home', 'home'],
+      ['jobs', 'layers'],
+      ['clients', 'users'],
+      ['profile', 'user'],
+    ] as [string, string][]
+  ).filter(([k]) => !hidden?.includes(k));
   return (
     <View
       style={{

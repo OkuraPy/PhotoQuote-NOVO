@@ -11,6 +11,7 @@ import { ClientsScreen, HomeScreen, JobsScreen, ProfileScreen } from './screens/
 import { AttachScreen, CameraScreen, EstimateScreen } from './screens/Flow';
 import { JobScreen } from './screens/Job';
 import { ChangePasswordScreen, ClientEditScreen, ClientScreen, CompanyScreen, LanguageScreen } from './screens/Misc';
+import { TeamScreen } from './screens/Team';
 
 const AUTH_SCREENS: Record<string, React.ComponentType<any>> = {
   login: LoginScreen,
@@ -32,6 +33,7 @@ const APP_SCREENS: Record<string, React.ComponentType<any>> = {
   profileCompany: CompanyScreen,
   changePassword: ChangePasswordScreen,
   language: LanguageScreen,
+  team: TeamScreen,
 };
 const TAB_ROOTS = ['home', 'jobs', 'clients', 'profile'];
 const FULLBLEED = ['camera'];
@@ -87,6 +89,7 @@ function AuthFlow() {
 /* ---------- logged-in flow ---------- */
 function AppFlow() {
   const { stack, setStack, top, back } = useStack('home');
+  const { role } = useAuth(); // field members don't get the Clients tab (RLS hides clients anyway)
   const [store, setStore] = useState<V2Store>(initStore);
   // stable `up` + memoized context value: a store write re-renders the top screen once, and
   // nav-only re-renders don't churn the context identity (typing used to re-render everything)
@@ -117,7 +120,7 @@ function AppFlow() {
       <SafeAreaView style={{ flex: 1, backgroundColor: fullbleed ? '#0C1116' : colors.bg }} edges={fullbleed ? ['bottom'] : showTabs ? ['top'] : ['top', 'bottom']}>
         <View style={{ flex: 1 }}>
           <Comp go={go} back={back} params={top.params} />
-          {showTabs ? <TabBar active={top.name} onNav={(k) => go(k, {}, 'tab')} /> : null}
+          {showTabs ? <TabBar active={top.name} onNav={(k) => go(k, {}, 'tab')} hidden={role === 'field' ? ['clients'] : undefined} /> : null}
         </View>
       </SafeAreaView>
     </StoreCtx.Provider>

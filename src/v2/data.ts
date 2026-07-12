@@ -350,6 +350,45 @@ export function needsPhaseSync(phases: SyncPhase[], items: { desc: string }[]): 
   return plan.removeIds.length > 0 || plan.create.length > 0;
 }
 
+/* ---------------- Team (Onda B): roles & credential helpers (pure) ---------------- */
+// App-level role of the signed-in account. 'owner' = no team_members row (the account owns its
+// data); 'office'/'field' come from team_members.role. MVP note: the UI only CREATES 'field'
+// members (office lands in a later wave), but the whole layer already understands 'office'.
+export type TeamRole = 'owner' | 'office' | 'field';
+export type MemberRole = Exclude<TeamRole, 'owner'>; // what team_members.role actually stores
+
+// Money-visibility matrix: owner and office always see values; field only with the per-member
+// can_see_financials flag (the RLS enforces the same rule server-side — this mirrors it for UI).
+export function canSeeMoney(role: TeamRole, memberFlag?: boolean | null): boolean {
+  return role === 'field' ? !!memberFlag : true;
+}
+
+// Unambiguous alphabet (no 0/O/1/l/I): the owner often reads this password out loud to the crew.
+export const PASSWORD_ALPHABET = '23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ';
+// Map random bytes onto the alphabet (callers pass >= len bytes from expo-crypto; the modulo on
+// the index is only a never-crash guard for short inputs). The tiny modulo bias (256 % 52 ≠ 0)
+// is irrelevant here — this is a starter password the owner can freely retype.
+export function passwordFromBytes(bytes: ArrayLike<number>, len = 10): string {
+  let out = '';
+  for (let i = 0; i < len; i++) {
+    const b = bytes.length ? Number(bytes[i % bytes.length]) || 0 : 0;
+    out += PASSWORD_ALPHABET[b % PASSWORD_ALPHABET.length];
+  }
+  return out;
+}
+
+// The "send this to your employee" message. This is the OWNER talking to their own crew — not a
+// client-facing document — so it IS localized (owner's rule only bans non-English client output).
+export function credentialsMessage(locale: 'en' | 'es' | 'pt', p: { company?: string | null; email: string; password: string }): string {
+  const co = String(p.company || '').trim();
+  const L = {
+    en: { added: co ? `${co} added you to PhotoQuote.` : 'You were added to PhotoQuote.', how: 'Download the app and sign in with:', email: 'Email', pass: 'Password', change: 'You can change the password later in Profile → Change password.' },
+    es: { added: co ? `${co} te agregó a PhotoQuote.` : 'Te agregaron a PhotoQuote.', how: 'Descarga la app e inicia sesión con:', email: 'Correo', pass: 'Contraseña', change: 'Puedes cambiar la contraseña luego en Perfil → Cambiar contraseña.' },
+    pt: { added: co ? `${co} adicionou você ao PhotoQuote.` : 'Você foi adicionado ao PhotoQuote.', how: 'Baixe o aplicativo e entre com:', email: 'E-mail', pass: 'Senha', change: 'Você pode trocar a senha depois em Perfil → Alterar senha.' },
+  }[locale];
+  return `${L.added}\n${L.how}\n\n${L.email}: ${p.email}\n${L.pass}: ${p.password}\n\n${L.change}`;
+}
+
 export const COMPANY = {
   name: 'Apex Renovations',
   license: 'Lic. #GC-204881',

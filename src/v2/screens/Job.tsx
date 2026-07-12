@@ -4,13 +4,13 @@ import { ActivityIndicator, Alert, Image, Pressable, Share, ScrollView, Text, Vi
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
-import { addDaysISO, applyMarkup, balanceAfterPayment, calcTotals, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
+import { addDaysISO, applyMarkup, balanceAfterPayment, calcTotals, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { addPhaseComment, addPhasePhotos, agreementLink, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deriveStage, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, JobDetail, progressLink, ProgressPhase, PhaseStatus, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
+import { addPhaseComment, addPhasePhotos, agreementLink, assignMember, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deriveStage, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, JobDetail, progressLink, ProgressPhase, PhaseStatus, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { sendDoc } from '../lib/send';
 import { registerStrings, useT } from '../lib/i18n';
-import { Between, Btn, Card, CatChip, Chip, DecimalInput, Divider, Empty, Field, Input, LinkBtn, Nav, NavBtn, Row, SectionTitle, SendSheet, Sheet, StageChip, Stepper, useStore } from '../ui';
+import { Avatar, Between, Btn, Card, CatChip, Chip, DecimalInput, Divider, Empty, Field, Input, LinkBtn, Nav, NavBtn, Row, SectionTitle, SendSheet, Sheet, StageChip, Stepper, Switch, useStore } from '../ui';
 import { ClosedChip } from './Tabs';
 
 registerStrings({
@@ -234,6 +234,20 @@ registerStrings({
     es: 'Agrega conceptos con precios antes de generar la factura.',
     pt: 'Adicione itens com preços antes de gerar a fatura.',
   },
+  // team assignment (Onda B) — the owner picks which members see this job
+  'job.menu.assignTeam': { en: 'Assign team', es: 'Asignar equipo', pt: 'Atribuir equipe' },
+  'job.assign.title': { en: 'Assign team', es: 'Asignar equipo', pt: 'Atribuir equipe' },
+  'job.assign.sub': {
+    en: 'Members only see the jobs assigned to them.',
+    es: 'Los miembros solo ven los trabajos que se les asignan.',
+    pt: 'Os membros só veem os trabalhos atribuídos a eles.',
+  },
+  'job.assign.none': {
+    en: 'No team members yet. Add your crew first.',
+    es: 'Aún no hay miembros en el equipo. Agrega primero a tu personal.',
+    pt: 'Ainda não há membros na equipe. Adicione seu pessoal primeiro.',
+  },
+  'job.assign.goTeam': { en: 'Add members', es: 'Agregar miembros', pt: 'Adicionar membros' },
 });
 
 // Client-facing copy is ALWAYS English (owner's rule) — never run these through t().
@@ -287,12 +301,15 @@ export function JobScreen({ go, back, params }: NavProp) {
   const job = params?.job || null;
   const client = job ? null : store.aSel || null; // existing job uses realClient (from detail); new job uses the picked client
   const id = job?.id || (params && params.id) || 'new';
-  const tab = store.jobTab || 'quote';
+  // Onda B: ownerId keys the data (owner's id even for a member); role gates the UI. Field mode
+  // = progress only: the money/pipeline surfaces hide (the RLS wouldn't feed them anyway).
+  const { user, ownerId, role, canSeeFinancials, memberName } = useAuth();
+  const fieldMode = role === 'field';
+  const tab = fieldMode ? 'progress' : store.jobTab || 'quote';
   const setStage = (s: Stage) => up((st) => ({ stageOverride: { ...st.stageOverride, [id]: s } }));
   const clearStage = () => up((st) => { const o = { ...st.stageOverride }; delete o[id]; return { stageOverride: o }; });
   const setTab = (k: string) => up({ jobTab: k });
-  const { user } = useAuth();
-  const { data: company } = useQuery({ queryKey: ['company', user?.id], queryFn: () => fetchCompanyProfile(user!.id), enabled: !!user?.id });
+  const { data: company } = useQuery({ queryKey: ['company', ownerId], queryFn: () => fetchCompanyProfile(ownerId!), enabled: !!ownerId });
   const projectId: string | null = job?.projectId || job?.id || (params?.id && params.id !== 'new' ? params.id : null);
   const { data: detail } = useQuery({ queryKey: ['jobDetail', projectId], queryFn: () => fetchJobDetail(projectId!), enabled: !!projectId });
   const est = detail?.estimate;
@@ -357,6 +374,13 @@ export function JobScreen({ go, back, params }: NavProp) {
   /* ----- close (lost / archive) & reopen — the "more" menu on the nav ----- */
   const [menuOpen, setMenuOpen] = useState(false);
   const [closingBusy, setClosingBusy] = useState(false);
+  // team assignment sheet (owner only). The small delay lets the menu Modal finish dismissing —
+  // presenting a second Modal while the first animates out can wedge it on iOS.
+  const [assignOpen, setAssignOpen] = useState(false);
+  const openAssign = () => {
+    setMenuOpen(false);
+    setTimeout(() => setAssignOpen(true), 380);
+  };
   const setProjectStatus = async (status: 'Lost' | 'Archived' | 'Active') => {
     if (!projectId || closingBusy) return;
     setClosingBusy(true);
@@ -401,21 +425,21 @@ export function JobScreen({ go, back, params }: NavProp) {
   };
   const openGenerateInvoice = () => {
     if (inv) { clearStage(); setTab('invoice'); return; }
-    if (!user?.id || !est?.id || !projectId) { Alert.alert(t('job.alert.estimateNeeded'), t('job.alert.saveEstimateFirst')); return; }
+    if (!ownerId || !est?.id || !projectId) { Alert.alert(t('job.alert.estimateNeeded'), t('job.alert.saveEstimateFirst')); return; }
     // a $0 invoice can never be settled (payments must be > 0) — send them back to the items
     if (!(quoteTotals.total > 0)) { Alert.alert(t('job.zeroTotalTitle'), t('job.zeroTotalBody')); return; }
     setPlanSheet('generate');
   };
   const confirmPlan = async (plan: PaymentPlan) => {
-    if (!user?.id) return;
+    if (!ownerId) return;
     const editing = planSheet === 'edit';
     // freeze for the post-invoice phases prompt below — invalidate refreshes `est` under us
-    const [uid, estId, pid, nItems] = [user.id, est?.id, projectId, items.length];
+    const [uid, estId, pid, nItems] = [ownerId, est?.id, projectId, items.length];
     setSavingPlan(true);
     try {
       let downgraded = false;
-      if (editing && inv) ({ downgraded } = await updateInvoicePlan(user.id, inv.id, plan));
-      else if (est?.id && projectId) ({ downgraded } = await createInvoice(user.id, est.id, projectId, plan));
+      if (editing && inv) ({ downgraded } = await updateInvoicePlan(ownerId, inv.id, plan));
+      else if (est?.id && projectId) ({ downgraded } = await createInvoice(ownerId, est.id, projectId, plan));
       else return;
       await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
@@ -461,11 +485,11 @@ export function JobScreen({ go, back, params }: NavProp) {
   // (Unpaid / Partially Paid / Paid) is derived server-side from Σ(payments) vs total.
   // After a successful record the contractor is offered a receipt for it (G3).
   const confirmPayment = async (amount: number, method: string | null) => {
-    if (!user?.id || !inv?.id) return;
+    if (!ownerId || !inv?.id) return;
     const invoice = inv; // freeze — detail refetches under the alert below
     setSavingPay(true);
     try {
-      const { id: paymentId } = await recordInvoicePayment(user.id, invoice.id, { amount, method });
+      const { id: paymentId } = await recordInvoicePayment(ownerId, invoice.id, { amount, method });
       await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
       setPaySheet(false);
@@ -528,8 +552,8 @@ export function JobScreen({ go, back, params }: NavProp) {
   const generateContract = async () => {
     if (detail?.agreement) return shareContract(detail.agreement.token); // existing doc — resharing is safe
     if (!inv) { Alert.alert(t('job.alert.invoiceNeeded'), t('job.alert.generateInvoiceFirst')); return; }
-    if (!user?.id || !projectId) return;
-    const [uid, pid, invId] = [user.id, projectId, inv.id];
+    if (!ownerId || !projectId) return;
+    const [uid, pid, invId] = [ownerId, projectId, inv.id];
     // company guard before GENERATING: createAgreement freezes the company name into the contract HTML
     requireCompany(async () => {
       setGenningContract(true);
@@ -583,16 +607,20 @@ export function JobScreen({ go, back, params }: NavProp) {
   };
   // "already approved on the phone" shortcut — visible while the next step is still "send"
   const canApproveDirectly = !closed && next.act === 'send' && !!est?.id;
+  // field: value only with the per-member flag; the stage chip follows it (without financials
+  // the RLS starves deriveStage and it would show a fake "Draft" — hiding beats lying)
+  const showMoney = !fieldMode || canSeeFinancials;
 
   return (
     <>
       <Nav
-        title={cName || t('job.noClient')}
-        sub={name}
+        // field members usually can't read the client (RLS) — the job title beats "No client"
+        title={fieldMode ? name : cName || t('job.noClient')}
+        sub={fieldMode ? undefined : name}
         center
         onBack={back}
-        // the menu writes projects.status — only offered once the job exists in the DB
-        right={projectId ? <NavBtn icon="more" onPress={() => setMenuOpen(true)} /> : undefined}
+        // the menu writes projects.status / assignments — owner & office only, once the job exists
+        right={projectId && !fieldMode ? <NavBtn icon="more" onPress={() => setMenuOpen(true)} /> : undefined}
       />
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false}>
         <View style={{ backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: radii.xl, padding: 18, ...shadow.sm }}>
@@ -604,16 +632,24 @@ export function JobScreen({ go, back, params }: NavProp) {
                 <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.muted }}>{addr}</Text>
               </Row>
             </View>
-            {closed ? <ClosedChip kind={closed} lg /> : <StageChip stage={stage} lg />}
+            {/* stage chip hidden for ANY field member — invoices are RLS-hidden from them, so the
+                derived stage would lie (Invoiced/Paid reads as Approved) even with the money flag */}
+            {closed ? <ClosedChip kind={closed} lg /> : !fieldMode ? <StageChip stage={stage} lg /> : null}
           </Between>
-          <Text style={{ fontFamily: fonts.num, fontSize: 32, color: colors.ink, marginTop: 14, letterSpacing: -0.6 }}>
-            {vd}<Text style={{ color: colors.muted }}>{vc}</Text>
-          </Text>
-          <Divider />
-          <Timeline stage={stage} />
+          {showMoney ? (
+            <Text style={{ fontFamily: fonts.num, fontSize: 32, color: colors.ink, marginTop: 14, letterSpacing: -0.6 }}>
+              {vd}<Text style={{ color: colors.muted }}>{vc}</Text>
+            </Text>
+          ) : null}
+          {fieldMode ? null : (
+            <>
+              <Divider />
+              <Timeline stage={stage} />
+            </>
+          )}
         </View>
 
-        {closed ? (
+        {fieldMode ? null : closed ? (
           // a closed job has no "next step" — a thin banner with the way back replaces it
           <Row style={{ gap: 10, backgroundColor: closed === 'lost' ? colors.errorTint : '#EEF0F3', borderRadius: radii.lg, paddingVertical: 11, paddingHorizontal: 13, marginTop: 16 }}>
             <Icon name={closed === 'lost' ? 'flag' : 'layers'} size={15} color={closed === 'lost' ? colors.error : '#8A93A3'} />
@@ -641,14 +677,17 @@ export function JobScreen({ go, back, params }: NavProp) {
           </>
         ) : null}
 
-        {/* internal tabs */}
-        <View style={{ flexDirection: 'row', gap: 4, padding: 4, backgroundColor: '#EEF1F4', borderRadius: 14, marginTop: 16 }}>
-          {['quote', 'invoice', 'contract', 'progress'].map((k) => (
-            <Pressable key={k} onPress={() => setTab(k)} style={[{ flex: 1, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, tab === k && { backgroundColor: colors.card, ...shadow.sm }]}>
-              <Text style={{ fontFamily: fonts.bold, fontSize: 13.5, color: tab === k ? colors.ink : colors.muted }}>{t('job.tab.' + k)}</Text>
-            </Pressable>
-          ))}
-        </View>
+        {/* internal tabs — field members live on Progress only (Quote/Invoice/Contract are
+            financial surfaces the RLS returns empty anyway) */}
+        {fieldMode ? null : (
+          <View style={{ flexDirection: 'row', gap: 4, padding: 4, backgroundColor: '#EEF1F4', borderRadius: 14, marginTop: 16 }}>
+            {['quote', 'invoice', 'contract', 'progress'].map((k) => (
+              <Pressable key={k} onPress={() => setTab(k)} style={[{ flex: 1, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, tab === k && { backgroundColor: colors.card, ...shadow.sm }]}>
+                <Text style={{ fontFamily: fonts.bold, fontSize: 13.5, color: tab === k ? colors.ink : colors.muted }}>{t('job.tab.' + k)}</Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
 
         {tab === 'quote' && (
           <QuoteTab
@@ -680,7 +719,18 @@ export function JobScreen({ go, back, params }: NavProp) {
         )}
         {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} jobSite={jobSite} company={company} invoice={inv} quoteTotal={est?.total} genning={savingPlan} onGen={openGenerateInvoice} onRecordPayment={() => setPaySheet(true)} onEditPlan={() => setPlanSheet('edit')} onReceipt={onReceiptRow} receiptBusyId={receiptBusy} setSheet={(b: boolean) => (b ? requireCompany(() => up({ sheet: true })) : up({ sheet: false }))} />}
         {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={invoiceTotals} plan={invoicePlan} company={company} genning={genningContract} onGenerate={generateContract} />}
-        {tab === 'progress' && <ProgressTab projectId={projectId} estimateId={est?.id || null} userId={user?.id || null} items={items} companyName={(company as any)?.company_name || t('job.companyFallback')} />}
+        {tab === 'progress' && (
+          <ProgressTab
+            projectId={projectId}
+            estimateId={est?.id || null}
+            // storage paths & row user_id stay keyed by the OWNER — a member's photos land in the
+            // owner's folders so the whole team (and the client portal) sees one project album
+            userId={ownerId || null}
+            items={items}
+            // comments sign with the member's own name; the owner keeps signing as the company
+            authorName={role !== 'owner' && memberName ? memberName : (company as any)?.company_name || t('job.companyFallback')}
+          />
+        )}
       </ScrollView>
 
       <SendSheet
@@ -740,23 +790,29 @@ export function JobScreen({ go, back, params }: NavProp) {
         closed={closed}
         busy={closingBusy}
         canApprove={canApproveDirectly}
+        canAssign={role === 'owner' && !!projectId}
+        onAssign={openAssign}
         onApprove={() => { setMenuOpen(false); void setEstimateStatus('Approved', 'Approved'); }}
         onMarkLost={confirmMarkLost}
         onArchive={() => { void setProjectStatus('Archived'); }}
         onReopen={() => { void setProjectStatus('Active'); }}
       />
+      {role === 'owner' && projectId && user?.id ? (
+        <AssignSheet open={assignOpen} onClose={() => setAssignOpen(false)} projectId={projectId} ownerId={ownerId} assignedBy={user.id} goTeam={() => { setAssignOpen(false); go('team'); }} />
+      ) : null}
     </>
   );
 }
 
-/* ---------------- Job menu sheet: mark lost / archive / reopen (+ approve shortcut) ---------------- */
+/* ---------------- Job menu sheet: assign team / mark lost / archive / reopen (+ approve) ---------------- */
 // Same local-state pattern as the payment sheets. "Closed" is projects.status — the underlying
 // quote/invoice keep their statuses, so reopening restores the exact pipeline stage.
-function JobMenuSheet({ open, onClose, closed, busy, canApprove, onApprove, onMarkLost, onArchive, onReopen }: { open: boolean; onClose: () => void; closed: ClosedKind | null; busy: boolean; canApprove: boolean; onApprove: () => void; onMarkLost: () => void; onArchive: () => void; onReopen: () => void }) {
+function JobMenuSheet({ open, onClose, closed, busy, canApprove, canAssign, onAssign, onApprove, onMarkLost, onArchive, onReopen }: { open: boolean; onClose: () => void; closed: ClosedKind | null; busy: boolean; canApprove: boolean; canAssign: boolean; onAssign: () => void; onApprove: () => void; onMarkLost: () => void; onArchive: () => void; onReopen: () => void }) {
   const t = useT();
   const rows: { key: string; ico: string; col: string; bg: string; label: string; onPress: () => void }[] = closed
     ? [{ key: 'reopen', ico: 'trend', col: colors.primary, bg: colors.primaryTint, label: t('job.menu.reopen'), onPress: onReopen }]
     : [
+        ...(canAssign ? [{ key: 'assign', ico: 'users', col: colors.primary, bg: colors.primaryTint, label: t('job.menu.assignTeam'), onPress: onAssign }] : []),
         ...(canApprove ? [{ key: 'approve', ico: 'check', col: colors.success, bg: colors.successTint, label: t('job.approveDirectly'), onPress: onApprove }] : []),
         { key: 'lost', ico: 'flag', col: colors.error, bg: colors.errorTint, label: t('job.menu.markLost'), onPress: onMarkLost },
         { key: 'archive', ico: 'layers', col: colors.muted, bg: colors.chipBg, label: t('job.menu.archive'), onPress: onArchive },
@@ -772,6 +828,61 @@ function JobMenuSheet({ open, onClose, closed, busy, canApprove, onApprove, onMa
           {busy ? <ActivityIndicator size="small" color={colors.muted} /> : <Icon name="chevR" size={18} color="#C2C9D2" />}
         </Pressable>
       ))}
+    </Sheet>
+  );
+}
+
+/* ---------------- Assign team sheet (Onda B, owner only) ---------------- */
+// One switch per active member: on = the member sees this job (project_members row). Optimistic
+// toggle + invalidate, same pattern as the doc-photo selection; a duplicate insert is a no-op
+// server-side, so a raced double-tap can't corrupt anything.
+function AssignSheet({ open, onClose, projectId, ownerId, assignedBy, goTeam }: { open: boolean; onClose: () => void; projectId: string; ownerId: string | null; assignedBy: string; goTeam: () => void }) {
+  const t = useT();
+  const qc = useQueryClient();
+  const { data: members = [], isLoading } = useQuery({ queryKey: ['team', ownerId], queryFn: () => fetchTeam(ownerId!), enabled: open && !!ownerId });
+  const { data: assigned = [] } = useQuery({ queryKey: ['assignments', projectId], queryFn: () => fetchProjectAssignments(projectId), enabled: open });
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const isOn = (memberId: string) => assigned.some((a) => a.memberId === memberId);
+
+  const toggle = async (m: TeamMember) => {
+    if (busyId) return;
+    const on = isOn(m.id);
+    setBusyId(m.id);
+    qc.setQueryData(['assignments', projectId], (old?: { memberId: string }[]) =>
+      on ? (old || []).filter((a) => a.memberId !== m.id) : [...(old || []), { memberId: m.id }]
+    );
+    try {
+      if (on) await unassignMember(projectId, m.id);
+      else await assignMember(projectId, m.id, assignedBy);
+    } catch (e: any) {
+      Alert.alert(t('job.alert.couldNotUpdate'), e?.message || t('job.alert.tryAgain'));
+    } finally {
+      await qc.invalidateQueries({ queryKey: ['assignments', projectId] }); // re-sync with the DB truth
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title={t('job.assign.title')} sub={t('job.assign.sub')}>
+      {isLoading ? (
+        <View style={{ paddingVertical: 22, alignItems: 'center' }}><ActivityIndicator color={colors.primary} /></View>
+      ) : members.length === 0 ? (
+        <View style={{ alignItems: 'center', paddingVertical: 10 }}>
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.muted, textAlign: 'center', lineHeight: 19 }}>{t('job.assign.none')}</Text>
+          <Btn variant="soft" sm icon="users" title={t('job.assign.goTeam')} onPress={goTeam} style={{ marginTop: 14, paddingHorizontal: 18 }} />
+        </View>
+      ) : (
+        members.map((m) => (
+          <Pressable key={m.id} onPress={() => toggle(m)} disabled={!!busyId} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: colors.border, marginBottom: 10, opacity: busyId && busyId !== m.id ? 0.6 : 1 }}>
+            <Avatar text={initials(m.name)} size={40} radius={12} fontSize={14} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text numberOfLines={1} style={{ fontFamily: fonts.bold, fontSize: 14.5, color: colors.ink }}>{m.name}</Text>
+              <Text numberOfLines={1} style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 1 }}>{m.email}</Text>
+            </View>
+            {busyId === m.id ? <ActivityIndicator size="small" color={colors.muted} /> : <Switch on={isOn(m.id)} onPress={() => toggle(m)} />}
+          </Pressable>
+        ))
+      )}
     </Sheet>
   );
 }
@@ -1318,9 +1429,13 @@ const PHASE_STAT: Record<PhaseStatus, [string, string, string]> = {
 };
 const NEXT_PHASE_STATUS: Record<PhaseStatus, PhaseStatus> = { not_started: 'in_progress', in_progress: 'completed', completed: 'not_started' };
 
-function ProgressTab({ projectId, estimateId, userId, items, companyName }: { projectId: string | null; estimateId: string | null; userId: string | null; items: LineItem[]; companyName: string }) {
+function ProgressTab({ projectId, estimateId, userId, items, authorName }: { projectId: string | null; estimateId: string | null; userId: string | null; items: LineItem[]; authorName: string }) {
   const t = useT();
   const qc = useQueryClient();
+  // Field members work the phases (status/photos/comments) but don't reshape the plan or share
+  // the client link — those stay with the owner (and the RLS agrees).
+  const { role } = useAuth();
+  const fieldMode = role === 'field';
   const { data: phases = [], isLoading } = useQuery({ queryKey: ['phases', projectId], queryFn: () => fetchPhases(projectId!), enabled: !!projectId });
   const [sheet, setSheet] = useState(false);
   const [newName, setNewName] = useState('');
@@ -1335,7 +1450,7 @@ function ProgressTab({ projectId, estimateId, userId, items, companyName }: { pr
 
   // G4: seed one phase per quote item (empty tab), and re-align after the quote was edited.
   // The plan logic is pure (data.ts); only auto-seeded, untouched phases are ever removed.
-  const canSeed = !!userId && !!estimateId && items.length > 0;
+  const canSeed = !fieldMode && !!userId && !!estimateId && items.length > 0;
   const seedFromQuote = async () => {
     if (!canSeed || !projectId || seedBusy) return;
     setSeedBusy(true);
@@ -1372,7 +1487,7 @@ function ProgressTab({ projectId, estimateId, userId, items, companyName }: { pr
     if (!projectId || !cmPhase || !cmText.trim()) return;
     setCmBusy(true);
     try {
-      await addPhaseComment(projectId, cmPhase.id, companyName, cmText.trim());
+      await addPhaseComment(projectId, cmPhase.id, authorName, cmText.trim());
       setCmText('');
       refresh();
     } catch (e: any) {
@@ -1455,12 +1570,15 @@ function ProgressTab({ projectId, estimateId, userId, items, companyName }: { pr
     <View style={{ marginTop: 16 }}>
       <Between style={{ marginBottom: 14 }}>
         <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{phases.length ? t('job.phasesCount', { done, total: phases.length }) : t('job.workPhases')}</Text>
-        <Pressable onPress={shareWithClient} disabled={sharing} hitSlop={8}>
-          <Row style={{ gap: 5 }}>
-            <Icon name="link" size={14} color={colors.primary} />
-            <Text style={{ fontFamily: fonts.bold, fontSize: 13.5, color: colors.primary }}>{sharing ? t('job.working') : t('job.clientLink')}</Text>
-          </Row>
-        </Pressable>
+        {fieldMode ? null : (
+          // sharing the client link is the owner's move (it can mint a share token)
+          <Pressable onPress={shareWithClient} disabled={sharing} hitSlop={8}>
+            <Row style={{ gap: 5 }}>
+              <Icon name="link" size={14} color={colors.primary} />
+              <Text style={{ fontFamily: fonts.bold, fontSize: 13.5, color: colors.primary }}>{sharing ? t('job.working') : t('job.clientLink')}</Text>
+            </Row>
+          </Pressable>
+        )}
       </Between>
 
       {isLoading ? (
@@ -1495,7 +1613,7 @@ function ProgressTab({ projectId, estimateId, userId, items, companyName }: { pr
                       <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: c }}>{t('job.tapToAdvance', { label: t(labKey) })}</Text>
                     </Pressable>
                   </Row>
-                  <Pressable onPress={() => removePhase(p)} hitSlop={8}><Icon name="trash" size={16} color={colors.faint} /></Pressable>
+                  {fieldMode ? null : <Pressable onPress={() => removePhase(p)} hitSlop={8}><Icon name="trash" size={16} color={colors.faint} /></Pressable>}
                 </Between>
                 {p.notes ? <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 8, lineHeight: 19 }}>{p.notes}</Text> : null}
                 {p.photos.length ? (
@@ -1524,7 +1642,8 @@ function ProgressTab({ projectId, estimateId, userId, items, companyName }: { pr
         </View>
       ) : null}
 
-      <Btn icon="plus" title={t('job.addPhase')} variant="soft" onPress={() => setSheet(true)} style={{ marginTop: 14 }} />
+      {/* creating phases needs the estimate id (NOT NULL) — a no-financials member can't have it */}
+      {fieldMode ? null : <Btn icon="plus" title={t('job.addPhase')} variant="soft" onPress={() => setSheet(true)} style={{ marginTop: 14 }} />}
 
       <Sheet open={sheet} onClose={() => setSheet(false)} title={t('job.newPhase')} sub={t('job.newPhaseSub')}>
         <Field label={t('job.phaseName')}><Input value={newName} onChangeText={setNewName} placeholder={t('job.phaseName')} autoFocus /></Field>

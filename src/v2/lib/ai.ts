@@ -36,7 +36,8 @@ async function toDataUrls(photos: Photo[]): Promise<string[]> {
 }
 
 // Try to surface the function's JSON `error`/`reason` even when supabase-js wraps it in FunctionsHttpError.
-async function readErrorBody(error: any): Promise<string | null> {
+// Exported: api.ts reuses it for the create-team-member Edge Function (Onda B).
+export async function readErrorBody(error: any): Promise<string | null> {
   try {
     const body = await error?.context?.json?.();
     return body?.error || body?.reason || null;

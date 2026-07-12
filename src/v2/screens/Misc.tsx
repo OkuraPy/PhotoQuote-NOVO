@@ -100,8 +100,8 @@ registerStrings({
 export function ClientScreen({ go, back, params }: NavProp) {
   const t = useT();
   const c: Client | undefined = params?.client;
-  const { user } = useAuth();
-  const { data: allJobs = [] } = useQuery({ queryKey: ['jobs', user?.id], queryFn: () => fetchJobs(user!.id), enabled: !!user?.id });
+  const { ownerId } = useAuth();
+  const { data: allJobs = [] } = useQuery({ queryKey: ['jobs', ownerId], queryFn: () => fetchJobs(ownerId!), enabled: !!ownerId });
   const jobs = c?.id ? allJobs.filter((j) => j.clientId === c.id) : [];
   // real actions via deep links; disabled when the client has no phone/email on file
   const tel = (c?.phone || '').replace(/[^\d+]/g, ''); // dialers reject "(305) 555-0142" raw
@@ -179,7 +179,7 @@ export function ClientEditScreen({ back, params }: NavProp) {
   const t = useT();
   const existing: Client | undefined = params?.client;
   const editing = !!existing;
-  const { user } = useAuth();
+  const { ownerId } = useAuth(); // clients belong to the OWNER account (Onda B)
   const { up } = useStore();
   const qc = useQueryClient();
   const [name, setName] = useState(existing?.name || '');
@@ -205,7 +205,7 @@ export function ClientEditScreen({ back, params }: NavProp) {
 
   const save = async () => {
     if (!name.trim()) { Alert.alert(t('misc.required'), t('misc.clientNameRequired')); return; }
-    if (!user) return;
+    if (!ownerId) return;
     setBusy(true);
     try {
       // the city field holds "City, ST" (from the ZIP lookup or typed) — split into structured parts
@@ -215,7 +215,7 @@ export function ClientEditScreen({ back, params }: NavProp) {
       if (editing && existing) {
         await updateClient(existing.id, payload);
       } else {
-        const created = await createClient(user.id, payload);
+        const created = await createClient(ownerId, payload);
         // coming from the estimate flow → pre-select the new client back on the Attach screen
         if (params?.from === 'attach' && created?.id) {
           up({ aSel: { id: created.id, name: name.trim(), phone, email, addr: address, city } });
@@ -284,9 +284,9 @@ const deComma = (s: string) => s.replace(/,/g, '.');
 
 export function CompanyScreen({ back }: NavProp) {
   const t = useT();
-  const { user } = useAuth();
+  const { ownerId } = useAuth(); // the company profile is the owner's users row
   const qc = useQueryClient();
-  const { data: profile } = useQuery({ queryKey: ['company', user?.id], queryFn: () => fetchCompanyProfile(user!.id), enabled: !!user?.id });
+  const { data: profile } = useQuery({ queryKey: ['company', ownerId], queryFn: () => fetchCompanyProfile(ownerId!), enabled: !!ownerId });
   const [name, setName] = useState('');
   const [license, setLicense] = useState('');
   const [phone, setPhone] = useState('');
@@ -314,12 +314,12 @@ export function CompanyScreen({ back }: NavProp) {
   }, [profile]);
 
   const pickLogo = async () => {
-    if (!user) return;
+    if (!ownerId) return;
     const res = await ImagePicker.launchImageLibraryAsync({ allowsMultipleSelection: false, quality: 0.9 });
     if (res.canceled || !res.assets?.length) return;
     setLogoBusy(true);
     try {
-      const url = await uploadCompanyLogo(user.id, res.assets[0].uri);
+      const url = await uploadCompanyLogo(ownerId, res.assets[0].uri);
       setLogoUrl(url);
     } catch (e: any) {
       Alert.alert(t('misc.couldNotUploadLogo'), e?.message || t('misc.tryAgain'));
@@ -328,13 +328,13 @@ export function CompanyScreen({ back }: NavProp) {
     }
   };
   const save = async () => {
-    if (!user) return;
+    if (!ownerId) return;
     setBusy(true);
     try {
       const depNum = deposit.trim() === '' ? null : Math.max(0, Math.min(100, parseInt(deComma(deposit), 10) || 0));
       const taxNum = taxRate.trim() === '' ? null : Math.max(0, parseFloat(deComma(taxRate)) || 0);
       const marginNum = margin.trim() === '' ? null : Math.max(0, parseFloat(deComma(margin)) || 0);
-      await updateCompanyProfile(user.id, { company_name: name, company_license: license, company_phone: phone, company_email: email, company_address: address, default_deposit_percent: depNum, default_tax_percent: taxNum, default_margin_percent: marginNum, logo_url: logoUrl || null });
+      await updateCompanyProfile(ownerId, { company_name: name, company_license: license, company_phone: phone, company_email: email, company_address: address, default_deposit_percent: depNum, default_tax_percent: taxNum, default_margin_percent: marginNum, logo_url: logoUrl || null });
       qc.invalidateQueries({ queryKey: ['company'] });
       back();
     } catch (e: any) {

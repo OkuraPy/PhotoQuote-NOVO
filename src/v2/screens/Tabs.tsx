@@ -91,7 +91,25 @@ registerStrings({
   'tabs.logoAdded': { en: 'Added · shown on PDFs', es: 'Agregado · se muestra en los PDF', pt: 'Adicionado · aparece nos PDFs' },
   'tabs.logoAdd': { en: 'Add a logo', es: 'Agrega un logotipo', pt: 'Adicione um logotipo' },
   'tabs.team': { en: 'Team', es: 'Equipo', pt: 'Equipe' },
-  'tabs.teamVal': { en: '1 owner · invite members', es: '1 propietario · invita miembros', pt: '1 proprietário · convide membros' },
+  'tabs.teamVal': { en: 'Add members & permissions', es: 'Agrega miembros y permisos', pt: 'Adicione membros e permissões' },
+  // field-member mode (Onda B)
+  'tabs.myJobs': { en: 'My jobs', es: 'Mis trabajos', pt: 'Meus trabalhos' },
+  'tabs.fieldWelcomeSub': {
+    en: 'These are the jobs assigned to you.',
+    es: 'Estos son los trabajos asignados a ti.',
+    pt: 'Estes são os trabalhos atribuídos a você.',
+  },
+  'tabs.noAssignedJobs': {
+    en: 'No jobs assigned yet. Your team lead will assign you to a job.',
+    es: 'Aún no tienes trabajos asignados. Tu encargado te asignará a un trabajo.',
+    pt: 'Nenhum trabalho atribuído ainda. Seu responsável vai atribuir um trabalho a você.',
+  },
+  'tabs.partOfTeam': {
+    en: 'You’re part of the {company} team.',
+    es: 'Formas parte del equipo de {company}.',
+    pt: 'Você faz parte da equipe de {company}.',
+  },
+  'tabs.member': { en: 'Team member', es: 'Miembro del equipo', pt: 'Membro da equipe' },
   'tabs.defaults': { en: 'Defaults', es: 'Valores predeterminados', pt: 'Padrões' },
   'tabs.language': { en: 'Language', es: 'Idioma', pt: 'Idioma' },
   'tabs.defaultTaxRate': { en: 'Default tax rate', es: 'Tasa de impuesto predeterminada', pt: 'Taxa de imposto padrão' },
@@ -133,6 +151,16 @@ export function ClosedChip({ kind, lg }: { kind: ClosedKind; lg?: boolean }) {
 /* ---------------- JOB CARD ---------------- */
 export function JobCard({ j, i, onPress }: { j: Job; i: number; onPress: () => void }) {
   const t = useT();
+  const { role, canSeeFinancials } = useAuth();
+  // Field mode (Onda B): money hides behind the per-member flag, and the stage chip goes with it
+  // (the stage derives from estimates/invoices, which the RLS hides from a no-financials member —
+  // it would read as a fake "Draft"). The date fills the money slot so the row never looks broken.
+  const showMoney = canSeeFinancials;
+  // field NEVER sees the stage chip — invoices stay owner-only under RLS even with the financial
+  // toggle, so a billed/paid job would lie as "Approved" (reviewer finding A2)
+  const showStage = role !== 'field';
+  // clients are also RLS-hidden from field members — the job title beats a misleading "No client yet"
+  const headline = j.client || (role === 'field' ? j.title : t('tabs.noClientYet'));
   const [d, c] = split(j.value);
   return (
     <Pressable onPress={onPress}>
@@ -152,18 +180,22 @@ export function JobCard({ j, i, onPress }: { j: Job; i: number; onPress: () => v
           </View>
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text numberOfLines={1} style={{ fontFamily: fonts.extrabold, fontSize: 15, color: j.client ? colors.ink : colors.faint, letterSpacing: -0.2 }}>
-            {j.client || t('tabs.noClientYet')}
+          <Text numberOfLines={1} style={{ fontFamily: fonts.extrabold, fontSize: 15, color: j.client || role === 'field' ? colors.ink : colors.faint, letterSpacing: -0.2 }}>
+            {headline}
           </Text>
           <Row style={{ gap: 5, marginTop: 2 }}>
             <Icon name="mapPin" size={13} color={colors.faint} />
             <Text numberOfLines={1} style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, flex: 1 }}>{j.addr}</Text>
           </Row>
           <Between style={{ marginTop: 9 }}>
-            <Text style={{ fontFamily: fonts.extrabold, fontSize: 15, color: colors.ink }}>
-              {d}<Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted }}>{c}</Text>
-            </Text>
-            {j.closed ? <ClosedChip kind={j.closed} /> : <StageChip stage={j.stage} />}
+            {showMoney ? (
+              <Text style={{ fontFamily: fonts.extrabold, fontSize: 15, color: colors.ink }}>
+                {d}<Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted }}>{c}</Text>
+              </Text>
+            ) : (
+              <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{j.date}</Text>
+            )}
+            {j.closed ? <ClosedChip kind={j.closed} /> : showStage ? <StageChip stage={j.stage} /> : null}
           </Between>
         </View>
       </Card>
@@ -174,23 +206,55 @@ export function JobCard({ j, i, onPress }: { j: Job; i: number; onPress: () => v
 /* ---------------- HOME ---------------- */
 export function HomeScreen({ go }: NavProp) {
   const t = useT();
-  const { user } = useAuth();
-  const { data: jobs = [], isLoading } = useQuery({ queryKey: ['jobs', user?.id], queryFn: () => fetchJobs(user!.id), enabled: !!user?.id });
-  const { data: profile } = useQuery({ queryKey: ['company', user?.id], queryFn: () => fetchCompanyProfile(user!.id), enabled: !!user?.id });
+  // ownerId keys every data query (Onda B): for a member it's the owner's id and the RLS trims
+  // the rows; for the owner it's their own id and NOTHING changes.
+  const { ownerId, role } = useAuth();
+  const { data: jobs = [], isLoading } = useQuery({ queryKey: ['jobs', ownerId], queryFn: () => fetchJobs(ownerId!), enabled: !!ownerId });
+  const { data: profile } = useQuery({ queryKey: ['company', ownerId], queryFn: () => fetchCompanyProfile(ownerId!), enabled: !!ownerId });
   // closed (lost/archived) jobs are out of every number except collected — see homeMetrics
   const { pipeline, invoiced, collected, active, openQuotes } = homeMetrics(jobs);
   const [pd, pc] = split(pipeline);
   const recent = jobs.filter((j) => !j.closed).slice(0, 4);
   const companyName = (profile as any)?.company_name || t('tabs.yourCompany');
+  const header = (
+    <Between style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4, alignItems: 'flex-start' }}>
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontFamily: fonts.bold, fontSize: 12, letterSpacing: 1.5, color: colors.muted }}>{t('tabs.welcomeBack')}</Text>
+        <Text numberOfLines={1} style={{ fontFamily: fonts.extrabold, fontSize: 28, color: colors.ink, letterSpacing: -0.7, marginTop: 4 }}>{companyName}</Text>
+      </View>
+      <Avatar text={initials(companyName)} size={40} radius={13} />
+    </Between>
+  );
+  if (role === 'field') {
+    // Field member home: no money metrics, no "New Quote" — just their assigned jobs (the RLS
+    // already limits `jobs` to the assigned ones; JobCard hides values on its own).
+    return (
+      <>
+        {header}
+        <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false}>
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 13.5, color: colors.muted, marginTop: 10 }}>{t('tabs.fieldWelcomeSub')}</Text>
+          <Btn title={t('tabs.myJobs')} icon="layers" onPress={() => go('jobs', {}, 'tab')} style={{ marginTop: 16, height: 60 }} />
+          <SectionTitle title={t('tabs.recentJobs')} link={t('tabs.seeAll')} onLink={() => go('jobs', {}, 'tab')} />
+          {isLoading ? (
+            <View style={{ paddingVertical: 30, alignItems: 'center' }}><ActivityIndicator color={colors.primary} /></View>
+          ) : recent.length === 0 ? (
+            <Card pad style={{ alignItems: 'center', paddingVertical: 28 }}>
+              <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.muted, textAlign: 'center' }}>{t('tabs.noAssignedJobs')}</Text>
+            </Card>
+          ) : (
+            <View style={{ gap: 10 }}>
+              {recent.map((j, i) => (
+                <JobCard key={j.id} j={j} i={i} onPress={() => go('job', { job: j })} />
+              ))}
+            </View>
+          )}
+        </ScrollView>
+      </>
+    );
+  }
   return (
     <>
-      <Between style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4, alignItems: 'flex-start' }}>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontFamily: fonts.bold, fontSize: 12, letterSpacing: 1.5, color: colors.muted }}>{t('tabs.welcomeBack')}</Text>
-          <Text numberOfLines={1} style={{ fontFamily: fonts.extrabold, fontSize: 28, color: colors.ink, letterSpacing: -0.7, marginTop: 4 }}>{companyName}</Text>
-        </View>
-        <Avatar text={initials(companyName)} size={40} radius={13} />
-      </Between>
+      {header}
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false}>
         <View style={{ gap: 12, marginTop: 16 }}>
           <LinearGradient colors={[colors.primary, colors.primary700]} start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }} style={{ borderRadius: radii.lg, padding: 16, ...shadow.btn }}>
@@ -251,9 +315,11 @@ function Metric({ icon, label, value, meta, valueColor }: { icon: string; label:
 export function JobsScreen({ go }: NavProp) {
   const t = useT();
   const { store, up } = useStore();
-  const { user } = useAuth();
-  const { data: jobs = [], isLoading } = useQuery({ queryKey: ['jobs', user?.id], queryFn: () => fetchJobs(user!.id), enabled: !!user?.id });
-  const filter = store.jobFilter || 'All';
+  const { ownerId, role } = useAuth();
+  const { data: jobs = [], isLoading } = useQuery({ queryKey: ['jobs', ownerId], queryFn: () => fetchJobs(ownerId!), enabled: !!ownerId });
+  // field members: no stage filters (stages derive from RLS-hidden financials) and no New Quote
+  const fieldMode = role === 'field';
+  const filter = fieldMode ? 'All' : store.jobFilter || 'All';
   const q = store.jobQ || '';
   // 'All' and the stage filters show OPEN jobs only; Lost/Archived list just their own closed kind
   const filters = ['All', ...STAGES, 'Lost', 'Archived'];
@@ -270,6 +336,7 @@ export function JobsScreen({ go }: NavProp) {
       </View>
       <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
         <SearchBar placeholder={t('tabs.searchClientOrAddress')} value={q} onChangeText={(v) => up({ jobQ: v })} />
+        {fieldMode ? null : (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }} style={{ marginTop: 12 }}>
           {filters.map((f) => (
             <Pressable
@@ -284,6 +351,7 @@ export function JobsScreen({ go }: NavProp) {
             </Pressable>
           ))}
         </ScrollView>
+        )}
       </View>
       <FlatList
         data={isLoading ? [] : list}
@@ -297,11 +365,15 @@ export function JobsScreen({ go }: NavProp) {
           isLoading ? (
             <View style={{ paddingTop: 40, alignItems: 'center' }}><ActivityIndicator color={colors.primary} /></View>
           ) : (
-            <Empty icon="layers" title={jobs.length === 0 ? t('tabs.noJobsYet') : t('tabs.noMatches')} body={jobs.length === 0 ? t('tabs.noJobsBody') : t('tabs.noMatchesJobsBody')} />
+            <Empty
+              icon="layers"
+              title={jobs.length === 0 ? t('tabs.noJobsYet') : t('tabs.noMatches')}
+              body={jobs.length === 0 ? (fieldMode ? t('tabs.noAssignedJobs') : t('tabs.noJobsBody')) : t('tabs.noMatchesJobsBody')}
+            />
           )
         }
       />
-      <Fab onPress={() => go('camera')} />
+      {fieldMode ? null : <Fab onPress={() => go('camera')} />}
     </>
   );
 }
@@ -320,12 +392,12 @@ export function Fab({ onPress }: { onPress: () => void }) {
 export function ClientsScreen({ go }: NavProp) {
   const t = useT();
   const { store, up } = useStore();
-  const { user } = useAuth();
+  const { ownerId } = useAuth();
   const q = store.clientQ || '';
   const { data: clients = [], isLoading } = useQuery({
-    queryKey: ['clients', user?.id],
-    queryFn: () => fetchClients(user!.id),
-    enabled: !!user?.id,
+    queryKey: ['clients', ownerId],
+    queryFn: () => fetchClients(ownerId!),
+    enabled: !!ownerId,
   });
   const ql = q.toLowerCase();
   const list = clients.filter((c) => c.name.toLowerCase().includes(ql) || c.phone.toLowerCase().includes(ql) || c.email.toLowerCase().includes(ql) || c.city.toLowerCase().includes(ql));
@@ -369,12 +441,45 @@ export function ClientsScreen({ go }: NavProp) {
 /* ---------------- PROFILE ---------------- */
 export function ProfileScreen({ go }: NavProp) {
   const t = useT();
-  const { user, signOut } = useAuth();
-  const { data: profile } = useQuery({ queryKey: ['company', user?.id], queryFn: () => fetchCompanyProfile(user!.id), enabled: !!user?.id });
+  const { user, signOut, ownerId, role, memberName } = useAuth();
+  const { data: profile } = useQuery({ queryKey: ['company', ownerId], queryFn: () => fetchCompanyProfile(ownerId!), enabled: !!ownerId });
   const company = (profile as any) || {};
   const companyName = company.company_name || t('tabs.yourCompany');
   const [locale] = useLocale();
   const localeLabel = LOCALES.find((l) => l.code === locale)?.label || 'English';
+  if (role === 'field') {
+    // Field member profile: the company belongs to the OWNER — no Company/Team/defaults here.
+    // Just who they are, whose team they're on, language, password and the way out.
+    const meName = memberName || user?.email || t('tabs.member');
+    return (
+      <>
+        <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>
+          <Text style={{ fontFamily: fonts.extrabold, fontSize: 30, color: colors.ink, letterSpacing: -0.7 }}>{t('tabs.profile')}</Text>
+        </View>
+        <ScrollView contentContainerStyle={[scroll, { paddingTop: 8 }]} showsVerticalScrollIndicator={false}>
+          <Card pad style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <Avatar text={initials(meName)} size={54} radius={16} fontSize={20} />
+            <View style={{ flex: 1 }}>
+              <Text numberOfLines={1} style={{ fontFamily: fonts.extrabold, fontSize: 17, color: colors.ink }}>{meName}</Text>
+              <Text numberOfLines={1} style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{user?.email || t('tabs.member')}</Text>
+            </View>
+          </Card>
+          <Card pad style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.primaryTint, borderWidth: 0, marginTop: 12 }}>
+            <Icon name="users" size={18} color={colors.primary} />
+            <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 13.5, color: colors.ink, lineHeight: 19 }}>{t('tabs.partOfTeam', { company: companyName })}</Text>
+          </Card>
+          <SectionTitle title={t('tabs.defaults')} />
+          <SetGroup rows={[{ ico: 'globe', name: t('tabs.language'), val: localeLabel, onPress: () => go('language') }]} />
+          <SectionTitle title={t('tabs.account')} />
+          <SetGroup rows={[
+            { ico: 'lock', name: t('tabs.changePassword'), onPress: () => go('changePassword') },
+            { ico: 'logout', name: t('tabs.logOut'), danger: true, onPress: () => signOut() },
+          ]} />
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, textAlign: 'center', marginTop: 20 }}>{t('tabs.footer')}</Text>
+        </ScrollView>
+      </>
+    );
+  }
   return (
     <>
       <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>
@@ -396,6 +501,8 @@ export function ProfileScreen({ go }: NavProp) {
         <SetGroup rows={[
           { ico: 'building', name: t('tabs.businessDetails'), val: t('tabs.businessDetailsVal'), onPress: () => go('profileCompany') },
           { ico: 'image', name: t('tabs.logo'), val: company.logo_url ? t('tabs.logoAdded') : t('tabs.logoAdd'), onPress: () => go('profileCompany') },
+          // Team management is the owner's alone (an office member sees everything else as-is)
+          ...(role === 'owner' ? [{ ico: 'users', name: t('tabs.team'), val: t('tabs.teamVal'), onPress: () => go('team') }] : []),
         ]} />
 
         <SectionTitle title={t('tabs.defaults')} />

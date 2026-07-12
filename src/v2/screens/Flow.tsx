@@ -542,8 +542,8 @@ export function EstimateScreen({ go, back, params }: NavProp) {
   const ranRef = useRef(false);
 
   // pre-fill tax/margin from the company defaults on a fresh estimate (once the profile loads)
-  const { user } = useAuth();
-  const { data: companyProfile } = useQuery({ queryKey: ['company', user?.id], queryFn: () => fetchCompanyProfile(user!.id), enabled: !!user?.id });
+  const { ownerId } = useAuth();
+  const { data: companyProfile } = useQuery({ queryKey: ['company', ownerId], queryFn: () => fetchCompanyProfile(ownerId!), enabled: !!ownerId });
   const defaultsRef = useRef(false);
   useEffect(() => {
     const p = companyProfile as any;
@@ -938,7 +938,8 @@ function NoteTranslator() {
 export function AttachScreen({ go, back }: NavProp) {
   const t = useT();
   const { store, up } = useStore();
-  const { user } = useAuth();
+  // the job/clients belong to the OWNER account (Onda B) — same id as the user for a solo account
+  const { ownerId } = useAuth();
   const queryClient = useQueryClient();
   const q = store.aQ || '';
   const sel = store.aSel;
@@ -946,29 +947,29 @@ export function AttachScreen({ go, back }: NavProp) {
   const [saving, setSaving] = useState(false);
 
   // search the user's REAL clients (was a mock list before)
-  const { data: clients = [] } = useQuery({ queryKey: ['clients', user?.id], queryFn: () => fetchClients(user!.id), enabled: !!user?.id });
+  const { data: clients = [] } = useQuery({ queryKey: ['clients', ownerId], queryFn: () => fetchClients(ownerId!), enabled: !!ownerId });
   const ql = q.toLowerCase();
   const results = q
     ? clients.filter((c) => c.name.toLowerCase().includes(ql) || (c.phone || '').includes(q) || (c.email || '').toLowerCase().includes(ql))
     : [];
   // existing client → its real id; quick-add (name only) → create it first
   async function resolveClientId(): Promise<string | null> {
-    if (!sel || !user?.id) return null;
+    if (!sel || !ownerId) return null;
     if (sel.id) return sel.id;
-    const created = await createClient(user.id, { name: sel.name || t('flow.newClient') });
+    const created = await createClient(ownerId, { name: sel.name || t('flow.newClient') });
     return created.id;
   }
 
   async function onSave(skipClient = false) {
     if (!store.items.length) { Alert.alert(t('flow.nothingToSaveTitle'), t('flow.nothingToSaveBody')); return; }
-    if (!user?.id) { Alert.alert(t('flow.notSignedInTitle'), t('flow.notSignedInBody')); return; }
+    if (!ownerId) { Alert.alert(t('flow.notSignedInTitle'), t('flow.notSignedInBody')); return; }
     setSaving(true);
     try {
       const clientId = skipClient ? null : await resolveClientId(); // client is optional
       const client = skipClient ? null : sel; // city fallback only — the address is the JOB SITE's
       const jobTitle = store.svcs[0] ? t('flow.jobSuffix', { service: store.svcs[0] }) : t('flow.newEstimate');
       const { projectId } = await createJob({
-        userId: user.id,
+        userId: ownerId,
         clientId,
         name: jobTitle,
         // G5: projects.address is the WORK address (typed/GPS). Fallback to the client's street

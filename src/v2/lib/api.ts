@@ -4,7 +4,8 @@ import * as Location from 'expo-location';
 import * as Crypto from 'expo-crypto';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from './supabase';
-import { Client, ClosedKind, closedFromStatus, deriveBase, deriveStage, DOC_PHOTO_CAP, Job, LineItem, paidTotal, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, Photo, planFromInvoice, planRows, rescaleSchedule, round2, ScheduleRow, seedPhasePlan, statusFromPayments, syncPhasePlan, toDateOnly } from '../data';
+import { readErrorBody } from './ai';
+import { Client, ClosedKind, closedFromStatus, deriveBase, deriveStage, DOC_PHOTO_CAP, Job, LineItem, MemberRole, paidTotal, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, Photo, planFromInvoice, planRows, rescaleSchedule, round2, ScheduleRow, seedPhasePlan, statusFromPayments, syncPhasePlan, toDateOnly } from '../data';
 export { deriveStage }; // re-exported for screens (lives in ../data so it's unit-testable)
 
 /* ---------------- Location: real ZIP (Zippopotam, keyless) + GPS (expo-location) ---------------- */
@@ -562,6 +563,100 @@ export async function updateProjectStatus(projectId: string, status: 'Lost' | 'A
   if (error) throw error;
 }
 
+/* ---------------- Team (Onda B): owner + field members ---------------- */
+// Opção B: the OWNER stays the data key. Members get a team_members row; project_members says
+// which jobs each member sees. The READ queries in this file never change — the RLS branches
+// added bank-side make fetchJobs(ownerId)/fetchPhases(...) return only what the caller may see.
+export type TeamMember = {
+  id: string;
+  userId: string | null; // member_user_id (the member's auth uid)
+  email: string;
+  name: string;
+  role: MemberRole;
+  canSeeFinancials: boolean;
+  createdAt: string;
+};
+
+export async function fetchTeam(ownerId: string): Promise<TeamMember[]> {
+  const { data, error } = await supabase
+    .from('team_members')
+    .select('id, member_user_id, member_email, full_name, role, can_see_financials, status, created_at')
+    .eq('owner_id', ownerId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data || []).map((m: any) => ({
+    id: m.id,
+    userId: m.member_user_id || null,
+    email: m.member_email || '',
+    name: m.full_name || m.member_email || 'Member',
+    role: m.role === 'office' ? 'office' : 'field',
+    canSeeFinancials: !!m.can_see_financials,
+    createdAt: m.created_at,
+  }));
+}
+
+// The owner creates the employee's account DIRECTLY (email + password — no invite flow, owner's
+// call). The Edge Function holds the service role: it creates the auth user + team_members row.
+// Known error codes come back as err.code so the screen can show its own localized message.
+export async function createTeamMember(input: { name: string; email: string; password: string; role: MemberRole; canSeeFinancials?: boolean }): Promise<{ memberId: string }> {
+  const { data, error } = await supabase.functions.invoke('create-team-member', {
+    body: {
+      name: input.name.trim(),
+      email: input.email.trim().toLowerCase(),
+      password: input.password,
+      role: input.role,
+      canSeeFinancials: !!input.canSeeFinancials,
+    },
+  });
+  const fail = (raw: string | null | undefined): never => {
+    // promote every known edge-function error to a code the UI maps to friendly copy
+    const known = ['email_in_use', 'member_exists', 'member_limit_reached', 'weak_password'];
+    const code = known.includes(String(raw)) ? String(raw) : null;
+    const err: any = new Error(String(raw || 'Could not create the team member.'));
+    err.code = code;
+    throw err;
+  };
+  if (error) fail(await readErrorBody(error) || error.message);
+  if (data?.error) fail(String(data.error));
+  if (!data?.ok || !data?.memberId) fail(null);
+  return { memberId: String(data.memberId) };
+}
+
+export async function updateTeamMember(id: string, patch: { role?: MemberRole; canSeeFinancials?: boolean }): Promise<void> {
+  const row: Record<string, unknown> = {};
+  if (patch.role !== undefined) row.role = patch.role;
+  if (patch.canSeeFinancials !== undefined) row.can_see_financials = patch.canSeeFinancials;
+  if (!Object.keys(row).length) return;
+  const { error } = await supabase.from('team_members').update(row).eq('id', id);
+  if (error) throw error;
+}
+
+// Soft removal on purpose: status='removed' keeps the row (photos/comments history stays
+// attributable) while the RLS stops honoring the membership. NEVER a hard delete.
+export async function removeTeamMember(id: string): Promise<void> {
+  const { error } = await supabase.from('team_members').update({ status: 'removed' }).eq('id', id);
+  if (error) throw error;
+}
+
+/* ----- project assignments: which members see this job ----- */
+export async function fetchProjectAssignments(projectId: string): Promise<{ memberId: string }[]> {
+  const { data, error } = await supabase.from('project_members').select('member_id').eq('project_id', projectId);
+  if (error) throw error;
+  return (data || []).map((r: any) => ({ memberId: r.member_id }));
+}
+
+export async function assignMember(projectId: string, memberId: string, assignedBy: string): Promise<void> {
+  const { error } = await supabase.from('project_members').insert({ project_id: projectId, member_id: memberId, assigned_by: assignedBy });
+  // a duplicate assignment (unique project+member) means the toggle already holds — not an error
+  if (error && (error as any).code !== '23505') throw error;
+}
+
+export async function unassignMember(projectId: string, memberId: string): Promise<void> {
+  const { error } = await supabase.from('project_members').delete().eq('project_id', projectId).eq('member_id', memberId);
+  if (error) throw error;
+}
+
 /* ---------------- Contract / Agreement (generated from the invoice) ---------------- */
 export const PORTAL_URL = 'https://photoquote-client-portal.vercel.app';
 export const agreementLink = (token: string) => `${PORTAL_URL}/agreement/sign/${token}`;
@@ -1116,7 +1211,10 @@ export async function addPhasePhotos(userId: string, projectId: string, phaseId:
       const m = await ImageManipulator.manipulateAsync(photo.uri, [{ resize: { width: 1280 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true });
       if (!m.base64) continue;
       const path = `${userId}/${projectId}/${phaseId}/${Crypto.randomUUID()}.jpg`;
-      const { error: upErr } = await supabase.storage.from(PHASE_BUCKET).upload(path, decode(m.base64), { contentType: 'image/jpeg', upsert: true });
+      // NO upsert: the name is a fresh UUID (upsert is pointless) and upsert needs a SELECT
+      // policy on the object — a team member uploads into the OWNER's folder and has none
+      // (same 403-in-400 class as the 07/08 B1 bug). Plain INSERT is all this path needs.
+      const { error: upErr } = await supabase.storage.from(PHASE_BUCKET).upload(path, decode(m.base64), { contentType: 'image/jpeg' });
       if (upErr) continue;
       const { data } = supabase.storage.from(PHASE_BUCKET).getPublicUrl(path);
       if (!data?.publicUrl) continue;

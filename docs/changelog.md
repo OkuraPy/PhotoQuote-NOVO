@@ -4,6 +4,39 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-12 03:10] — feat: v2 — ONDA B COMPLETA: equipe multi-usuário (owner+field, Opção B)
+- **O que mudou**: **EQUIPE no app** — dono cria funcionário direto (nome+email+senha, sem convite; exigência
+  verbatim do dono), atribui trabalhos, controla se o membro vê valores. Membro `field` loga e cai numa UI
+  restrita: só os jobs atribuídos, aba Progress (fases/fotos/comentários), SEM valores/aba de negócio a menos
+  que a flag `can_see_financials` esteja ligada (aí vê o orçamento SÓ dos jobs dele; faturas nunca). Papel
+  `office` fica pronto no banco (RLS), UI dele é onda futura. Conta solo continua bit a bit idêntica.
+- **Arquivos**: auth.tsx (membership context: ownerId/role/canSeeFinancials + gate anti-flash), api.ts (todas
+  as queries chaveadas por ownerId; createTeamMember/fetchTeam/assign/remove; upload de foto de fase SEM
+  upsert), Team.tsx (nova tela: criar membro c/ senha gerada, compartilhar credenciais, flag financeira,
+  atribuir jobs, remover), Tabs/Job/Flow/Navigator/Misc/ui (fieldMode: home Progress-only, chip de stage
+  oculto, FAB/criação escondidos), data.ts (helpers de papel/senha), team.test.ts (+9 ⇒ jest 100/100).
+- **Banco (3 migrations APLICADAS em prod)**: 20260712100000 higiene RLS fase 0 (52 policies re-escritas com
+  `(select auth.uid())`, 2 duplicadas consolidadas, 20 índices de FK); 20260712100100 fundação (team_members
+  role office/field + can_see_financials + unique ativo por usuário, created_by nas fases/fotos, 3 helpers
+  SECURITY DEFINER, 12 policies de membro + 4 RESTRITIVAS anti-hijack, clients/estimates/line_items/users/
+  storage p/ membro; invoices owner-only); 20260712100200 grants service_role nas 5 tabelas de equipe
+  (**bug classe ai_jobs achado no E2E**: revoke de abril deixou service_role sem DML — a function morria em
+  membership_check_failed) + revoke TRUNCATE de anon/authenticated.
+- **Edge function**: create-team-member v1 (verify_jwt ON) — cria auth user confirmado + membership ativa,
+  rollback deleteUser se insert falha, gate de 10 assentos, 403 p/ membro criando membro.
+- **Revisão + prova**: revisor adversarial integrado REPROVOU 1ª rodada (A1 bloqueante: upload de foto de
+  fase com upsert:true morre sem policy SELECT — classe B1 recorrente; A2 chip de stage mentindo pro field;
+  A3 timeout de membership fixava owner-empty; A4 erros da function engolidos) — TODOS corrigidos pré-commit.
+  **E2E completo em PROD**: function 401/400/200/409/403 ✓; membro sem atribuição vê 0 em tudo (users=2,
+  própria membership=1) ✓; atribuído vê 1 projeto/1 cliente/1 fase, atualiza fase ✓; 4 hijacks bloqueados
+  (42501: roubar fase, mover p/ projeto alheio, foto com user_id próprio, foto em projeto alheio) ✓; storage
+  pasta do owner OK sem upsert, pasta de terceiro 403 ✓; gate financeiro OFF=0 → ON=1 estimate (só o
+  atribuído) + 2 line_items, invoices 0 ✓; cenário todo desmontado; invariante do owner idêntico nas 3
+  medições (8/7/4/1/0). tsc limpo.
+- **Decisão técnica**: SEM build EAS — regra do dono 11/07: build única pra Apple só depois de TUDO pronto
+  e revisado. Onda termina em commit+túnel. Residual documentado: membro pode escrever na PRÓPRIA pasta do
+  bucket (policy antiga own-folder; lixo inócuo, nada referencia).
+
 ### [2026-07-12 00:30] — feat: v2 — ONDA A COMPLETA: os 6 pedidos do uso real (G1-G5 + G4) → build 31
 - **O que mudou**: (G5) **endereço da OBRA** — campo "Job site address" no passo do cliente (GPS reverso
   pré-preenche a rua, que antes era descartada; atalho "same as client"); projects.address volta à semântica
