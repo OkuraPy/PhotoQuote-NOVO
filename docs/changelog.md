@@ -4,6 +4,36 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-12 07:40] — feat: ONDA C — portal: contrato assinado vira cópia permanente do cliente
+- **O que mudou (portal, repo photoquote-client-portal)**: página do agreement com status `signed`
+  deixou de ser beco sem saída ("contact your contractor") — agora renderiza o CONTRATO COMPLETO
+  (sanitizado server-side, mesmo pipeline do fluxo de assinar) + bloco de assinatura (imagem, nome,
+  data, selo ESIGN) + botão **Download PDF** (window.print + @media print: só o documento imprime) +
+  link "Track project progress" quando há share token ativo. Tela de sucesso pós-assinar ganhou
+  "View signed agreement" e avisa que o link é a cópia permanente. Página de progresso ganhou card
+  "Service Agreement" com estado. Baixos da revisão geral: ProgressCard não mostra mais 01/01/1970
+  (activatedAt null → '—'), 2 erros de ESLint zerados (drawBaseline içado; raw as any tipado),
+  CSP +object-src 'none'/base-uri/form-action. `/api/sign` preparado p/ SERVICE_ROLE_KEY na Vercel
+  (signingClient(): usa service role quando a env existir; sem a env, fallback byte-idêntico ao anon).
+- **Banco (2 migrations APLICADAS)**: 20260712130000 RPCs +signatureImageUrl/projectToken
+  (agreement) e +agreementToken/agreementStatus (progresso; signed_ip NUNCA sai); 20260712140000
+  **lockdown do revisor (A1)**: a ponte progresso→contrato só existe p/ contrato JÁ ASSINADO e com
+  show_values=true — sem isso, quem tivesse só o link de progresso (terceiro sem valores) alcançava
+  a página de assinatura EXECUTÁVEL de contrato pendente, ou via total/assinatura contra o
+  show_values. + order by explícito nos subselects (B1) e break-inside:avoid na assinatura (B2).
+- **Revisão**: adversarial REPROVOU a 1ª versão pelo A1 (escalada real) → corrigido e PROVADO em
+  prod nos dois sentidos: token real show_values=false + contrato assinado → agreementToken NULL;
+  token descartável show_values=true (mesmo projeto) → token presente/status signed; descartável
+  deletado. RPC v2 provada com o contrato assinado real (assinatura + HTML 7.9k). XSS: mesmo
+  sanitizador nos dois caminhos; imagem inerte (CSP img-src); 4/4 assinaturas de prod apontam pro
+  bucket. Build Next limpo, ESLint 0 erros.
+- **Arquivos**: portal: agreement page/AgreementSignClient/PrintButton(novo)/p-page/ProgressCard/
+  SignatureCanvas/data/types/mockData/agreementData/globals.css/next.config/api-sign; app-repo:
+  2 migrations.
+- **Decisão técnica**: ponte progresso→contrato fecha atrás de show_values (o cliente legítimo tem
+  o link permanente do PRÓPRIO contrato; terceiro de progresso não ganha acesso a assinatura/total).
+  Revokes de anon no sign_agreement/storage ficam pra quando a SERVICE_ROLE_KEY entrar na Vercel.
+
 ### [2026-07-12 06:20] — fix: REVISÃO GERAL ("revisa tudo") — 4 agentes, 2 bloqueantes + 5 altos corrigidos
 - **O que mudou**: revisão adversarial completa pré-build (app inteiro, banco prod, edge functions +
   segredos, portal) com 4 agentes paralelos; TODOS os achados acionáveis corrigidos e provados em prod.
