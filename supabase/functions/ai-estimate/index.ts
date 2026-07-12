@@ -80,6 +80,7 @@ Deno.serve(async (req: Request) => {
           .from('ai_jobs')
           .select('id', { count: 'exact', head: true })
           .eq('user_id', uid)
+          .neq('status', 'rate_limited') // denied attempts must not renew the lockout
           .gte('created_at', new Date(Date.now() - 3_600_000).toISOString());
         if ((count ?? 0) >= AI_CALLS_PER_HOUR) {
           await logJob('rate_limited', { error: 'hourly cap' });

@@ -13,7 +13,7 @@ import { LOCALES, registerStrings, useLocale, useT } from '../lib/i18n';
 
 // Owner-only billing pulse (Onda D): members never see billing; anything but an
 // expired trial behaves exactly like before (state 'ok'/'trial' never blocks).
-function useBilling() {
+export function useBilling() {
   const { user, role } = useAuth();
   const { data } = useQuery({
     queryKey: ['billing', user?.id],
@@ -136,6 +136,9 @@ registerStrings({
   'tabs.deleteAccount': { en: 'Delete account', es: 'Eliminar cuenta', pt: 'Apagar conta' },
   'tabs.deleteTitle': { en: 'Delete account?', es: '¿Eliminar cuenta?', pt: 'Apagar a conta?' },
   'tabs.deleteBody': { en: 'This permanently erases your account and ALL data — jobs, quotes, invoices, contracts, photos and team. This cannot be undone.', es: 'Esto borra permanentemente tu cuenta y TODOS los datos: trabajos, cotizaciones, facturas, contratos, fotos y equipo. No se puede deshacer.', pt: 'Isto apaga permanentemente sua conta e TODOS os dados — trabalhos, orçamentos, faturas, contratos, fotos e equipe. Não dá para desfazer.' },
+  // member variant: deleting a MEMBER account only removes their login and team access —
+  // the owner's business data is untouched (the generic copy would be lying to them)
+  'tabs.deleteBodyMember': { en: 'This permanently erases your account and removes your team access. The company’s data stays with the owner. This cannot be undone.', es: 'Esto borra permanentemente tu cuenta y quita tu acceso al equipo. Los datos de la empresa quedan con el dueño. No se puede deshacer.', pt: 'Isto apaga permanentemente sua conta e remove seu acesso à equipe. Os dados da empresa ficam com o dono. Não dá para desfazer.' },
   'tabs.deleteConfirm': { en: 'Delete forever', es: 'Eliminar para siempre', pt: 'Apagar para sempre' },
   'tabs.deleteFinalTitle': { en: 'Are you absolutely sure?', es: '¿Estás completamente seguro?', pt: 'Tem certeza absoluta?' },
   'tabs.deleteFinalBody': { en: 'Last chance — everything will be gone in seconds.', es: 'Última oportunidad: todo desaparecerá en segundos.', pt: 'Última chance — tudo some em segundos.' },
@@ -523,7 +526,7 @@ export function ProfileScreen({ go }: NavProp) {
   // App Store 5.1.1(v): in-app account deletion. Two destructive confirms (380ms apart —
   // stacked Alerts race on iOS), then the edge function wipes everything and we sign out.
   const onDeleteAccount = () => {
-    Alert.alert(t('tabs.deleteTitle'), t('tabs.deleteBody'), [
+    Alert.alert(t('tabs.deleteTitle'), t(role === 'owner' ? 'tabs.deleteBody' : 'tabs.deleteBodyMember'), [
       { text: t('tabs.cancel'), style: 'cancel' },
       {
         text: t('tabs.deleteConfirm'),

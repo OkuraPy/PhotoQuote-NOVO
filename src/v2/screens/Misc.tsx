@@ -7,7 +7,7 @@ import { Icon } from '../Icon';
 import { colors, fonts } from '../theme';
 import { Client, initials } from '../data';
 import { Avatar, Between, Btn, Card, Divider, Empty, Field, Input, Kav, Nav, NavBtn, Row, SectionTitle, useStore } from '../ui';
-import { JobCard } from './Tabs';
+import { JobCard, useBilling } from './Tabs';
 import { useAuth } from '../lib/auth';
 import { countClientProjects, createClient, deleteClient, fetchClients, fetchCompanyProfile, fetchJobs, lookupZip, updateClient, updateCompanyProfile, uploadCompanyLogo } from '../lib/api';
 import { LOCALES, registerStrings, useLocale, useT } from '../lib/i18n';
@@ -100,6 +100,8 @@ registerStrings({
 export function ClientScreen({ go, back, params }: NavProp) {
   const t = useT();
   const { ownerId } = useAuth();
+  // final-review M2: this was the only camera entry point without the expired-trial gate
+  const { state: bState } = useBilling();
   // params.client is a stale snapshot from the stack — after an edit the save invalidates
   // ['clients'], so resolve the live row from the query and keep the snapshot as fallback
   // (review finding: Call/Text kept dialing the OLD phone until the screen was re-entered).
@@ -173,7 +175,17 @@ export function ClientScreen({ go, back, params }: NavProp) {
         </View>
       </ScrollView>
       <View style={actionbar}>
-        <Btn title={t('misc.newQuoteFor', { name: c.name.split(' ')[0] })} icon="camera" onPress={() => go('camera', { client: c })} />
+        <Btn
+          title={t('misc.newQuoteFor', { name: c.name.split(' ')[0] })}
+          icon="camera"
+          onPress={() => {
+            if (bState === 'expired') {
+              go('plans');
+              return;
+            }
+            go('camera', { client: c });
+          }}
+        />
       </View>
     </>
   );
@@ -183,7 +195,7 @@ export function ClientEditScreen({ back, params }: NavProp) {
   const t = useT();
   const existing: Client | undefined = params?.client;
   const editing = !!existing;
-  const { ownerId } = useAuth(); // clients belong to the OWNER account (Onda B)
+  const { ownerId, role } = useAuth(); // clients belong to the OWNER account (Onda B)
   const { up } = useStore();
   const qc = useQueryClient();
   const [name, setName] = useState(existing?.name || '');
@@ -275,7 +287,9 @@ export function ClientEditScreen({ back, params }: NavProp) {
         </Row>
         <Field label={t('misc.streetAddress')} opt><Input value={address} onChangeText={setAddress} placeholder={t('misc.streetAddressPlaceholder')} /></Field>
         <Field label={t('misc.notes')} opt><Input value={notes} onChangeText={setNotes} multiline placeholder={t('misc.notesPlaceholder')} style={{ height: 80, paddingTop: 13 }} /></Field>
-        {editing ? <Btn variant="danger" icon="trash" title={t('misc.deleteClient')} onPress={remove} style={{ marginTop: 8 }} /> : null}
+        {/* destruction stays with the owner — the office role has no DELETE policy, so the
+            button would "succeed" silently and the client would reappear (final-review M1) */}
+        {editing && role === 'owner' ? <Btn variant="danger" icon="trash" title={t('misc.deleteClient')} onPress={remove} style={{ marginTop: 8 }} /> : null}
       </ScrollView>
       <View style={actionbar}>
         <Btn title={busy ? t('misc.saving') : editing ? t('misc.saveChanges') : t('misc.createClient')} onPress={save} disabled={busy} />

@@ -511,7 +511,10 @@ export async function ensureReceiptNumber(paymentId: string): Promise<string> {
   const { data: again, error: aErr } = await supabase.from('invoice_payments').select('receipt_number').eq('id', paymentId).maybeSingle();
   if (aErr) throw aErr;
   if (again?.receipt_number) return String(again.receipt_number);
-  return number; // row vanished mid-race — the freshly minted number is still valid
+  // 0 rows updated AND still no number on re-read = the write was silently denied (RLS)
+  // or the row vanished — issuing a number the DB never stored puts a phantom receipt
+  // number on a client PDF (final-review A3). Fail loudly instead.
+  throw new Error('Could not save the receipt number.');
 }
 
 // Persist a status change to the DB (replaces the old in-memory-only stage override).
@@ -708,10 +711,13 @@ function renderTermsBlocks(blocks: unknown): string {
 // Generates the service agreement from the invoice + a contract template, stores it with a
 // random token, and returns the token (used to build the client's signing link).
 export async function createAgreement(userId: string, projectId: string, invoiceId: string): Promise<{ id: string; token: string }> {
-  const [{ data: proj }, { data: inv }, { data: company }] = await Promise.all([
+  const [{ data: proj }, { data: inv }, company] = await Promise.all([
     supabase.from('projects').select('client_id, name, address, city, property_state, service_type, zip').eq('id', projectId).maybeSingle(),
     supabase.from('invoices').select('invoice_number, estimate_id, subtotal, tax_rate, tax_amount, total, deposit_percent, payment_mode, due_date, deposit_amount').eq('id', invoiceId).maybeSingle(),
-    supabase.from('users').select('company_name, company_address, company_phone, company_email, company_license, default_state').eq('id', userId).maybeSingle(),
+    // fetchCompanyProfile, not a raw users SELECT: the owner's row is RLS-invisible to an
+    // OFFICE member — the raw read returned null and the contract printed "Your Company"
+    // (final-review A1); the profile helper falls back to get_owner_branding for members.
+    fetchCompanyProfile(userId),
   ]);
   if (!proj) throw new Error('Project not found.');
   if (!proj.client_id) throw new Error('Add a client to this job before creating a contract.');

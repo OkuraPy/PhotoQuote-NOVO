@@ -4,6 +4,35 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-12 13:10] — fix: REVISÃO FINAL INTEGRAL ("revisa tudo tudo tudo") — família office fechada
+- **4 revisores frescos** sobre o estado atual (app 2d20b6f, portal 1378e36, prod pós-9-migrations).
+  Vereditos: EDGE **APROVADO** (drift ZERO — 5 functions byte-idênticas ao repo, sha256; logs limpos;
+  zero segredo nos commits do dia); PORTAL **PRONTO** (9 jornadas vivas OK); BANCO **SIM com ressalva**
+  e APP **NÃO sem fixes** — ambos convergindo na mesma família: o papel OFFICE nunca tinha sido
+  exercitado de ponta a ponta nos fluxos financeiro/contrato/portal.
+- **Migration 20260712190000 (APLICADA)**: H1 agreements p/ office (SELECT/INSERT/UPDATE c/ amarras) —
+  sem isso a aba Contract era cega e o envio dava 42501; H2 project_share_tokens p/ office (ALL c/
+  amarra) — "Client link" morria; A3 invoice_payments UPDATE p/ office — recibo saía com número
+  FANTASMA (UPDATE silencioso de 0 linhas); **H3 effective_owner_id()**: next_invoice_number/
+  next_receipt_number chaveavam o contador em auth.uid() — office numeraria com a sequência PRÓPRIA
+  e colidiria com a do dono (23505 na frente do cliente); agora o contador é do dono efetivo (solo
+  idêntico) + lpad greatest() (INV/RCPT >9999 não trunca — mesma classe do fix de estimates); **M1
+  portal**: get_agreement_by_token devolvia contrato COMPLETO (preços+HTML+pivô projectToken) p/
+  agreement VOID via PostgREST cru — agora não-assinável/não-assinado retorna só {status,companyName}
+  (provado: void = 2 chaves; assinado = 12 chaves intactas); token de teste ADIVINHÁVEL
+  (test_agreement_token_2026_demo → dados reais) rotacionado p/ aleatório (provado morto).
+- **App**: createAgreement lia users cru (office → contrato "Your Company") → fetchCompanyProfile
+  c/ fallback RPC; ensureReceiptNumber agora FALHA ALTO se o número não persistir (nunca mais número
+  fantasma em PDF); botão "Delete client" escondido p/ office (falhava em silêncio e o cliente
+  "ressuscitava"); gate de trial no 3º e último entry point de câmera (ficha do cliente); copy do
+  delete-account p/ MEMBRO diz a verdade (só apaga a conta pessoal/acesso — dados da empresa ficam).
+- **Edge v8/v5/v3**: contador de rate-limit ignora linhas 'rate_limited' (lockout auto-renovável
+  eliminado). **Portal**: mapper tolerante ao payload mínimo do void + título próprio da página de
+  progresso (era "Service Agreement" na aba).
+- **Gates**: tsc limpo, jest 108/108, build do portal ok. Registrados p/ futuro: FKs NO ACTION→
+  CASCADE (estimates/invoices/agreements/contract_templates.user_id), RESTRICT p/ agreement assinado,
+  smoke 200 real de ai-estimate/transcribe pós-deploy, warnings ESLint pré-existentes do portal.
+
 ### [2026-07-12 11:50] — fix: vereditos dos revisores D e E — todos os achados corrigidos
 - **Revisor D (APROVADO c/ ressalva dura)**: A1 — o wipe de storage do delete-account usava list()
   NÃO-recursivo: pastas voltam como entradas virtuais e remove('pasta') é no-op silencioso → NENHUMA
