@@ -13,6 +13,7 @@ import { AttachScreen, CameraScreen, EstimateScreen } from './screens/Flow';
 import { JobScreen } from './screens/Job';
 import { ChangePasswordScreen, ClientEditScreen, ClientScreen, CompanyScreen, LanguageScreen } from './screens/Misc';
 import { TeamScreen } from './screens/Team';
+import { PlansScreen } from './screens/Plans';
 
 registerStrings({
   'nav.connecting': { en: 'Connecting…', es: 'Conectando…', pt: 'Conectando…' },
@@ -39,6 +40,7 @@ const APP_SCREENS: Record<string, React.ComponentType<any>> = {
   changePassword: ChangePasswordScreen,
   language: LanguageScreen,
   team: TeamScreen,
+  plans: PlansScreen,
 };
 const TAB_ROOTS = ['home', 'jobs', 'clients', 'profile'];
 const FULLBLEED = ['camera'];

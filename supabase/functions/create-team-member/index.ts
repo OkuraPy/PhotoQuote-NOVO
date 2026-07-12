@@ -9,7 +9,7 @@
 //   -> 200 { ok: true, memberId, memberUserId }   (memberId = team_members.id,
 //      the id project_members.member_id points at — the app needs it for assigning)
 //   -> 400 invalid_name|invalid_email|weak_password|invalid_role|member_limit_reached
-//   -> 401 unauthorized · 403 members_cannot_create_members
+//   -> 401 unauthorized · 403 members_cannot_create_members|plan_upgrade_required
 //   -> 409 email_in_use|member_exists · 500 otherwise
 //
 // AuthZ model: any authenticated account that is NOT itself an active member of a
@@ -79,6 +79,24 @@ Deno.serve(async (req: Request) => {
       .limit(1);
     if (cmErr) return json({ error: 'membership_check_failed' }, 500);
     if ((callerMembership?.length ?? 0) > 0) return json({ error: 'members_cannot_create_members' }, 403);
+
+    // ---- plan gate (Onda D) -------------------------------------------------
+    // Team is a Team-plan feature. Today nothing is billed: owners are 'trial' or
+    // legacy 'active' with no plan row — both pass. This only bites a PAID Solo
+    // account (subscription_plan_id -> plan named 'Solo') created after launch.
+    const { data: ownerRow } = await sb
+      .from('users')
+      .select('subscription_plan_id')
+      .eq('id', ownerId)
+      .maybeSingle();
+    if (ownerRow?.subscription_plan_id) {
+      const { data: plan } = await sb
+        .from('subscription_plans')
+        .select('name')
+        .eq('id', ownerRow.subscription_plan_id)
+        .maybeSingle();
+      if (plan?.name === 'Solo') return json({ error: 'plan_upgrade_required' }, 403);
+    }
 
     // ---- MVP seat gate -----------------------------------------------------
     const { count, error: cntErr } = await sb

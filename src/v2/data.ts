@@ -389,6 +389,27 @@ export function credentialsMessage(locale: 'en' | 'es' | 'pt', p: { company?: st
   return `${L.added}\n${L.how}\n\n${L.email}: ${p.email}\n${L.pass}: ${p.password}\n\n${L.change}`;
 }
 
+/* ---------------- Plans / billing (Onda D) ---------------- */
+// Approved model (ESTUDO §4, owner OK): Solo $39/mo ($29 annual) · Team $99/mo ($79 annual,
+// 3 seats, +$19/extra seat) · 14-day trial, no card. Nothing is billed until the store build:
+// these helpers only shape UI state (banner/paywall). 'active' (legacy/paid) never blocks.
+export type BillingState = 'ok' | 'trial' | 'expired';
+
+// users.subscription_status/expires_at → what the OWNER's UI should do.
+// Unknown/legacy statuses degrade to 'ok' (never lock a paying/grandfathered account by accident).
+export function billingState(status?: string | null, expiresAt?: string | null, now: Date = new Date()): BillingState {
+  if (status !== 'trial') return 'ok';
+  if (!expiresAt) return 'trial';
+  return new Date(expiresAt).getTime() >= now.getTime() ? 'trial' : 'expired';
+}
+
+// Days left on the trial, for the banner (ceil: "expira hoje" = 1, nunca 0 enquanto válido).
+export function trialDaysLeft(expiresAt?: string | null, now: Date = new Date()): number {
+  if (!expiresAt) return 0;
+  const ms = new Date(expiresAt).getTime() - now.getTime();
+  return ms <= 0 ? 0 : Math.ceil(ms / 86_400_000);
+}
+
 export const COMPANY = {
   name: 'Apex Renovations',
   license: 'Lic. #GC-204881',

@@ -612,7 +612,7 @@ export async function createTeamMember(input: { name: string; email: string; pas
   });
   const fail = (raw: string | null | undefined): never => {
     // promote every known edge-function error to a code the UI maps to friendly copy
-    const known = ['email_in_use', 'member_exists', 'member_limit_reached', 'weak_password'];
+    const known = ['email_in_use', 'member_exists', 'member_limit_reached', 'weak_password', 'plan_upgrade_required'];
     const code = known.includes(String(raw)) ? String(raw) : null;
     const err: any = new Error(String(raw || 'Could not create the team member.'));
     err.code = code;
@@ -858,6 +858,59 @@ export async function fetchCompanyProfile(userId: string) {
 export async function updateCompanyProfile(userId: string, p: { company_name?: string; company_license?: string; company_phone?: string; company_email?: string; company_address?: string; default_deposit_percent?: number | null; default_tax_percent?: number | null; default_margin_percent?: number | null; logo_url?: string | null }) {
   const { error } = await supabase.from('users').update(p).eq('id', userId);
   if (error) throw error;
+}
+
+/* ---------------- Billing / account (Onda D) ---------------- */
+export type OwnBilling = { status: string | null; expiresAt: string | null; planName: string | null };
+
+// The signed-in user's OWN subscription fields (own-row RLS). Only the OWNER's UI uses this
+// (members never see billing); failures degrade to nulls = 'ok' state, never a lockout.
+export async function fetchOwnBilling(userId: string): Promise<OwnBilling> {
+  const { data } = await supabase
+    .from('users')
+    .select('subscription_status, subscription_expires_at, subscription_plan_id')
+    .eq('id', userId)
+    .maybeSingle();
+  let planName: string | null = null;
+  if (data?.subscription_plan_id) {
+    const { data: plan } = await supabase
+      .from('subscription_plans')
+      .select('name')
+      .eq('id', data.subscription_plan_id)
+      .maybeSingle();
+    planName = plan?.name ?? null;
+  }
+  return {
+    status: data?.subscription_status ?? null,
+    expiresAt: data?.subscription_expires_at ?? null,
+    planName,
+  };
+}
+
+// Active plans for the paywall (public catalog; RLS USING(true) on subscription_plans).
+export type PlanRow = { id: string; name: string; priceMonthly: number; priceYearly: number; features: Record<string, unknown> };
+export async function fetchPlans(): Promise<PlanRow[]> {
+  const { data, error } = await supabase
+    .from('subscription_plans')
+    .select('id, name, price_monthly, price_yearly, features')
+    .eq('is_active', true)
+    .order('price_monthly');
+  if (error) throw error;
+  return (data || []).map((p: any) => ({
+    id: p.id,
+    name: p.name,
+    priceMonthly: Number(p.price_monthly) || 0,
+    priceYearly: Number(p.price_yearly) || 0,
+    features: p.features || {},
+  }));
+}
+
+// Permanent account deletion (App Store 5.1.1(v)). The edge function wipes memberships,
+// storage folders and the auth user — the DB cascade takes the whole business graph.
+// Caller must signOut() right after a successful return.
+export async function deleteAccount(): Promise<void> {
+  const { data, error } = await supabase.functions.invoke('delete-account', { body: {} });
+  if (error || data?.error) throw new Error(data?.error || error?.message || 'delete_failed');
 }
 
 const LOGO_BUCKET = 'company-logos';

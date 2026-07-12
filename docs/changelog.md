@@ -4,6 +4,36 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-12 09:30] — feat: ONDA D — planos/monetização (SEM billing real) + apagar conta + privacidade
+- **O que mudou**: fundação completa de monetização SEM cobrar ninguém e SEM módulo nativo (RevenueCat
+  entra só na build da loja — preservando Expo Go/túnel). **Planos**: catálogo Solo $39/mês ($29 anual)
+  e Team $99/mês ($79 anual, 3 assentos, +$19/extra) semeado no banco (legados Free/Pro/Enterprise
+  desativados); contas NOVAS nascem com trial de 14 dias (handle_new_user); os 2 usuários reais ficam
+  'active' intocados (zero risco de bloqueio). **App**: tela Plans (catálogo, toggle mensal/anual,
+  status do trial; CTA é stub explicando que a compra abre com o lançamento), banner de trial na Home
+  (dias restantes; vermelho quando expira), gate SOFT de criação (trial expirado bloqueia SÓ criar
+  orçamento novo — dados existentes seguem 100% visíveis), linha "Assinatura" no Profile. **Apagar
+  conta (App Store 5.1.1(v))**: edge function delete-account v1 (verify_jwt ON; apaga memberships dos
+  2 lados, ai_jobs, pastas de storage best-effort, e o auth user — cascade leva TODO o grafo de dados;
+  fail-closed) + fluxo no Profile com dupla confirmação destrutiva (380ms entre Alerts). **Gate de
+  plano na equipe**: create-team-member v2 recusa plan_upgrade_required p/ Solo PAGO (inerte hoje).
+- **Portal**: /privacy e /terms públicas (exigidas na ficha da loja; deployadas) + links no footer.
+  De carona: fix M1 da 2ª revisão da C (agreement VOID renderizava a página de ASSINAR com termos e
+  total do contrato cancelado — agora cai em "no longer available") e migration race-guard no
+  sign_agreement (B1: UPDATE re-exige status assinável; double-sign concorrente morre no banco).
+- **2ª revisão da Onda C (pedida pelo dono)**: APROVADA em produção — 0 bloqueante/alto; provas vivas
+  (print CSS servido, lockdown vigente byte-igual, shape RPC==TS, CSP nova inócua, force-dynamic ON).
+  M1/B1 corrigidos acima; B2 (cascade invoice→agreement assinado) e B3-B5 registrados p/ futuro.
+- **Docs**: APP_STORE_LISTING.md draft (nome/subtítulo/descrição/keywords/nutrition labels/IAP
+  pendências do dono marcadas 🔶).
+- **Arquivos**: app: Plans.tsx (nova), Tabs.tsx (banner/gates/profile), Navigator, api.ts, data.ts,
+  billing.test.ts (+8 ⇒ jest 108/108, tsc limpo); banco: migrations 150000 (planos+trial) e 160000
+  (race guard) APLICADAS; functions delete-account v1 + create-team-member v2 deployadas; portal
+  6c2148e.
+- **Decisão técnica**: billing real fora do bundle até o GO da build (stub honesto na UI); gate de
+  criação é soft e owner-only (member nunca vê billing); 'active'/desconhecido NUNCA bloqueia
+  (fail-open a favor do usuário pagante/legado).
+
 ### [2026-07-12 07:40] — feat: ONDA C — portal: contrato assinado vira cópia permanente do cliente
 - **O que mudou (portal, repo photoquote-client-portal)**: página do agreement com status `signed`
   deixou de ser beco sem saída ("contact your contractor") — agora renderiza o CONTRATO COMPLETO

@@ -1,15 +1,48 @@
 // PhotoQuote v2 — tab roots: Home, Jobs, Clients, Profile
 import React from 'react';
-import { ActivityIndicator, FlatList, Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useQuery } from '@tanstack/react-query';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
-import { ClosedKind, fmt0, homeMetrics, initials, Job, split, STAGES } from '../data';
+import { billingState, ClosedKind, fmt0, homeMetrics, initials, Job, split, STAGES, trialDaysLeft } from '../data';
 import { Avatar, Between, Btn, Card, Empty, NavBtn, Row, SearchBar, SectionTitle, StageChip, Switch, useStore } from '../ui';
 import { useAuth } from '../lib/auth';
-import { fetchClients, fetchCompanyProfile, fetchJobs } from '../lib/api';
+import { deleteAccount, fetchClients, fetchCompanyProfile, fetchJobs, fetchOwnBilling } from '../lib/api';
 import { LOCALES, registerStrings, useLocale, useT } from '../lib/i18n';
+
+// Owner-only billing pulse (Onda D): members never see billing; anything but an
+// expired trial behaves exactly like before (state 'ok'/'trial' never blocks).
+function useBilling() {
+  const { user, role } = useAuth();
+  const { data } = useQuery({
+    queryKey: ['billing', user?.id],
+    queryFn: () => fetchOwnBilling(user!.id),
+    enabled: !!user?.id && role === 'owner',
+    staleTime: 5 * 60 * 1000,
+  });
+  const state = role === 'owner' ? billingState(data?.status, data?.expiresAt) : 'ok';
+  return { state, days: trialDaysLeft(data?.expiresAt), planName: data?.planName ?? null };
+}
+
+// Trial/expired strip under the Home header. Tapping it opens the Plans screen.
+function BillingBanner({ go }: { go: (n: string) => void }) {
+  const t = useT();
+  const { state, days } = useBilling();
+  if (state === 'ok') return null;
+  const expired = state === 'expired';
+  return (
+    <Pressable onPress={() => go('plans')} style={{ marginHorizontal: 20, marginTop: 10 }}>
+      <Card pad style={{ backgroundColor: expired ? colors.errorTint : colors.primaryTint, borderWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <Icon name={expired ? 'bell' : 'clock'} size={16} color={expired ? colors.error : colors.primary} />
+        <Text style={{ flex: 1, fontFamily: fonts.bold, fontSize: 13, color: expired ? colors.error : colors.primary }}>
+          {expired ? t('tabs.trialEnded') : t('tabs.trialBanner', { n: days })}
+        </Text>
+        <Text style={{ fontFamily: fonts.extrabold, fontSize: 12.5, color: expired ? colors.error : colors.primary }}>{t('tabs.seePlans')}</Text>
+      </Card>
+    </Pressable>
+  );
+}
 
 registerStrings({
   // Job card
@@ -92,6 +125,22 @@ registerStrings({
   'tabs.logoAdd': { en: 'Add a logo', es: 'Agrega un logotipo', pt: 'Adicione um logotipo' },
   'tabs.team': { en: 'Team', es: 'Equipo', pt: 'Equipe' },
   'tabs.teamVal': { en: 'Add members & permissions', es: 'Agrega miembros y permisos', pt: 'Adicione membros e permissões' },
+  // billing (Onda D)
+  'tabs.trialBanner': { en: 'Free trial: {n} day(s) left', es: 'Prueba gratis: queda(n) {n} día(s)', pt: 'Teste grátis: falta(m) {n} dia(s)' },
+  'tabs.trialEnded': { en: 'Trial ended — pick a plan to keep creating', es: 'La prueba terminó: elige un plan para seguir creando', pt: 'O teste acabou — escolha um plano para continuar criando' },
+  'tabs.seePlans': { en: 'PLANS', es: 'PLANES', pt: 'PLANOS' },
+  'tabs.subscription': { en: 'Subscription', es: 'Suscripción', pt: 'Assinatura' },
+  'tabs.subscriptionTrial': { en: 'Free trial', es: 'Prueba gratis', pt: 'Teste grátis' },
+  'tabs.expiredGateTitle': { en: 'Trial ended', es: 'Prueba terminada', pt: 'Teste encerrado' },
+  'tabs.expiredGateBody': { en: 'Choose a plan to keep creating new quotes.', es: 'Elige un plan para seguir creando cotizaciones.', pt: 'Escolha um plano para continuar criando orçamentos.' },
+  'tabs.deleteAccount': { en: 'Delete account', es: 'Eliminar cuenta', pt: 'Apagar conta' },
+  'tabs.deleteTitle': { en: 'Delete account?', es: '¿Eliminar cuenta?', pt: 'Apagar a conta?' },
+  'tabs.deleteBody': { en: 'This permanently erases your account and ALL data — jobs, quotes, invoices, contracts, photos and team. This cannot be undone.', es: 'Esto borra permanentemente tu cuenta y TODOS los datos: trabajos, cotizaciones, facturas, contratos, fotos y equipo. No se puede deshacer.', pt: 'Isto apaga permanentemente sua conta e TODOS os dados — trabalhos, orçamentos, faturas, contratos, fotos e equipe. Não dá para desfazer.' },
+  'tabs.deleteConfirm': { en: 'Delete forever', es: 'Eliminar para siempre', pt: 'Apagar para sempre' },
+  'tabs.deleteFinalTitle': { en: 'Are you absolutely sure?', es: '¿Estás completamente seguro?', pt: 'Tem certeza absoluta?' },
+  'tabs.deleteFinalBody': { en: 'Last chance — everything will be gone in seconds.', es: 'Última oportunidad: todo desaparecerá en segundos.', pt: 'Última chance — tudo some em segundos.' },
+  'tabs.deleteFailed': { en: 'Could not delete the account. Try again or contact support.', es: 'No se pudo eliminar la cuenta. Intenta de nuevo o contacta soporte.', pt: 'Não foi possível apagar a conta. Tente de novo ou fale com o suporte.' },
+  'tabs.cancel': { en: 'Cancel', es: 'Cancelar', pt: 'Cancelar' },
   // field-member mode (Onda B)
   'tabs.myJobs': { en: 'My jobs', es: 'Mis trabajos', pt: 'Meus trabalhos' },
   'tabs.fieldWelcomeSub': {
@@ -211,6 +260,16 @@ export function HomeScreen({ go }: NavProp) {
   const { ownerId, role } = useAuth();
   const { data: jobs = [], isLoading } = useQuery({ queryKey: ['jobs', ownerId], queryFn: () => fetchJobs(ownerId!), enabled: !!ownerId });
   const { data: profile } = useQuery({ queryKey: ['company', ownerId], queryFn: () => fetchCompanyProfile(ownerId!), enabled: !!ownerId });
+  // Onda D: an expired trial soft-locks CREATION only (existing data stays fully visible)
+  const { state: bState } = useBilling();
+  const newQuote = () => {
+    if (bState === 'expired') {
+      Alert.alert(t('tabs.expiredGateTitle'), t('tabs.expiredGateBody'));
+      go('plans');
+      return;
+    }
+    go('camera');
+  };
   // closed (lost/archived) jobs are out of every number except collected — see homeMetrics
   const { pipeline, invoiced, collected, active, openQuotes } = homeMetrics(jobs);
   const [pd, pc] = split(pipeline);
@@ -255,6 +314,7 @@ export function HomeScreen({ go }: NavProp) {
   return (
     <>
       {header}
+      <BillingBanner go={go} />
       <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false}>
         <View style={{ gap: 12, marginTop: 16 }}>
           <LinearGradient colors={[colors.primary, colors.primary700]} start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }} style={{ borderRadius: radii.lg, padding: 16, ...shadow.btn }}>
@@ -273,7 +333,7 @@ export function HomeScreen({ go }: NavProp) {
           </Row>
         </View>
 
-        <Btn title={t('tabs.newQuote')} icon="camera" onPress={() => go('camera')} style={{ marginTop: 20, height: 60 }} />
+        <Btn title={t('tabs.newQuote')} icon="camera" onPress={newQuote} style={{ marginTop: 20, height: 60 }} />
         <Row style={{ gap: 10, marginTop: 12 }}>
           <Btn title={t('tabs.newClient')} icon="user" variant="ghost" sm onPress={() => go('clientEdit', {})} style={{ flex: 1 }} />
           <Btn title={t('tabs.allJobs')} icon="layers" variant="ghost" sm onPress={() => go('jobs', {}, 'tab')} style={{ flex: 1 }} />
@@ -317,6 +377,7 @@ export function JobsScreen({ go }: NavProp) {
   const { store, up } = useStore();
   const { ownerId, role } = useAuth();
   const { data: jobs = [], isLoading } = useQuery({ queryKey: ['jobs', ownerId], queryFn: () => fetchJobs(ownerId!), enabled: !!ownerId });
+  const { state: bState } = useBilling(); // Onda D: expired trial soft-locks creation
   // field members: no stage filters (stages derive from RLS-hidden financials) and no New Quote
   const fieldMode = role === 'field';
   const filter = fieldMode ? 'All' : store.jobFilter || 'All';
@@ -373,7 +434,18 @@ export function JobsScreen({ go }: NavProp) {
           )
         }
       />
-      {fieldMode ? null : <Fab onPress={() => go('camera')} />}
+      {fieldMode ? null : (
+        <Fab
+          onPress={() => {
+            if (bState === 'expired') {
+              Alert.alert(t('tabs.expiredGateTitle'), t('tabs.expiredGateBody'));
+              go('plans');
+              return;
+            }
+            go('camera');
+          }}
+        />
+      )}
     </>
   );
 }
@@ -447,6 +519,38 @@ export function ProfileScreen({ go }: NavProp) {
   const companyName = company.company_name || t('tabs.yourCompany');
   const [locale] = useLocale();
   const localeLabel = LOCALES.find((l) => l.code === locale)?.label || 'English';
+  const { state: bState, days, planName } = useBilling();
+  // App Store 5.1.1(v): in-app account deletion. Two destructive confirms (380ms apart —
+  // stacked Alerts race on iOS), then the edge function wipes everything and we sign out.
+  const onDeleteAccount = () => {
+    Alert.alert(t('tabs.deleteTitle'), t('tabs.deleteBody'), [
+      { text: t('tabs.cancel'), style: 'cancel' },
+      {
+        text: t('tabs.deleteConfirm'),
+        style: 'destructive',
+        onPress: () =>
+          setTimeout(() =>
+            Alert.alert(t('tabs.deleteFinalTitle'), t('tabs.deleteFinalBody'), [
+              { text: t('tabs.cancel'), style: 'cancel' },
+              {
+                text: t('tabs.deleteConfirm'),
+                style: 'destructive',
+                onPress: () => {
+                  void (async () => {
+                    try {
+                      await deleteAccount();
+                      await signOut();
+                    } catch {
+                      Alert.alert(t('tabs.deleteTitle'), t('tabs.deleteFailed'));
+                    }
+                  })();
+                },
+              },
+            ]), 380),
+      },
+    ]);
+  };
+  const subscriptionVal = planName || (bState === 'trial' ? `${t('tabs.subscriptionTrial')} · ${days}d` : bState === 'expired' ? t('tabs.trialEnded') : undefined);
   if (role === 'field') {
     // Field member profile: the company belongs to the OWNER — no Company/Team/defaults here.
     // Just who they are, whose team they're on, language, password and the way out.
@@ -474,6 +578,7 @@ export function ProfileScreen({ go }: NavProp) {
           <SetGroup rows={[
             { ico: 'lock', name: t('tabs.changePassword'), onPress: () => go('changePassword') },
             { ico: 'logout', name: t('tabs.logOut'), danger: true, onPress: () => signOut() },
+            { ico: 'trash', name: t('tabs.deleteAccount'), danger: true, onPress: onDeleteAccount },
           ]} />
           <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, textAlign: 'center', marginTop: 20 }}>{t('tabs.footer')}</Text>
         </ScrollView>
@@ -515,8 +620,11 @@ export function ProfileScreen({ go }: NavProp) {
 
         <SectionTitle title={t('tabs.account')} />
         <SetGroup rows={[
+          // subscription entry is the owner's (members never bill); office keeps password/logout
+          ...(role === 'owner' ? [{ ico: 'card', name: t('tabs.subscription'), val: subscriptionVal, onPress: () => go('plans') } as SetRowDef] : []),
           { ico: 'lock', name: t('tabs.changePassword'), onPress: () => go('changePassword') },
           { ico: 'logout', name: t('tabs.logOut'), danger: true, onPress: () => signOut() },
+          { ico: 'trash', name: t('tabs.deleteAccount'), danger: true, onPress: onDeleteAccount },
         ]} />
         <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, textAlign: 'center', marginTop: 20 }}>{t('tabs.footer')}</Text>
       </ScrollView>
