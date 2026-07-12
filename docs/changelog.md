@@ -4,6 +4,29 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-12 10:40] — feat: ONDA E — papel OFFICE completo (banco + app)
+- **O que mudou**: o funcionário de ESCRITÓRIO virou realidade. Banco (migration 20260712170000,
+  APLICADA): 24 policies novas — office lê FATURAS/pagamentos/cronograma (faltava) e ESCREVE o
+  negócio do dono inteiro (clientes, jobs, orçamentos, line items, faturas, pagamentos, cronograma,
+  fases, fotos, comentários, media) sempre com user_id=dono; amarras de tenant no WITH CHECK
+  (user_id ∈ member_owner_ids['office'] + filho amarrado ao MESMO user_id do pai — client_id/
+  estimate_id de outro tenant morre em 42501) e as restritivas anti-hijack da Onda B valem por
+  cima; storage: office sobe foto de job na pasta do DONO (project-photos). O que office NÃO faz:
+  equipe (project_members/team_members), billing, editar perfil da empresa, deletar cliente/job.
+  RPC get_owner_defaults() (definer, só office) — orçamento do office herda imposto/margem/
+  cidade do dono. **App**: TeamScreen ganhou seletor de papel Campo/Escritório (flag de preços só
+  p/ campo; office sempre vê; lista esconde o switch p/ office) + erro plan_upgrade_required
+  localizado; Profile de membro agora cobre field E office (edição de empresa é do dono — RLS
+  falharia silencioso); fetchCompanyProfile faz merge branding+defaults p/ office. Office usa os
+  MESMOS caminhos do owner no resto do app (Home com métricas, criar orçamento, enviar, faturar).
+- **E2E em prod (cenário montado e desmontado)**: office criado via function ✓; lê 8 projetos/
+  7 clientes/4 orçamentos/**1 fatura** (política nova) ✓; CRIA cliente pro dono 201 ✓; hijack de
+  tenant aleatório 42501 ✓; EDITA cliente 200 ✓; project_members 403 (equipe é do dono) ✓;
+  linha users do dono invisível (billing/margens protegidos) ✓; limpeza total (0 sobras).
+- **Arquivos**: migration 20260712170000, Team.tsx, Tabs.tsx, api.ts. tsc limpo, jest 108/108.
+- **Decisão técnica**: office NÃO recebeu DELETE de clients/projects/estimates (destruição fica
+  com o dono); atribuição de equipe segue owner-only (AssignSheet já era gated).
+
 ### [2026-07-12 09:30] — feat: ONDA D — planos/monetização (SEM billing real) + apagar conta + privacidade
 - **O que mudou**: fundação completa de monetização SEM cobrar ninguém e SEM módulo nativo (RevenueCat
   entra só na build da loja — preservando Expo Go/túnel). **Planos**: catálogo Solo $39/mês ($29 anual)

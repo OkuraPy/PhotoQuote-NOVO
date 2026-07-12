@@ -849,10 +849,17 @@ export async function fetchCompanyProfile(userId: string) {
   if (data) return data;
   // Team member: RLS hides the owner's users row (it carries rates/margins/plan). The
   // get_owner_branding() definer returns ONLY the branding fields — enough for everything
-  // a member's UI renders; the sensitive defaults stay owner-only.
-  const { data: branding } = await supabase.rpc('get_owner_branding');
+  // a member's UI renders; the sensitive defaults stay owner-only… except for OFFICE
+  // (Onda E): get_owner_defaults() adds tax/margin/deposit/city so office quotes inherit
+  // the owner's numbers (returns 0 rows for field — the merge is a no-op there).
+  const [{ data: branding }, { data: defaults }] = await Promise.all([
+    supabase.rpc('get_owner_branding'),
+    supabase.rpc('get_owner_defaults'),
+  ]);
   const b = Array.isArray(branding) ? branding[0] : branding;
-  return b && b.id === userId ? b : null;
+  const d = Array.isArray(defaults) ? defaults[0] : defaults;
+  if (!b || b.id !== userId) return null;
+  return d && d.id === userId ? { ...b, ...d } : b;
 }
 
 export async function updateCompanyProfile(userId: string, p: { company_name?: string; company_license?: string; company_phone?: string; company_email?: string; company_address?: string; default_deposit_percent?: number | null; default_tax_percent?: number | null; default_margin_percent?: number | null; logo_url?: string | null }) {

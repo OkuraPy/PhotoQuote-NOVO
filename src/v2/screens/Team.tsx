@@ -1,8 +1,8 @@
-// PhotoQuote v2 — Team screen (Onda B): the owner creates and manages field members.
+// PhotoQuote v2 — Team screen (Onda B; office na Onda E): the owner creates and manages members.
 // The owner creates the employee's login DIRECTLY (email + password, no invite flow — owner's
 // call: "coloca e-mail e senha e já era") and hands the credentials over via the share sheet.
-// MVP scope: only the 'field' role is creatable here; the office role ships in a later wave
-// (the data layer & auth context already understand it).
+// Roles: 'field' (assigned jobs only; money behind the per-member flag) and 'office' (runs the
+// whole business — always sees values; no team management, no billing, no company profile edit).
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, Share, Text, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
@@ -54,9 +54,28 @@ registerStrings({
   'team.passwordLabel': { en: 'Password', es: 'Contraseña', pt: 'Senha' },
   'team.passwordHint': { en: 'Suggested password — tap ⚡ for a new one or type your own.', es: 'Contraseña sugerida: toca ⚡ para otra o escribe la tuya.', pt: 'Senha sugerida — toque em ⚡ para outra ou digite a sua.' },
   'team.roleNote': {
-    en: 'New members join as field crew: they see only assigned jobs and update progress, photos and comments.',
-    es: 'Los nuevos miembros entran como equipo de campo: solo ven los trabajos asignados y actualizan progreso, fotos y comentarios.',
-    pt: 'Novos membros entram como equipe de campo: veem só os trabalhos atribuídos e atualizam progresso, fotos e comentários.',
+    en: 'You can change what they see anytime. Team management and billing always stay with you.',
+    es: 'Puedes cambiar lo que ven cuando quieras. El equipo y la facturación siempre quedan contigo.',
+    pt: 'Você pode mudar o que eles veem quando quiser. Equipe e cobrança ficam sempre com você.',
+  },
+  'team.roleLabel': { en: 'Role', es: 'Función', pt: 'Função' },
+  'team.roleFieldName': { en: 'Field', es: 'Campo', pt: 'Campo' },
+  'team.roleOfficeName': { en: 'Office', es: 'Oficina', pt: 'Escritório' },
+  'team.roleFieldHint': {
+    en: 'Sees only assigned jobs; updates progress, photos and comments.',
+    es: 'Solo ve los trabajos asignados; actualiza progreso, fotos y comentarios.',
+    pt: 'Vê só os trabalhos atribuídos; atualiza progresso, fotos e comentários.',
+  },
+  'team.roleOfficeHint': {
+    en: 'Runs the office: creates quotes, invoices and clients, sees all values. No team or billing access.',
+    es: 'Opera la oficina: crea cotizaciones, facturas y clientes, ve todos los valores. Sin acceso a equipo ni facturación.',
+    pt: 'Opera o escritório: cria orçamentos, faturas e clientes, vê todos os valores. Sem acesso a equipe e cobrança.',
+  },
+  'team.planUpgradeTitle': { en: 'Team plan required', es: 'Se necesita el plan Team', pt: 'Precisa do plano Team' },
+  'team.planUpgradeBody': {
+    en: 'Adding members is a Team plan feature. Open Profile → Subscription to upgrade.',
+    es: 'Agregar miembros es una función del plan Team. Abre Perfil → Suscripción para mejorar.',
+    pt: 'Adicionar membros é do plano Team. Abra Perfil → Assinatura para fazer o upgrade.',
   },
   'team.creating': { en: 'Creating…', es: 'Creando…', pt: 'Criando…' },
   'team.create': { en: 'Create account', es: 'Crear cuenta', pt: 'Criar conta' },
@@ -179,13 +198,15 @@ export function TeamScreen({ go, back }: NavProp) {
                   </Row>
                   <Pressable onPress={() => confirmRemove(m)} hitSlop={8}><Icon name="trash" size={16} color={colors.faint} /></Pressable>
                 </Between>
-                <Between style={{ marginTop: 12, backgroundColor: colors.bg, borderRadius: radii.lg, paddingVertical: 10, paddingHorizontal: 12 }}>
-                  <Row style={{ gap: 8 }}>
-                    <Icon name="eye" size={15} color={colors.muted} />
-                    <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.ink2 }}>{t('team.canSeePrices')}</Text>
-                  </Row>
-                  {busyId === m.id ? <ActivityIndicator size="small" color={colors.muted} /> : <Switch on={m.canSeeFinancials} onPress={() => toggleMoney(m)} />}
-                </Between>
+                {m.role === 'field' ? (
+                  <Between style={{ marginTop: 12, backgroundColor: colors.bg, borderRadius: radii.lg, paddingVertical: 10, paddingHorizontal: 12 }}>
+                    <Row style={{ gap: 8 }}>
+                      <Icon name="eye" size={15} color={colors.muted} />
+                      <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.ink2 }}>{t('team.canSeePrices')}</Text>
+                    </Row>
+                    {busyId === m.id ? <ActivityIndicator size="small" color={colors.muted} /> : <Switch on={m.canSeeFinancials} onPress={() => toggleMoney(m)} />}
+                  </Between>
+                ) : null}
               </Card>
             ))}
           </View>
@@ -212,6 +233,7 @@ function AddMemberSheet({ open, onClose, companyName, onCreated }: { open: boole
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [canSee, setCanSee] = useState(false);
+  const [role, setRole] = useState<'field' | 'office'>('field');
   const [busy, setBusy] = useState(false);
   // after a successful create the sheet flips to the "send this to your employee" card
   const [created, setCreated] = useState<{ name: string; email: string; password: string } | null>(null);
@@ -223,6 +245,7 @@ function AddMemberSheet({ open, onClose, companyName, onCreated }: { open: boole
     setEmail('');
     setPassword(suggestPassword());
     setCanSee(false);
+    setRole('field');
     setCreated(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -234,14 +257,15 @@ function AddMemberSheet({ open, onClose, companyName, onCreated }: { open: boole
     if (password.length < 8) { Alert.alert(t('team.passwordShort'), t('team.passwordShortBody')); return; }
     setBusy(true);
     try {
-      // MVP: always 'field' — the office role is a later wave (screen decision, not a data limit)
-      await createTeamMember({ name, email, password, role: 'field', canSeeFinancials: canSee });
+      // Onda E: field OR office (office sempre vê financeiro — a flag só vale pro field)
+      await createTeamMember({ name, email, password, role, canSeeFinancials: role === 'office' ? true : canSee });
       onCreated();
       setCreated({ name: name.trim(), email: email.trim().toLowerCase(), password });
     } catch (e: any) {
       if (e?.code === 'email_in_use' || e?.code === 'member_exists') Alert.alert(t('team.emailInUseTitle'), t('team.emailInUseBody'));
       else if (e?.code === 'member_limit_reached') Alert.alert(t('team.limitTitle'), t('team.limitBody'));
       else if (e?.code === 'weak_password') Alert.alert(t('team.weakPasswordTitle'), t('team.weakPasswordBody'));
+      else if (e?.code === 'plan_upgrade_required') Alert.alert(t('team.planUpgradeTitle'), t('team.planUpgradeBody'));
       else Alert.alert(t('team.couldNotCreate'), e?.message || t('team.tryAgain'));
     } finally {
       setBusy(false);
@@ -292,13 +316,34 @@ function AddMemberSheet({ open, onClose, companyName, onCreated }: { open: boole
         </Row>
         <Text style={{ fontFamily: fonts.semibold, fontSize: 11.5, color: colors.muted, marginTop: 7 }}>{t('team.passwordHint')}</Text>
       </Field>
-      <Between style={{ backgroundColor: colors.bg, borderRadius: radii.lg, padding: 14 }}>
-        <Row style={{ gap: 8, flex: 1 }}>
-          <Icon name="eye" size={15} color={colors.muted} />
-          <Text style={{ fontFamily: fonts.bold, fontSize: 13.5, color: colors.ink }}>{t('team.canSeePrices')}</Text>
+      {/* role picker (Onda E): field = obra atribuída; office = opera o escritório inteiro */}
+      <Field label={t('team.roleLabel')}>
+        <Row style={{ gap: 8 }}>
+          {(['field', 'office'] as const).map((r) => (
+            <Pressable
+              key={r}
+              onPress={() => setRole(r)}
+              style={{ flex: 1, paddingVertical: 12, borderRadius: radii.lg, borderWidth: 2, borderColor: role === r ? colors.primary : colors.border, backgroundColor: role === r ? colors.primaryTint : '#fff', alignItems: 'center' }}
+            >
+              <Text style={{ fontFamily: fonts.bold, fontSize: 13.5, color: role === r ? colors.primary : colors.muted }}>
+                {r === 'field' ? t('team.roleFieldName') : t('team.roleOfficeName')}
+              </Text>
+            </Pressable>
+          ))}
         </Row>
-        <Switch on={canSee} onPress={() => setCanSee(!canSee)} />
-      </Between>
+        <Text style={{ fontFamily: fonts.semibold, fontSize: 11.5, color: colors.muted, marginTop: 7 }}>
+          {role === 'field' ? t('team.roleFieldHint') : t('team.roleOfficeHint')}
+        </Text>
+      </Field>
+      {role === 'field' ? (
+        <Between style={{ backgroundColor: colors.bg, borderRadius: radii.lg, padding: 14 }}>
+          <Row style={{ gap: 8, flex: 1 }}>
+            <Icon name="eye" size={15} color={colors.muted} />
+            <Text style={{ fontFamily: fonts.bold, fontSize: 13.5, color: colors.ink }}>{t('team.canSeePrices')}</Text>
+          </Row>
+          <Switch on={canSee} onPress={() => setCanSee(!canSee)} />
+        </Between>
+      ) : null}
       <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 12, lineHeight: 17 }}>{t('team.roleNote')}</Text>
       <Btn title={busy ? t('team.creating') : t('team.create')} icon={busy ? undefined : 'check'} disabled={busy} onPress={create} style={{ marginTop: 14 }} />
     </Sheet>

@@ -551,8 +551,9 @@ export function ProfileScreen({ go }: NavProp) {
     ]);
   };
   const subscriptionVal = planName || (bState === 'trial' ? `${t('tabs.subscriptionTrial')} · ${days}d` : bState === 'expired' ? t('tabs.trialEnded') : undefined);
-  if (role === 'field') {
-    // Field member profile: the company belongs to the OWNER — no Company/Team/defaults here.
+  if (role !== 'owner') {
+    // Member profile (field AND office — Onda E): the company belongs to the OWNER, and the
+    // users-row RLS is own-only, so company/defaults edits would fail silently for members.
     // Just who they are, whose team they're on, language, password and the way out.
     const meName = memberName || user?.email || t('tabs.member');
     return (
