@@ -1,8 +1,14 @@
-// PhotoQuote — transcribe-audio Edge Function.
+// PhotoQuote — transcribe-audio Edge Function (v4).
 // Audio (base64) -> text, via OpenAI transcription. Key read from app_config (RLS-locked,
 // service-role only) so it never ships in the app. Returns { text } or { error }.
 // Every call is logged to public.ai_jobs (model 'gpt-4o-mini-transcribe') for diagnostics.
+// v4 (revisão geral): teto de tamanho do áudio (só havia piso), rate-limit por usuário via
+// ai_jobs, respostas de erro genéricas (detalhe fica no log).
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+
+const AI_CALLS_PER_HOUR = 60; // shared per-user budget across the AI functions
+const MAX_B64_CHARS = 20_000_000; // ~15MB binary — a dictation is seconds, this is minutes
+const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -53,15 +59,36 @@ Deno.serve(async (req: Request) => {
   try {
     const { audio = '', mime = 'audio/m4a', filename = 'audio.m4a', language } = await req.json().catch(() => ({}));
     if (!audio || typeof audio !== 'string') return json({ error: 'No audio provided' }, 400);
+    // hard ceiling BEFORE decoding — don't even materialize a giant buffer
+    if (audio.length > MAX_B64_CHARS) return json({ error: 'Audio too large' }, 400);
 
     const sUrl = Deno.env.get('SUPABASE_URL');
     const sKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || Deno.env.get('SERVICE_ROLE_KEY');
     sb = createClient(sUrl!, sKey!);
-    const { data: cfg, error: cfgErr } = await sb.from('app_config').select('value').eq('key', 'OPENAI_API_KEY').maybeSingle();
+
+    // abuse guard: N calls/user/hour across ALL AI functions (ai_jobs is the shared counter).
+    // Fail-open — a counting hiccup must never block real work; the log records the denial.
+    if (uid) {
+      try {
+        const { count } = await sb
+          .from('ai_jobs')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', uid)
+          .gte('created_at', new Date(Date.now() - 3_600_000).toISOString());
+        if ((count ?? 0) >= AI_CALLS_PER_HOUR) {
+          await logJob('rate_limited', { error: 'hourly cap' });
+          return json({ error: 'Too many AI requests — try again in a while.' }, 429);
+        }
+      } catch {
+        /* fail-open */
+      }
+    }
+
+    const { data: cfg } = await sb.from('app_config').select('value').eq('key', 'OPENAI_API_KEY').maybeSingle();
     const apiKey = cfg?.value;
     if (!apiKey) {
       await logJob('error', { error: 'OpenAI key not configured' });
-      return json({ error: 'OpenAI key not configured', debug: { cfgErr: cfgErr?.message || null } }, 500);
+      return json({ error: 'Service not configured' }, 500);
     }
 
     let bytes: Uint8Array;
@@ -74,6 +101,10 @@ Deno.serve(async (req: Request) => {
     if (bytes.length < 256) {
       await logJob('error', { error: 'Audio too short' });
       return json({ error: 'Audio too short' }, 400);
+    }
+    if (bytes.length > MAX_AUDIO_BYTES) {
+      await logJob('error', { error: 'Audio too large' });
+      return json({ error: 'Audio too large' }, 400);
     }
 
     const form = new FormData();
@@ -95,14 +126,14 @@ Deno.serve(async (req: Request) => {
       d = await r.json();
     } catch (e) {
       await logJob('error', { error: `OpenAI request failed: ${(e as Error).message}` });
-      return json({ error: `OpenAI request failed: ${(e as Error).message}` }, 504);
+      return json({ error: 'AI request failed' }, 504);
     } finally {
       clearTimeout(timer);
     }
 
     if (d?.error) {
       await logJob('error', { error: d.error.message || 'OpenAI error' });
-      return json({ error: d.error.message || 'OpenAI error' }, 502);
+      return json({ error: 'AI provider error' }, 502);
     }
     const text = String(d?.text || '').trim();
     if (!text) {
@@ -113,6 +144,6 @@ Deno.serve(async (req: Request) => {
     return json({ text });
   } catch (e) {
     await logJob('error', { error: String((e as Error)?.message || e) });
-    return json({ error: String((e as Error)?.message || e) }, 500);
+    return json({ error: 'Internal error' }, 500);
   }
 });

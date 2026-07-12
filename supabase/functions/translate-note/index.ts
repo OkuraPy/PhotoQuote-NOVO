@@ -17,6 +17,7 @@ const json = (obj: unknown, status = 200) =>
 
 // keep requests bounded — a document note is short; anything longer is truncated, not rejected
 const MAX_CHARS = 2000;
+const AI_CALLS_PER_HOUR = 60; // shared per-user budget across the AI functions (v2, revisão geral)
 
 // user id from the (already Supabase-verified) JWT, for the ai_jobs log
 function userIdFromJwt(req: Request): string | null {
@@ -60,11 +61,30 @@ Deno.serve(async (req: Request) => {
     const sUrl = Deno.env.get('SUPABASE_URL');
     const sKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || Deno.env.get('SERVICE_ROLE_KEY');
     sb = createClient(sUrl!, sKey!);
-    const { data: cfg, error: cfgErr } = await sb.from('app_config').select('value').eq('key', 'OPENAI_API_KEY').maybeSingle();
+
+    // abuse guard: N calls/user/hour across ALL AI functions (ai_jobs is the shared counter).
+    // Fail-open — a counting hiccup must never block real work; the log records the denial.
+    if (uid) {
+      try {
+        const { count } = await sb
+          .from('ai_jobs')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', uid)
+          .gte('created_at', new Date(Date.now() - 3_600_000).toISOString());
+        if ((count ?? 0) >= AI_CALLS_PER_HOUR) {
+          await logJob('rate_limited', { error: 'hourly cap' });
+          return json({ error: 'Too many AI requests — try again in a while.' }, 429);
+        }
+      } catch {
+        /* fail-open */
+      }
+    }
+
+    const { data: cfg } = await sb.from('app_config').select('value').eq('key', 'OPENAI_API_KEY').maybeSingle();
     const apiKey = cfg?.value;
     if (!apiKey) {
       await logJob('error', { error: 'OpenAI key not configured' });
-      return json({ error: 'OpenAI key not configured', debug: { cfgErr: cfgErr?.message || null } }, 500);
+      return json({ error: 'Service not configured' }, 500);
     }
 
     const input = text.trim().slice(0, MAX_CHARS);
@@ -92,14 +112,14 @@ Deno.serve(async (req: Request) => {
       d = await r.json();
     } catch (e) {
       await logJob('error', { error: `OpenAI request failed: ${(e as Error).message}` });
-      return json({ error: `OpenAI request failed: ${(e as Error).message}` }, 504);
+      return json({ error: 'AI request failed' }, 504);
     } finally {
       clearTimeout(timer);
     }
 
     if (d?.error) {
       await logJob('error', { error: d.error.message || 'OpenAI error' });
-      return json({ error: d.error.message || 'OpenAI error' }, 502);
+      return json({ error: 'AI provider error' }, 502);
     }
 
     let translated = '';
@@ -120,6 +140,6 @@ Deno.serve(async (req: Request) => {
     return json({ translated, detected });
   } catch (e) {
     await logJob('error', { error: String((e as Error)?.message || e) });
-    return json({ error: String((e as Error)?.message || e) }, 500);
+    return json({ error: 'Internal error' }, 500);
   }
 });

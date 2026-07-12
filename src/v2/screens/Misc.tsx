@@ -9,7 +9,7 @@ import { Client, initials } from '../data';
 import { Avatar, Between, Btn, Card, Divider, Empty, Field, Input, Kav, Nav, NavBtn, Row, SectionTitle, useStore } from '../ui';
 import { JobCard } from './Tabs';
 import { useAuth } from '../lib/auth';
-import { countClientProjects, createClient, deleteClient, fetchCompanyProfile, fetchJobs, lookupZip, updateClient, updateCompanyProfile, uploadCompanyLogo } from '../lib/api';
+import { countClientProjects, createClient, deleteClient, fetchClients, fetchCompanyProfile, fetchJobs, lookupZip, updateClient, updateCompanyProfile, uploadCompanyLogo } from '../lib/api';
 import { LOCALES, registerStrings, useLocale, useT } from '../lib/i18n';
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
@@ -99,8 +99,12 @@ registerStrings({
 
 export function ClientScreen({ go, back, params }: NavProp) {
   const t = useT();
-  const c: Client | undefined = params?.client;
   const { ownerId } = useAuth();
+  // params.client is a stale snapshot from the stack — after an edit the save invalidates
+  // ['clients'], so resolve the live row from the query and keep the snapshot as fallback
+  // (review finding: Call/Text kept dialing the OLD phone until the screen was re-entered).
+  const { data: allClients } = useQuery({ queryKey: ['clients', ownerId], queryFn: () => fetchClients(ownerId!), enabled: !!ownerId && !!params?.client?.id });
+  const c: Client | undefined = (params?.client?.id && allClients?.find((x) => x.id === params.client.id)) || params?.client;
   const { data: allJobs = [] } = useQuery({ queryKey: ['jobs', ownerId], queryFn: () => fetchJobs(ownerId!), enabled: !!ownerId });
   const jobs = c?.id ? allJobs.filter((j) => j.clientId === c.id) : [];
   // real actions via deep links; disabled when the client has no phone/email on file
@@ -188,7 +192,8 @@ export function ClientEditScreen({ back, params }: NavProp) {
   const [zip, setZip] = useState(existing?.zip || '');
   const [city, setCity] = useState(existing?.city || '');
   const [address, setAddress] = useState(existing?.addr || '');
-  const [notes, setNotes] = useState('');
+  // hydrate notes on edit — an empty state here used to NULL the column on every save
+  const [notes, setNotes] = useState(existing?.notes || '');
   const [busy, setBusy] = useState(false);
   const [zipBusy, setZipBusy] = useState(false);
 

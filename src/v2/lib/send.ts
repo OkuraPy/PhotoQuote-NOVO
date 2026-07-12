@@ -1,9 +1,17 @@
 // PhotoQuote v2 — sending quotes/invoices: branded PDF (escaped HTML) + Email/SMS/WhatsApp.
-// Client-facing output is ALWAYS English (owner's rule) — no i18n in this file on purpose.
-import { Alert, Linking, Platform } from 'react-native';
+// Client-facing output is ALWAYS English (owner's rule) — no i18n in this file on purpose,
+// EXCEPT the two Alerts below: those are the CONTRACTOR's UI, so they do translate.
+import { Alert, Linking, Platform, Share } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { parseDateOnly } from '../data';
+import { registerStrings, translate } from './i18n';
+
+registerStrings({
+  'send.pdfSaved': { en: 'PDF saved', es: 'PDF guardado', pt: 'PDF salvo' },
+  'send.couldNotSend': { en: 'Could not send', es: 'No se pudo enviar', pt: 'Não foi possível enviar' },
+  'send.tryAnother': { en: 'Try another option.', es: 'Prueba otra opción.', pt: 'Tente outra opção.' },
+});
 
 const fmt = (n: number) => '$' + (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 // date-only 'YYYY-MM-DD' → "Jul 22, 2026"; null = the payment is due upon completion
@@ -223,14 +231,16 @@ export async function sendDoc(option: string, d: SendData) {
       const sep = Platform.OS === 'ios' ? '&' : '?';
       await Linking.openURL(`sms:${phone}${sep}body=${encodeURIComponent(text)}`);
     } else if (option === 'WhatsApp') {
-      await Linking.openURL(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`);
+      // no phone on file → wa.me without a number lands on an error page; share sheet instead
+      if (phone) await Linking.openURL(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`);
+      else await Share.share({ message: text });
     } else {
       // Save PDF
       const { uri } = await Print.printToFileAsync({ html: buildHtml(d) });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: `${d.docLabel} ${d.number || ''}` });
-      else Alert.alert('PDF saved', uri);
+      else Alert.alert(translate('send.pdfSaved'), uri);
     }
   } catch (e: any) {
-    Alert.alert('Could not send', e?.message || 'Try another option.');
+    Alert.alert(translate('send.couldNotSend'), e?.message || translate('send.tryAnother'));
   }
 }

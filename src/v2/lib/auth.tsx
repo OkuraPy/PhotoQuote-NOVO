@@ -2,6 +2,7 @@
 // Onda B: after the session resolves we also load the account's team membership (team_members),
 // which decides WHOSE data the app operates on (ownerId) and what the UI may show (role/flags).
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { AuthError, Session, User } from '@supabase/supabase-js';
 import { canSeeMoney, TeamRole } from '../data';
 import { supabase } from './supabase';
@@ -155,6 +156,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const m = await loadMembership(uid);
     if (loadedUidRef.current === uid) setMembership(m);
   };
+
+  // Revocations must not wait for an app restart (review finding): whenever the app returns
+  // to the foreground, re-pull the membership; if it actually changed (flag flipped, member
+  // removed, role changed) also drop the query caches — they hold data from the old reality.
+  const membershipKeyRef = useRef('null');
+  useEffect(() => {
+    membershipKeyRef.current = JSON.stringify(membership);
+  }, [membership]);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st !== 'active') return;
+      const uid = loadedUidRef.current;
+      if (!uid) return;
+      void (async () => {
+        const m = await loadMembership(uid);
+        if (loadedUidRef.current !== uid) return; // signed out / switched while fetching
+        if (JSON.stringify(m) !== membershipKeyRef.current) {
+          setMembership(m);
+          queryClient.clear();
+        }
+      })();
+    });
+    return () => sub.remove();
+  }, []);
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });

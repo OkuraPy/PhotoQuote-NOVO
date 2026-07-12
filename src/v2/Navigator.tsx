@@ -5,6 +5,7 @@ import { ActivityIndicator, BackHandler, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from './theme';
 import { FLOW_RESET, StoreCtx, TabBar, V2Store } from './ui';
+import { registerStrings, translate } from './lib/i18n';
 import { useAuth } from './lib/auth';
 import { ForgotScreen, LoginScreen, OnboardScreen, SignupScreen } from './screens/Auth';
 import { ClientsScreen, HomeScreen, JobsScreen, ProfileScreen } from './screens/Tabs';
@@ -12,6 +13,10 @@ import { AttachScreen, CameraScreen, EstimateScreen } from './screens/Flow';
 import { JobScreen } from './screens/Job';
 import { ChangePasswordScreen, ClientEditScreen, ClientScreen, CompanyScreen, LanguageScreen } from './screens/Misc';
 import { TeamScreen } from './screens/Team';
+
+registerStrings({
+  'nav.connecting': { en: 'Connecting…', es: 'Conectando…', pt: 'Conectando…' },
+});
 
 const AUTH_SCREENS: Record<string, React.ComponentType<any>> = {
   login: LoginScreen,
@@ -133,7 +138,7 @@ export function Navigator() {
     return (
       <View style={{ flex: 1, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator color="#fff" />
-        <Text style={{ color: '#fff', marginTop: 14, fontSize: 14 }}>Connecting…</Text>
+        <Text style={{ color: '#fff', marginTop: 14, fontSize: 14 }}>{translate('nav.connecting')}</Text>
       </View>
     );
   }

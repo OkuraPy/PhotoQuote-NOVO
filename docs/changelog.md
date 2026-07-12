@@ -4,6 +4,49 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-12 06:20] — fix: REVISÃO GERAL ("revisa tudo") — 4 agentes, 2 bloqueantes + 5 altos corrigidos
+- **O que mudou**: revisão adversarial completa pré-build (app inteiro, banco prod, edge functions +
+  segredos, portal) com 4 agentes paralelos; TODOS os achados acionáveis corrigidos e provados em prod.
+- **BLOQUEANTE 1 (banco)**: numeração de orçamentos — `generate_estimate_number()` usava `LPAD(n,3)` que
+  TRUNCA acima de 999 ('1004'→'100') + UNIQUE global: a conta de teste colidia no PRÓXIMO insert e o
+  Gladson quebraria no seu 100º orçamento (EST-100 global já tomado). Fix: unique por usuário
+  (user_id, estimate_number), lpad sem truncar, advisory lock (mata race do MAX+1), drop do trigger
+  legado adormecido + função uuid órfã. **PROVADO**: insert real → EST-1004, 201.
+- **BLOQUEANTE 2 (app)**: título do job era persistido LOCALIZADO ("trabalho de Painting") e imprimia no
+  CONTRATO legal do cliente (Project: …) — viola a regra "cliente sempre vê inglês". Fix: persiste
+  sempre EN (`{svc} job`/'New quote'); prod tinha 0 títulos pt/es (sem reparo de dados).
+- **ALTOS**: (a) editar cliente APAGAVA notes silenciosamente (state nunca hidratado + update sempre
+  incluía a chave) → hidrata + select notes; (b) SendSheet herdava a aba ativa → NEXT "Send quote" na
+  aba Invoice/Contract mandava PDF rotulado "Invoice" sem número/"Agreement" sem termos e não estampava
+  Sent → força jobTab:'quote'; (c) sem rate-limit/teto nas 3 functions de IA (custo OpenAI scriptável)
+  → 60 chamadas/usuário/hora via ai_jobs + caps (desc 2000, imagem 4M chars, áudio 15MB) — v7/v4/v2
+  DEPLOYADAS e smoke-testadas; (d) fábrica do bug service_role: DEFAULT PRIVILEGES quebrados desde
+  abril (toda tabela nova nascia sem DML pro service_role, anon com TRUNCATE) → corrigido estoque
+  (18 tabelas) + fábrica (ALTER DEFAULT PRIVILEGES); (e) bucket contract-signatures era file-host
+  público irrestrito → PNG ≤512KB só em signatures/ (provado: mime/pasta errada 400, caminho portal 200).
+- **MÉDIOS**: revogação de membro agora pega no foreground (AppState → refreshMembership + clear de
+  caches); Alerts pós-Modal com delay 380ms (oferta de recibo/fases sumia no iOS); ClientScreen resolve
+  cliente vivo da query (Call/Text discavam número velho); show_values fail-open → fail-closed
+  (COALESCE false + NOT NULL); author_type travado no INSERT de comentário do membro; ramos mortos
+  admin/estimator removidos de 6 policies (get_member_role/user_has_team_access DROPADAS);
+  sign_agreement com caps+validação de URL do bucket; membro agora vê só BRANDING do dono via
+  get_owner_branding() (policy da linha inteira de users com rates/margens DROPADA; fetchCompanyProfile
+  faz fallback via RPC); base64url no decode de JWT do ai-estimate; erros das functions genéricos
+  (detalhe só no log ai_jobs).
+- **BAIXOS**: depósito $0 bloqueado; strings do send.ts/Navigator no i18n; wa.me sem telefone cai no
+  share sheet; placeholder INV falso → '—'; link Edit escondido em job legado sem estimate;
+  handle_new_user com cap 120; pg_temp nas definer antigas; UNIQUEs de invoice/receipt por usuário;
+  templates default fora do anon; revokes de higiene (anon INSERT phase_comments, EXECUTE helpers).
+- **Arquivos**: migration 20260712120000_general_review_hardening.sql (APLICADA em prod), 3 edge
+  functions (deployadas), Flow/Job/Misc/Navigator/data/api/auth/send no app.
+- **Verificação**: invariante do owner 8/7/4/1/0 intacto pós-tudo; tsc limpo; jest 100/100; matriz de
+  grants zerada (0 tabelas sem DML service_role, 0 TRUNCATE cliente); smoke das 3 functions ao vivo.
+- **Decisão técnica**: SEM build EAS (regra do dono segue). Aceitos conscientemente (documentados):
+  own-folder residual do storage, tokens fracos de agreements LEGADOS (v2 já gera forte), métrica
+  "awaiting payment" superconta parcial (decisão de produto), sign_agreement segue executável por anon
+  até a SERVICE_ROLE_KEY entrar na Vercel (Onda C), leaked-password protection = toggle no dashboard
+  (pendência dono), expo-print fotos remotas = validar em device antes da build.
+
 ### [2026-07-12 03:10] — feat: v2 — ONDA B COMPLETA: equipe multi-usuário (owner+field, Opção B)
 - **O que mudou**: **EQUIPE no app** — dono cria funcionário direto (nome+email+senha, sem convite; exigência
   verbatim do dono), atribui trabalhos, controla se o membro vê valores. Membro `field` loga e cai numa UI

@@ -435,6 +435,7 @@ export type Client = {
   city: string;
   zip?: string;
   state?: string;
+  notes?: string; // hydrated into the editor — an untouched edit must not wipe it
   jobs: number;
 };
 

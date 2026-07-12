@@ -82,7 +82,7 @@ async function uploadProjectPhotos(userId: string, projectId: string, photos: Ph
 /* ---------------- Clients ---------------- */
 export async function fetchClients(userId: string): Promise<Client[]> {
   const [{ data, error }, { data: projs }] = await Promise.all([
-    supabase.from('clients').select('id, full_name, phone, email, address, address_street, address_city, address_state, address_zip, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    supabase.from('clients').select('id, full_name, phone, email, address, address_street, address_city, address_state, address_zip, notes, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     supabase.from('projects').select('client_id').eq('user_id', userId),
   ]);
   if (error) throw error;
@@ -97,6 +97,7 @@ export async function fetchClients(userId: string): Promise<Client[]> {
     city: [c.address_city, c.address_state].filter(Boolean).join(', '),
     zip: c.address_zip || '',
     state: c.address_state || '',
+    notes: c.notes || '',
     jobs: counts.get(c.id) || 0,
   }));
 }
@@ -845,7 +846,13 @@ export async function fetchCompanyProfile(userId: string) {
     .select('company_name, company_address, company_phone, company_email, company_license, company_website, default_city, default_state, default_deposit_percent, default_tax_percent, default_margin_percent, logo_url')
     .eq('id', userId)
     .maybeSingle();
-  return data;
+  if (data) return data;
+  // Team member: RLS hides the owner's users row (it carries rates/margins/plan). The
+  // get_owner_branding() definer returns ONLY the branding fields — enough for everything
+  // a member's UI renders; the sensitive defaults stay owner-only.
+  const { data: branding } = await supabase.rpc('get_owner_branding');
+  const b = Array.isArray(branding) ? branding[0] : branding;
+  return b && b.id === userId ? b : null;
 }
 
 export async function updateCompanyProfile(userId: string, p: { company_name?: string; company_license?: string; company_phone?: string; company_email?: string; company_address?: string; default_deposit_percent?: number | null; default_tax_percent?: number | null; default_margin_percent?: number | null; logo_url?: string | null }) {

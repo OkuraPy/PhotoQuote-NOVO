@@ -447,13 +447,14 @@ export function JobScreen({ go, back, params }: NavProp) {
       clearStage(); // invoice now exists → DB-derived stage becomes "Invoiced"
       setTab('invoice');
       // the schedule insert failed and the plan fell back to a single payment — say so, never silently
-      if (downgraded) Alert.alert(t('job.planDowngradedTitle'), t('job.planDowngradedBody'));
+      // (380ms: an Alert presented while the sheet Modal is still dismissing dies with it on iOS)
+      if (downgraded) setTimeout(() => Alert.alert(t('job.planDowngradedTitle'), t('job.planDowngradedBody')), 380);
       else if (!editing && estId && pid && nItems > 0) {
         // G4: fresh invoice = the work is about to start — offer to seed the progress phases.
         // Best-effort and only when there are none yet; a failure just leaves the tab's button.
         try {
           if ((await countProjectPhases(pid)) === 0) {
-            Alert.alert(t('job.createPhasesTitle'), t('job.createPhasesBody', { n: nItems }), [
+            setTimeout(() => Alert.alert(t('job.createPhasesTitle'), t('job.createPhasesBody', { n: nItems }), [
               { text: t('job.notNow'), style: 'cancel' },
               {
                 text: t('job.create'),
@@ -468,7 +469,7 @@ export function JobScreen({ go, back, params }: NavProp) {
                   })();
                 },
               },
-            ]);
+            ]), 380);
           }
         } catch {
           /* never block the invoice flow over the phases nicety */
@@ -495,13 +496,14 @@ export function JobScreen({ go, back, params }: NavProp) {
       setPaySheet(false);
       clearStage();
       const balanceAfter = invoiceBalance(invoice.total, invoice.amountPaid + amount);
-      Alert.alert(t('job.paymentRecordedTitle'), t('job.sendReceiptBody', { amount: fmt(amount) }), [
+      // 380ms: the receipt offer (G3) was racing the sheet's dismiss animation and could vanish
+      setTimeout(() => Alert.alert(t('job.paymentRecordedTitle'), t('job.sendReceiptBody', { amount: fmt(amount) }), [
         { text: t('job.notNow'), style: 'cancel' },
         {
           text: t('job.sendReceipt'),
           onPress: () => requireCompany(() => { void sendReceipt(paymentId, { amount, method, date: toDateOnly(new Date()), balanceAfter }, invoice.number); }),
         },
-      ]);
+      ]), 380);
     } catch (e: any) {
       Alert.alert(t('job.couldNotRecordPayment'), e?.message || t('job.alert.tryAgain'));
     } finally {
@@ -600,7 +602,9 @@ export function JobScreen({ go, back, params }: NavProp) {
   };
 
   const doNext = () => {
-    if (next.act === 'send') return requireCompany(() => up({ sheet: true })); // quote goes out with the company header
+    // NEXT's send is ALWAYS the quote — force the tab too, or the sheet inherits whatever tab is
+    // open and the PDF goes out labeled "Invoice" (no number) / "Agreement" (no terms).
+    if (next.act === 'send') return requireCompany(() => up({ sheet: true, jobTab: 'quote' }));
     if (next.act === 'approve') return setEstimateStatus('Approved', 'Approved');
     if (next.act === 'invoice') return openGenerateInvoice();
     if (next.act === 'paid') return setPaySheet(true); // record what was received (pre-filled with the balance)
@@ -926,7 +930,9 @@ function QuoteTab({ items, totals, markupPercent = 0, customerNote, go, photos, 
           ) : null}
         </>
       ) : null}
-      <SectionTitle title={t('job.lineItems')} link={t('job.edit')} onLink={onEdit || (() => go('estimate', {}))} />
+      {/* no onEdit = legacy job without an estimate row — the bare go('estimate') fallback
+          started a FRESH flow and could duplicate the job on save; hide the link instead */}
+      <SectionTitle title={t('job.lineItems')} link={onEdit ? t('job.edit') : undefined} onLink={onEdit} />
       <View style={{ gap: 10 }}>
         {items.map((it) => (
           <Card key={it.id} style={{ padding: 14 }}>
@@ -1048,7 +1054,7 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, q
             </View>
           </Between>
           <Between style={{ marginTop: 16, alignItems: 'flex-start' }}>
-            <View><DpLab text={t('job.invoiceLabel')} /><Text style={{ fontFamily: fonts.num, fontSize: 14, color: colors.muted, marginTop: 3 }}>{invoice?.number || 'INV-2026-0001'}</Text></View>
+            <View><DpLab text={t('job.invoiceLabel')} /><Text style={{ fontFamily: fonts.num, fontSize: 14, color: colors.muted, marginTop: 3 }}>{invoice?.number || '—'}</Text></View>
             <View style={{ alignItems: 'flex-end' }}><DpLab text={due ? t('job.issuedDue') : t('job.issuedOnly')} /><Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.ink, marginTop: 3 }}>{mdDate(issued)}{due ? ` · ${mdDate(due)}` : ''}</Text></View>
           </Between>
         </View>
@@ -1274,7 +1280,9 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
   // a $0 installment would print "Payment N · $0.00" on the invoice AND the contract — never savable
   const hasZeroRow = rows.some((r) => !(r.amount > 0));
   const rowsOk = missingOk && !hasZeroRow;
-  const canConfirm = !busy && (mode === 'full' || (mode === 'deposit' && !depTooBig) || (mode === 'installments' && rowsOk));
+  // deposit must be a real amount — $0 saved a 'deposit' plan that rendered as a confusing
+  // "Full payment · Upon completion" with a "due today" header
+  const canConfirm = !busy && (mode === 'full' || (mode === 'deposit' && !depTooBig && depValue > 0) || (mode === 'installments' && rowsOk));
 
   const buildPlan = (): PaymentPlan => {
     if (mode === 'deposit') {

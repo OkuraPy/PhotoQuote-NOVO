@@ -967,7 +967,9 @@ export function AttachScreen({ go, back }: NavProp) {
     try {
       const clientId = skipClient ? null : await resolveClientId(); // client is optional
       const client = skipClient ? null : sel; // city fallback only — the address is the JOB SITE's
-      const jobTitle = store.svcs[0] ? t('flow.jobSuffix', { service: store.svcs[0] }) : t('flow.newEstimate');
+      // PERSISTED title is client-facing (contract "Project:", portal header) — locked rule:
+      // everything the client sees is English. Screens translate for display on their own.
+      const jobTitle = store.svcs[0] ? `${store.svcs[0]} job` : 'New quote';
       const { projectId } = await createJob({
         userId: ownerId,
         clientId,
