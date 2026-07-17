@@ -4,6 +4,22 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-17 06:10] — feat: fotos da obra — câmera OU galeria + apagar foto (pedido do dono)
+- **O que mudou (aba Progress/fases do Job)**: (1) ao adicionar foto de progresso, escolha entre 📷 tirar
+  na hora (câmera, com pedido de permissão) ou 🖼️ galeria — antes abria SÓ a galeria; (2) apagar uma foto
+  de progresso — long-press ou o botão "x" na miniatura (owner/office; field só adiciona). A foto some do
+  app E do portal do cliente (a linha phase_photos é a fonte); o objeto do storage é removido best-effort.
+- **Banco**: migration 20260717060000 APLICADA — policy "Team office deletes phase photos" (office gerencia
+  as fotos da obra do dono; owner já apagava via "Users manage own phase photos"; FIELD sem DELETE, só adiciona).
+- **App**: api.ts deletePhasePhoto; Job.tsx shootPhoto/pickFromGallery/uploadAssets/removePhoto (try/catch nos
+  dois launches), miniatura com botão de excluir; 7 strings i18n (en/es/pt). **app.json**: purpose strings
+  NSCamera/NSPhotoLibrary/NSMicrophone específicas (exigência da App Store — a Apple rejeita as genéricas).
+- **Revisão**: adversarial focada — VEREDITO PRONTO, 0 bloqueante/alto; RLS de delete conferida (owner via
+  policy própria, office via a nova, field bloqueado no banco E escondido na UI nos 2 caminhos); câmera não
+  é módulo novo (expo-image-picker/camera já nas deps — sem risco de saga de build). Nits absorvidos
+  (try/catch nos launches, newline do app.json). Órfão de storage no delete do office = classe já aceita
+  (igual deletePhase). tsc limpo, jest 108/108.
+
 ### [2026-07-17 05:30] — fix: REVISÃO PRÉ-BUILD-32 (dono "revisa cada micro coisa") — 4 revisores de PRODUTO
 - **Contexto**: build 31 (Ondas A+B) em uso REAL pelo Gladson há 1 semana SEM erros (contrato assinado,
   cotação IA c/ voz, portal c/ cliente comentando, pagamento $2.400 c/ recibo — auditoria de prod

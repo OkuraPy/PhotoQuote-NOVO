@@ -18,7 +18,10 @@
       "bundleIdentifier": "com.photoquoteai.app",
       "buildNumber": "23",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "PhotoQuote uses the camera so you can take photos of the job for AI estimates and progress updates.",
+        "NSPhotoLibraryUsageDescription": "PhotoQuote accesses your photo library so you can attach existing job photos to estimates and progress updates.",
+        "NSMicrophoneUsageDescription": "PhotoQuote uses the microphone so you can dictate job notes by voice."
       }
     },
     "android": {

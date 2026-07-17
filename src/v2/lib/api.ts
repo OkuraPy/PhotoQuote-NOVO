@@ -1321,6 +1321,23 @@ export async function addPhasePhotos(userId: string, projectId: string, phaseId:
   return added;
 }
 
+// Delete one progress photo (owner/office can manage the job's photos). Removes the row (drops it
+// from the app AND the client portal) and best-effort deletes the storage object behind it.
+export async function deletePhasePhoto(photoId: string, fileUrl?: string | null): Promise<void> {
+  const { error } = await supabase.from('phase_photos').delete().eq('id', photoId);
+  if (error) throw error;
+  if (fileUrl) {
+    const path = fileUrl.split('/phase-photos/')[1];
+    if (path) {
+      try {
+        await supabase.storage.from(PHASE_BUCKET).remove([path]);
+      } catch {
+        /* orphan object is harmless — the row (what the app/portal read) is already gone */
+      }
+    }
+  }
+}
+
 export const progressLink = (token: string) => `${PORTAL_URL}/p/${token}`;
 
 // Returns the project's active client-progress token, creating one (and stamping activated_at,

@@ -6,7 +6,7 @@ import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
 import { addDaysISO, applyMarkup, balanceAfterPayment, calcTotals, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { addPhaseComment, addPhasePhotos, agreementLink, assignMember, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deriveStage, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, JobDetail, progressLink, ProgressPhase, PhaseStatus, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
+import { addPhaseComment, addPhasePhotos, agreementLink, assignMember, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deletePhasePhoto, deriveStage, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, JobDetail, progressLink, ProgressPhase, PhaseStatus, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { sendDoc } from '../lib/send';
 import { registerStrings, useT } from '../lib/i18n';
@@ -173,6 +173,13 @@ registerStrings({
   'job.tapToAdvance': { en: '{label} · tap to advance', es: '{label} · toca para avanzar', pt: '{label} · toque para avançar' },
   'job.addMorePhotos': { en: 'Add more photos', es: 'Agregar más fotos', pt: 'Adicionar mais fotos' },
   'job.addProgressPhotos': { en: 'Add progress photos', es: 'Agregar fotos de progreso', pt: 'Adicionar fotos de progresso' },
+  'job.addPhotoTitle': { en: 'Add a photo', es: 'Agregar una foto', pt: 'Adicionar uma foto' },
+  'job.takePhoto': { en: 'Take a photo', es: 'Tomar una foto', pt: 'Tirar uma foto' },
+  'job.chooseFromGallery': { en: 'Choose from gallery', es: 'Elegir de la galería', pt: 'Escolher da galeria' },
+  'job.cameraDeniedTitle': { en: 'Camera access needed', es: 'Se necesita acceso a la cámara', pt: 'Precisa de acesso à câmera' },
+  'job.cameraDeniedBody': { en: 'Enable camera access in Settings to take a photo.', es: 'Activa el acceso a la cámara en Ajustes para tomar una foto.', pt: 'Ative o acesso à câmera nas Configurações para tirar uma foto.' },
+  'job.deletePhotoTitle': { en: 'Delete photo?', es: '¿Eliminar foto?', pt: 'Excluir foto?' },
+  'job.deletePhotoBody': { en: 'This removes the photo from the job and the client portal.', es: 'Esto quita la foto del trabajo y del portal del cliente.', pt: 'Isso remove a foto do trabalho e do portal do cliente.' },
   'job.commentsCount': { en: 'Comments · {n}', es: 'Comentarios · {n}', pt: 'Comentários · {n}' },
   'job.comments': { en: 'Comments', es: 'Comentarios', pt: 'Comentários' },
   'job.adding': { en: 'Adding…', es: 'Agregando…', pt: 'Adicionando…' },
@@ -1579,17 +1586,62 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName }: { pro
     ]);
   };
 
-  const addPhotos = async (p: ProgressPhase) => {
-    if (!userId) return;
-    const res = await ImagePicker.launchImageLibraryAsync({ allowsMultipleSelection: true, quality: 0.8, selectionLimit: 10 });
-    if (res.canceled || !res.assets?.length) return;
+  // add photos to a phase — the owner asked to be able to shoot on the spot OR pick from the gallery
+  const uploadAssets = async (p: ProgressPhase, assets: { uri: string }[]) => {
+    if (!userId || !assets.length) return;
     try {
-      const n = await addPhasePhotos(userId, projectId, p.id, res.assets.map((a) => ({ uri: a.uri })));
+      const n = await addPhasePhotos(userId, projectId, p.id, assets.map((a) => ({ uri: a.uri })));
       refresh();
       if (!n) Alert.alert(t('job.alert.uploadFailed'), t('job.alert.noPhotosAdded'));
     } catch (e: any) {
       Alert.alert(t('job.alert.couldNotAddPhotos'), e?.message || t('job.alert.tryAgain'));
     }
+  };
+  const shootPhoto = async (p: ProgressPhase) => {
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) { Alert.alert(t('job.cameraDeniedTitle'), t('job.cameraDeniedBody')); return; }
+      const res = await ImagePicker.launchCameraAsync({ quality: 0.8 });
+      if (res.canceled || !res.assets?.length) return;
+      await uploadAssets(p, res.assets.map((a) => ({ uri: a.uri })));
+    } catch (e: any) {
+      Alert.alert(t('job.error'), e?.message || t('job.alert.tryAgain'));
+    }
+  };
+  const pickFromGallery = async (p: ProgressPhase) => {
+    try {
+      const res = await ImagePicker.launchImageLibraryAsync({ allowsMultipleSelection: true, quality: 0.8, selectionLimit: 10 });
+      if (res.canceled || !res.assets?.length) return;
+      await uploadAssets(p, res.assets.map((a) => ({ uri: a.uri })));
+    } catch (e: any) {
+      Alert.alert(t('job.error'), e?.message || t('job.alert.tryAgain'));
+    }
+  };
+  const addPhotos = (p: ProgressPhase) => {
+    if (!userId) return;
+    Alert.alert(t('job.addPhotoTitle'), undefined, [
+      { text: t('job.takePhoto'), onPress: () => void shootPhoto(p) },
+      { text: t('job.chooseFromGallery'), onPress: () => void pickFromGallery(p) },
+      { text: t('job.cancel'), style: 'cancel' },
+    ]);
+  };
+  // owner/office manage the job's photos — tap one to remove it (field only adds)
+  const removePhoto = (photoId: string, url: string) => {
+    Alert.alert(t('job.deletePhotoTitle'), t('job.deletePhotoBody'), [
+      { text: t('job.cancel'), style: 'cancel' },
+      {
+        text: t('job.delete'),
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deletePhasePhoto(photoId, url);
+            refresh();
+          } catch (e: any) {
+            Alert.alert(t('job.error'), e?.message || t('job.couldNotDelete'));
+          }
+        },
+      },
+    ]);
   };
 
   const shareWithClient = async () => {
@@ -1659,7 +1711,17 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName }: { pro
                 {p.notes ? <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 8, lineHeight: 19 }}>{p.notes}</Text> : null}
                 {p.photos.length ? (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 12 }}>
-                    {p.photos.map((ph) => <Image key={ph.id} source={{ uri: ph.url }} style={{ width: 64, height: 64, borderRadius: 10, backgroundColor: colors.chipBg }} />)}
+                    {p.photos.map((ph) => (
+                      // field only adds photos; owner/office can long-press to delete one
+                      <Pressable key={ph.id} onLongPress={fieldMode ? undefined : () => removePhoto(ph.id, ph.url)} delayLongPress={300}>
+                        <Image source={{ uri: ph.url }} style={{ width: 64, height: 64, borderRadius: 10, backgroundColor: colors.chipBg }} />
+                        {fieldMode ? null : (
+                          <View style={{ position: 'absolute', top: -5, right: -5, width: 20, height: 20, borderRadius: 10, backgroundColor: colors.ink, alignItems: 'center', justifyContent: 'center' }}>
+                            <Pressable onPress={() => removePhoto(ph.id, ph.url)} hitSlop={10}><Icon name="x" size={11} sw={3} color="#fff" /></Pressable>
+                          </View>
+                        )}
+                      </Pressable>
+                    ))}
                   </ScrollView>
                 ) : null}
                 <Btn variant="ghost" sm icon="camera" title={p.photos.length ? t('job.addMorePhotos') : t('job.addProgressPhotos')} onPress={() => addPhotos(p)} style={{ marginTop: 12 }} />
