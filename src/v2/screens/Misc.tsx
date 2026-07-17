@@ -386,7 +386,9 @@ export function CompanyScreen({ back }: NavProp) {
         <Field label={t('misc.defaultMargin')} opt><Input value={margin} onChangeText={setMargin} keyboardType="decimal-pad" placeholder={t('misc.defaultMarginPlaceholder')} /></Field>
       </ScrollView>
       <View style={actionbar}>
-        <Btn title={busy ? t('misc.saving') : t('misc.save')} onPress={save} disabled={busy} />
+        {/* wait for the profile to hydrate before enabling save — otherwise a save on the empty
+            initial form would blank the name/license/defaults over the real row (final-review M2) */}
+        <Btn title={busy ? t('misc.saving') : t('misc.save')} onPress={save} disabled={busy || profile === undefined} />
       </View>
     </Kav>
   );

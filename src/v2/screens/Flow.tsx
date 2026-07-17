@@ -72,7 +72,6 @@ registerStrings({
   'flow.markupIncluded': { en: 'Markup included in item prices', es: 'Margen incluido en los precios de los elementos', pt: 'Margem incluída nos preços dos itens' },
   'flow.continue': { en: 'Continue', es: 'Continuar', pt: 'Continuar' },
   'flow.saveChanges': { en: 'Save changes', es: 'Guardar cambios', pt: 'Salvar alterações' },
-  'flow.newLineItem': { en: 'New line item', es: 'Nuevo elemento', pt: 'Novo item' },
 
   // Item editor
   'flow.editItem': { en: 'Edit item', es: 'Editar elemento', pt: 'Editar item' },
@@ -117,8 +116,6 @@ registerStrings({
   'flow.notSignedInTitle': { en: 'Not signed in', es: 'No has iniciado sesión', pt: 'Não conectado' },
   'flow.notSignedInBody': { en: 'Please sign in again.', es: 'Inicia sesión de nuevo.', pt: 'Faça login novamente.' },
   'flow.newClient': { en: 'New client', es: 'Nuevo cliente', pt: 'Novo cliente' },
-  'flow.jobSuffix': { en: '{service} job', es: 'trabajo de {service}', pt: 'trabalho de {service}' },
-  'flow.newEstimate': { en: 'New quote', es: 'Nueva cotización', pt: 'Novo orçamento' },
   'flow.couldNotSave': { en: 'Could not save', es: 'No se pudo guardar', pt: 'Não foi possível salvar' },
   'flow.skip': { en: 'Save without client', es: 'Guardar sin cliente', pt: 'Salvar sem cliente' },
   'flow.saving': { en: 'Saving…', es: 'Guardando…', pt: 'Salvando…' },
@@ -622,7 +619,10 @@ export function EstimateScreen({ go, back, params }: NavProp) {
   const updateItem = (id: number, patch: Partial<LineItem>) => up((st) => ({ items: st.items.map((it) => (it.id === id ? { ...it, ...patch } : it)) }));
   const removeItem = (id: number) => up((st) => ({ items: st.items.filter((it) => it.id !== id), editing: null }));
   const addItem = () => {
-    const it: LineItem = { id: Date.now(), cat: 'Labor', desc: tr('flow.newLineItem'), qty: 1, unit: 'ea', price: 0, basePrice: 0, taxable: false };
+    // English literal, NOT tr(): this is persisted to line_items.description and prints on the
+    // client's PDF/contract — the locked "client output is always English" rule. The editor opens
+    // on it for the user to rename anyway (final-review L1).
+    const it: LineItem = { id: Date.now(), cat: 'Labor', desc: 'New line item', qty: 1, unit: 'ea', price: 0, basePrice: 0, taxable: false };
     up((st) => ({ items: [...st.items, it], editing: it }));
   };
 

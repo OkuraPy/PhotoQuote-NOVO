@@ -4,6 +4,41 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-17 05:30] — fix: REVISÃO PRÉ-BUILD-32 (dono "revisa cada micro coisa") — 4 revisores de PRODUTO
+- **Contexto**: build 31 (Ondas A+B) em uso REAL pelo Gladson há 1 semana SEM erros (contrato assinado,
+  cotação IA c/ voz, portal c/ cliente comentando, pagamento $2.400 c/ recibo — auditoria de prod
+  confirmou integridade 100% zerada). Ondas C/D/E prontas mas só no túnel; esta revisão precede o OK
+  do dono pra build 32. 4 revisores focados em FLUXO/lógica de negócio/código morto (não segurança —
+  já auditada 8×). Vereditos: jornada owner SIM(1 ressalva), papéis/billing SIM, portal PRONTO,
+  produção SAUDÁVEL. Achados corrigidos:
+- **A1 (ALTO — dinheiro/legal)**: contrato enviado congela o snapshot da fatura; editar o orçamento
+  ou o plano DEPOIS deixava o "Resend signing link" mandar um contrato desatualizado (valor errado)
+  que o cliente ainda podia assinar. Fix: `voidUnsignedAgreements()` anula contratos NÃO-assinados ao
+  editar quote (via syncInvoiceWithEstimate) ou plano (updateInvoicePlan); fetchJobDetail ignora void
+  → a aba Contract volta a "gerar" e cria um fresco. Assinado é imutável (nunca tocado).
+- **Papel OFFICE (M1)**: `requireCompany` oferecia "Add company info" ao office → beco silencioso (save
+  de 0 linhas sem erro, guard bloqueava pra sempre). Agora membro recebe "peça ao dono"; só owner vê o
+  atalho.
+- **Pagamento (M1)**: valor acima do saldo (fat-finger $9409 p/ saldo $940.90) era aceito sem aviso e
+  virava "Paid in full" errado (ledger append-only, sem estorno). Agora confirma antes.
+- **CompanyScreen (M2)**: save ficava habilitado antes do profile hidratar → salvar no form vazio
+  zerava nome/licença/defaults. Agora `disabled` até a query retornar.
+- **Cliente EN (L1)**: item novo nascia com descrição localizada (`tr('flow.newLineItem')`="Novo item")
+  e imprimia no PDF EN do cliente — literal 'New line item' fixo (regra travada de saída EN).
+- **Contrato sem cliente (L2)**: erro cru em inglês caía em alert pt/es → pré-check localizado.
+- **Reset de senha (M3)**: o link do e-mail não tinha destino (caía no Site URL sem handler → 404).
+  Criada a página **/reset** no portal (troca de senha via token do hash) + `redirectTo` no app.
+- **Higiene**: comentário que mentia ("MVP só cria field" pós-Onda E) corrigido; 6 strings i18n órfãs
+  removidas (flow.jobSuffix/newEstimate/newLineItem, job.dueOn, tabs.notifications, team.members).
+- **Gates**: tsc limpo, jest 108/108, build do portal ok, eslint 0 erros.
+- **NÃO aplicado (decisão do dono, no relatório)**: remover o app v1 inteiro + 5 deps órfãs
+  (@react-navigation etc.), a rota `onboard` inalcançável, deps ngrok/react-native-web, e a limpeza
+  cosmética fina (10 ícones/7 tokens de tema órfãos) — tudo identificado, sem risco funcional, deixado
+  pra pós-build por cautela. Prod: 10 phase-photos órfãos do Gladson (limpeza) + duplicate_index em
+  invoices, ambos p/ migration de higiene futura. SEM BUILD até o OK do dono.
+
+---
+
 ### [2026-07-12 13:10] — fix: REVISÃO FINAL INTEGRAL ("revisa tudo tudo tudo") — família office fechada
 - **4 revisores frescos** sobre o estado atual (app 2d20b6f, portal 1378e36, prod pós-9-migrations).
   Vereditos: EDGE **APROVADO** (drift ZERO — 5 functions byte-idênticas ao repo, sha256; logs limpos;

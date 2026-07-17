@@ -203,7 +203,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const resetPassword = async (email: string) => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+    // send the recovery link to the portal's /reset page (final-review M3): without redirectTo it
+    // lands on the project's Site URL, which had no reset handler → the flow died in a 404.
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: 'https://photoquote-client-portal.vercel.app/reset',
+    });
     return { error };
   };
 

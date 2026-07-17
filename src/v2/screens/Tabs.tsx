@@ -169,7 +169,6 @@ registerStrings({
   'tabs.defaultMargin': { en: 'Default margin', es: 'Margen predeterminado', pt: 'Margem padrão' },
   'tabs.notSet': { en: 'Not set', es: 'Sin definir', pt: 'Não definido' },
   'tabs.account': { en: 'Account', es: 'Cuenta', pt: 'Conta' },
-  'tabs.notifications': { en: 'Notifications', es: 'Notificaciones', pt: 'Notificações' },
   'tabs.changePassword': { en: 'Change password', es: 'Cambiar contraseña', pt: 'Alterar senha' },
   'tabs.logOut': { en: 'Log out', es: 'Cerrar sesión', pt: 'Sair' },
   'tabs.footer': {

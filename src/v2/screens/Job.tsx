@@ -37,6 +37,8 @@ registerStrings({
   'job.alert.couldNotCreateInvoice': { en: 'Could not create the invoice', es: 'No se pudo crear la factura', pt: 'Não foi possível criar a fatura' },
   'job.alert.invoiceNeeded': { en: 'Invoice needed', es: 'Se necesita la factura', pt: 'Fatura necessária' },
   'job.alert.generateInvoiceFirst': { en: 'Generate the invoice first, then the contract.', es: 'Genera primero la factura y luego el contrato.', pt: 'Gere a fatura primeiro e depois o contrato.' },
+  'job.alert.clientNeeded': { en: 'Client needed', es: 'Se necesita un cliente', pt: 'Cliente necessário' },
+  'job.alert.clientNeededBody': { en: 'Add a client to this job before creating a contract.', es: 'Agrega un cliente a este trabajo antes de crear un contrato.', pt: 'Adicione um cliente a este trabalho antes de criar um contrato.' },
   'job.alert.couldNotCreateContract': { en: 'Could not create the contract', es: 'No se pudo crear el contrato', pt: 'Não foi possível criar o contrato' },
   'job.alert.couldNotUpdate': { en: 'Could not update', es: 'No se pudo actualizar', pt: 'Não foi possível atualizar' },
   'job.alert.tryAgain': { en: 'Try again.', es: 'Inténtalo de nuevo.', pt: 'Tente novamente.' },
@@ -88,7 +90,6 @@ registerStrings({
   'job.plan.installments': { en: 'Installments', es: 'Cuotas', pt: 'Parcelas' },
   'job.plan.installmentsDesc': { en: 'Split into 2–12 payments', es: 'Divide en 2–12 pagos', pt: 'Divida em 2–12 pagamentos' },
   'job.dueInDays': { en: 'Due in {n} days', es: 'Vence en {n} días', pt: 'Vence em {n} dias' },
-  'job.dueOn': { en: 'Due {date}', es: 'Vence {date}', pt: 'Vence {date}' },
   'job.uponCompletion': { en: 'Upon completion', es: 'Al finalizar', pt: 'Na conclusão' },
   'job.splitInto': { en: 'Split into', es: 'Dividir en', pt: 'Dividir em' },
   'job.depositPreview': { en: 'Deposit {dep} · Balance {bal}', es: 'Anticipo {dep} · Saldo {bal}', pt: 'Entrada {dep} · Saldo {bal}' },
@@ -116,6 +117,9 @@ registerStrings({
   'job.couldNotRecordPayment': { en: 'Could not record the payment', es: 'No se pudo registrar el pago', pt: 'Não foi possível registrar o pagamento' },
   // receipt (G3) — the document itself is English; only this app copy is translated
   'job.paymentRecordedTitle': { en: 'Payment recorded', es: 'Pago registrado', pt: 'Pagamento registrado' },
+  'job.overpayTitle': { en: 'Amount over balance', es: 'Monto mayor al saldo', pt: 'Valor acima do saldo' },
+  'job.overpayBody': { en: '{amount} is more than the {balance} balance due. Record it anyway?', es: '{amount} es más que el saldo de {balance}. ¿Registrar de todos modos?', pt: '{amount} é mais que o saldo de {balance}. Registrar mesmo assim?' },
+  'job.overpayConfirm': { en: 'Record anyway', es: 'Registrar igual', pt: 'Registrar mesmo assim' },
   'job.sendReceiptBody': { en: 'Send the client a receipt for {amount}?', es: '¿Enviar al cliente un recibo por {amount}?', pt: 'Enviar ao cliente um recibo de {amount}?' },
   'job.notNow': { en: 'Not now', es: 'Ahora no', pt: 'Agora não' },
   'job.sendReceipt': { en: 'Send receipt', es: 'Enviar recibo', pt: 'Enviar recibo' },
@@ -220,6 +224,7 @@ registerStrings({
     pt: 'Este documento sairia como "Sua empresa". Adicione o nome do seu negócio para que os clientes vejam de quem ele é.',
   },
   'job.companyMissingCta': { en: 'Add company info', es: 'Agregar datos de la empresa', pt: 'Adicionar dados da empresa' },
+  'job.companyMissingMember': { en: 'Ask the account owner to add the company name in their profile before sending documents.', es: 'Pide al dueño de la cuenta que agregue el nombre de la empresa en su perfil antes de enviar documentos.', pt: 'Peça ao dono da conta para adicionar o nome da empresa no perfil antes de enviar documentos.' },
   // payment plan hardening: silent installment downgrade, overdue dues, $0 quote
   'job.planDowngradedTitle': { en: 'Installments not saved', es: 'Las cuotas no se guardaron', pt: 'As parcelas não foram salvas' },
   'job.planDowngradedBody': {
@@ -408,10 +413,17 @@ export function JobScreen({ go, back, params }: NavProp) {
   const companyReady = company === undefined ? true : !!String((company as any)?.company_name || '').trim();
   const requireCompany = (proceed: () => void) => {
     if (companyReady) return proceed();
-    Alert.alert(t('job.companyMissingTitle'), t('job.companyMissingBody'), [
-      { text: t('job.cancel'), style: 'cancel' },
-      { text: t('job.companyMissingCta'), onPress: () => go('profileCompany') },
-    ]);
+    // only the OWNER can fill the company profile (users row is own-only) — offering an office
+    // member the "Add company info" button led to a silent dead end (final-review M1): the save
+    // wrote 0 rows without error and the guard blocked forever. Members just get told to ask.
+    if (role === 'owner') {
+      Alert.alert(t('job.companyMissingTitle'), t('job.companyMissingBody'), [
+        { text: t('job.cancel'), style: 'cancel' },
+        { text: t('job.companyMissingCta'), onPress: () => go('profileCompany') },
+      ]);
+    } else {
+      Alert.alert(t('job.companyMissingTitle'), t('job.companyMissingMember'));
+    }
   };
 
   // generating is now 2 steps: pick the plan in the sheet, THEN create the invoice on confirm.
@@ -487,6 +499,24 @@ export function JobScreen({ go, back, params }: NavProp) {
   // After a successful record the contractor is offered a receipt for it (G3).
   const confirmPayment = async (amount: number, method: string | null) => {
     if (!ownerId || !inv?.id) return;
+    // guard a fat-finger overpayment ($9409 for a $940.90 balance): the ledger is append-only,
+    // there's no in-app refund, and the receipt would print a wrong "Paid in full" (final-review M1)
+    const balanceNow = invoiceBalance(inv.total, inv.amountPaid);
+    if (amount > balanceNow + 0.005) {
+      Alert.alert(
+        t('job.overpayTitle'),
+        t('job.overpayBody', { amount: fmt(amount), balance: fmt(balanceNow) }),
+        [
+          { text: t('job.notNow'), style: 'cancel' },
+          { text: t('job.overpayConfirm'), onPress: () => void doRecordPayment(amount, method) },
+        ]
+      );
+      return;
+    }
+    void doRecordPayment(amount, method);
+  };
+  const doRecordPayment = async (amount: number, method: string | null) => {
+    if (!ownerId || !inv?.id) return;
     const invoice = inv; // freeze — detail refetches under the alert below
     setSavingPay(true);
     try {
@@ -554,6 +584,9 @@ export function JobScreen({ go, back, params }: NavProp) {
   const generateContract = async () => {
     if (detail?.agreement) return shareContract(detail.agreement.token); // existing doc — resharing is safe
     if (!inv) { Alert.alert(t('job.alert.invoiceNeeded'), t('job.alert.generateInvoiceFirst')); return; }
+    // a client is optional on a job/invoice but REQUIRED for a contract — pre-check with a localized
+    // message (createAgreement would otherwise throw its English string into a pt/es alert; L2)
+    if (!realClient) { Alert.alert(t('job.alert.clientNeeded'), t('job.alert.clientNeededBody')); return; }
     if (!ownerId || !projectId) return;
     const [uid, pid, invId] = [ownerId, projectId, inv.id];
     // company guard before GENERATING: createAgreement freezes the company name into the contract HTML

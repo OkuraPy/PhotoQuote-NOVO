@@ -352,8 +352,8 @@ export function needsPhaseSync(phases: SyncPhase[], items: { desc: string }[]): 
 
 /* ---------------- Team (Onda B): roles & credential helpers (pure) ---------------- */
 // App-level role of the signed-in account. 'owner' = no team_members row (the account owns its
-// data); 'office'/'field' come from team_members.role. MVP note: the UI only CREATES 'field'
-// members (office lands in a later wave), but the whole layer already understands 'office'.
+// data); 'office'/'field' come from team_members.role. The Team screen creates BOTH 'field' and
+// 'office' members (Onda E); office runs the business, field only sees assigned jobs.
 export type TeamRole = 'owner' | 'office' | 'field';
 export type MemberRole = Exclude<TeamRole, 'owner'>; // what team_members.role actually stores
 

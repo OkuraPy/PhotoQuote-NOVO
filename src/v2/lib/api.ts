@@ -302,6 +302,20 @@ export async function updateEstimateItems(
 // while that's still safe: never a Paid invoice, never one with recorded payments (the client
 // already acted on that document — the UI shows a "quote changed" banner instead). Best-effort
 // by design: a failed sync degrades to that same banner, never breaks the estimate save.
+// A1 (final review): a sent/pending contract freezes the invoice snapshot (items, total, payment
+// schedule) at generation time. Editing the quote or the payment plan afterwards leaves that legal
+// document stale — "resend signing link" would push an out-of-date, wrong-money contract the client
+// could still sign. Void every UNSIGNED contract built from this invoice so the app regenerates a
+// fresh one (fetchJobDetail ignores voids → the Contract tab returns to "generate"). A SIGNED
+// contract is immutable and never touched. Best-effort — a failure just leaves the old behavior.
+async function voidUnsignedAgreements(invoiceId: string): Promise<void> {
+  try {
+    await supabase.from('agreements').update({ status: 'void' }).eq('invoice_id', invoiceId).neq('status', 'signed').neq('status', 'void');
+  } catch {
+    /* best-effort */
+  }
+}
+
 async function syncInvoiceWithEstimate(estimateId: string): Promise<void> {
   try {
     const { data: inv } = await supabase
@@ -311,7 +325,9 @@ async function syncInvoiceWithEstimate(estimateId: string): Promise<void> {
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (!inv || String(inv.status || '').toLowerCase() === 'paid') return;
+    if (!inv) return;
+    await voidUnsignedAgreements(inv.id); // the quote changed → any unsigned contract is now stale
+    if (String(inv.status || '').toLowerCase() === 'paid') return;
     const { count } = await supabase.from('invoice_payments').select('id', { count: 'exact', head: true }).eq('invoice_id', inv.id);
     if (count) return;
 
@@ -441,6 +457,7 @@ export async function updateInvoicePlan(userId: string, invoiceId: string, plan:
   if (error) throw error;
   const { error: dErr } = await supabase.from('invoice_schedule').delete().eq('invoice_id', invoiceId);
   if (dErr) throw dErr;
+  await voidUnsignedAgreements(invoiceId); // the payment schedule changed → unsigned contract is stale (A1)
   return { downgraded: await insertScheduleRows(userId, invoiceId, plan) };
 }
 
@@ -1047,6 +1064,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
     .from('agreements')
     .select('id, token, status, signed_name, signed_date')
     .eq('project_id', projectId)
+    .neq('status', 'void') // A1: a voided (superseded) contract must not drive the Contract tab
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();

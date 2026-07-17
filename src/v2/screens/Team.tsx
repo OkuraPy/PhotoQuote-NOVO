@@ -17,7 +17,6 @@ import { getLocale, registerStrings, useT } from '../lib/i18n';
 
 registerStrings({
   'team.title': { en: 'Team', es: 'Equipo', pt: 'Equipe' },
-  'team.members': { en: 'Members', es: 'Miembros', pt: 'Membros' },
   'team.ownerOnly': { en: 'Only the account owner can manage the team.', es: 'Solo el propietario de la cuenta puede administrar el equipo.', pt: 'Só o dono da conta pode gerenciar a equipe.' },
   'team.empty.title': { en: 'No members yet', es: 'Aún no hay miembros', pt: 'Nenhum membro ainda' },
   'team.empty.body': {
