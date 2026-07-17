@@ -4,6 +4,20 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-17 06:45] — feat: portal do cliente — revisão da tela de acompanhamento (pedido do dono)
+- **Pedido**: "revisa o link da tela do cliente pra ficar bem estruturado, pra ele acompanhar a obra da
+  melhor forma". A estrutura já era sólida (header do contratante, barra de progresso, fases expansíveis
+  com fotos+lightbox+comentários) — 3 melhorias de valor pro cliente, todas no repo photoquote-client-portal:
+  (1) **Recência**: linha "Last update {há X}" no card de progresso — a 1ª coisa que o cliente quer saber
+  ("teve novidade?"); vira "Project complete" quando todas as fases estão concluídas. (2) **Empty-state
+  amigável**: quando o contratante ainda não postou nada, em vez de uma parede de fases "Not started" a 0%,
+  aparece "Work is scheduled — {contractor} vai postar fotos/atualizações aqui; o link fica vivo o projeto
+  todo". (3) **Estado vazio por fase**: fase expandida sem fotos/notas/comentários agora diz "This phase
+  hasn't started yet" em vez de só a caixa de comentário seca.
+- **Arquivos**: utils.ts (lastActivityAt/hasAnyActivity), ProgressCard.tsx, p/[token]/page.tsx, PhaseCard.tsx.
+- **Verificado**: nome do cliente nos comentários já cai em "Client" quando vazio (RPC add_client_comment,
+  sem bug). Build limpo, eslint 0 erros. Deploy Vercel. NÃO afeta o app nem o build 32.
+
 ### [2026-07-17 06:10] — feat: fotos da obra — câmera OU galeria + apagar foto (pedido do dono)
 - **O que mudou (aba Progress/fases do Job)**: (1) ao adicionar foto de progresso, escolha entre 📷 tirar
   na hora (câmera, com pedido de permissão) ou 🖼️ galeria — antes abria SÓ a galeria; (2) apagar uma foto
