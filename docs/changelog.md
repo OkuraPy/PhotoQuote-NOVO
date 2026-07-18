@@ -4,6 +4,28 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-18 02:30] — fix: PENTE FINO COMPLETO (dono pediu após o hotfix) — 3 frentes, 2 nits corrigidos
+- **3 frentes** (o ângulo que faltou quando o bug de recursão escapou): (1) análise de ciclos de RLS,
+  (2) teste de ESCRITA REAL em prod, (3) fluxo/lógica do app. Vereditos:
+- **Ciclos de RLS: LIVRE** — grafo das 95 policies é um DAG puro (tudo aponta p/ projects e team_members,
+  que são sinks sem aresta de saída inline); nenhum ciclo latente; o projects↔clients está comprovadamente
+  quebrado via client_belongs_to_owner() definer. O padrão "infinite recursion" não pode se repetir.
+- **Escrita real: 100% sã** — INSERT/UPDATE/DELETE de 14 tabelas centrais como owner em prod, todos 2xx,
+  zero recursão/42501/grant-faltando/falha-silenciosa; triggers e numeração EST-1004/INV-0002/RCPT-0001
+  corretos; imposto só sobre item tributável (bug histórico não reincide); **arquivar e salvar orçamento
+  provados sãos**; dados do Gladson intactos (contagem idêntica antes/depois); cenário desmontado.
+- **Fluxo/lógica: sem bloqueante, sem regressão** das mudanças de hoje (fotos da obra, tela do cliente,
+  hotfix). Dinheiro cent-exato, máquina de estados coerente, i18n completo. 2 nits corrigidos:
+  (a) MÉDIO — o gate M2 do save da empresa era `profile === undefined`, que NÃO cobre `null` (erro
+  transitório de query retorna null) → save podia gravar em branco por cima do perfil real; trocado por
+  `!profile` (cobre loading E erro; owner novo tem row via trigger, então segue habilitado). (b) BAIXO —
+  "New quote for {cliente}" com trial expirado agora mostra o Alert antes de ir pra Plans (consistência
+  com Home/Jobs). Aceito (1ª build): listas mostram empty-state em erro de query sem retry.
+- **Gates**: tsc limpo, jest 108/108. **Ressalva**: durante o teste de escrita, o perfil de empresa da
+  conta de TESTE do dono (rodrigo) teve company_name/phone/defaults resetados; restaurei company_name=
+  'Rodrigo Reformas' (crítico p/ envio de documentos); phone e defaults de imposto/margem ele reconfigura
+  na tela de empresa (não afeta salvar/arquivar). Conta do Gladson NUNCA tocada.
+
 ### [2026-07-18 01:45] — HOTFIX CRÍTICO: recursão infinita de RLS em projects (salvar orçamento / arquivar)
 - **Sintoma (uso real do dono)**: "Could not save / Could not update — infinite recursion detected in
   policy for relation projects" ao salvar orçamento (INSERT projects) e ao arquivar job (UPDATE projects).

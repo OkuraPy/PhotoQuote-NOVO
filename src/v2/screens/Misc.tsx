@@ -180,6 +180,8 @@ export function ClientScreen({ go, back, params }: NavProp) {
           icon="camera"
           onPress={() => {
             if (bState === 'expired') {
+              // match Home/Jobs: tell the owner why before bouncing to Plans (pente-fino consistency)
+              Alert.alert(t('tabs.expiredGateTitle'), t('tabs.expiredGateBody'));
               go('plans');
               return;
             }
@@ -387,8 +389,11 @@ export function CompanyScreen({ back }: NavProp) {
       </ScrollView>
       <View style={actionbar}>
         {/* wait for the profile to hydrate before enabling save — otherwise a save on the empty
-            initial form would blank the name/license/defaults over the real row (final-review M2) */}
-        <Btn title={busy ? t('misc.saving') : t('misc.save')} onPress={save} disabled={busy || profile === undefined} />
+            initial form would blank the name/license/defaults over the real row. `!profile` covers
+            BOTH undefined (loading) AND null (a transient query error still returns null, not
+            undefined — pente-fino refinement of the earlier M2 fix). A new owner's row exists via
+            the signup trigger, so profile is a truthy object with empty fields → save stays enabled. */}
+        <Btn title={busy ? t('misc.saving') : t('misc.save')} onPress={save} disabled={busy || !profile} />
       </View>
     </Kav>
   );
