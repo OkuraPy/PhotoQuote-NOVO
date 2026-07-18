@@ -4,6 +4,25 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-18 01:45] — HOTFIX CRÍTICO: recursão infinita de RLS em projects (salvar orçamento / arquivar)
+- **Sintoma (uso real do dono)**: "Could not save / Could not update — infinite recursion detected in
+  policy for relation projects" ao salvar orçamento (INSERT projects) e ao arquivar job (UPDATE projects).
+- **Causa**: a Onda E (migration 170000) deu às policies office de projects um WITH CHECK com
+  `EXISTS(clients ...)`, e a policy de clients da Onda B (100100) já tinha `EXISTS(projects ...)` →
+  ciclo projects→clients→projects que o Postgres detecta no PLANEJAMENTO, quebrando QUALQUER
+  insert/update de projects, inclusive do OWNER (todas as policies permissivas entram no plano).
+  Escapou às 9 rodadas de revisão porque os E2E de office testaram INSERT de clients/leitura, nunca
+  INSERT/UPDATE de projects; e o Gladson não criou/arquivou job desde 12/07 (só editou existentes),
+  por isso prod não acusou.
+- **Fix (migration 20260718020000, APLICADA)**: a amarra "client_id pertence ao mesmo dono" virou a
+  função SECURITY DEFINER `client_belongs_to_owner()` — consulta clients SEM reentrar nas policies de
+  clients, quebrando o ciclo e mantendo a garantia anti-cross-tenant idêntica. Só as 2 policies office
+  de projects mudaram.
+- **Provado em prod (owner rodrigo)**: UPDATE projects 204, INSERT projects com client 201, UPDATE
+  status=archived 204, cleanup 204 — o dado de teste alterado na verificação foi restaurado.
+- **LIÇÃO**: após mudança de RLS, testar INSERT E UPDATE de CADA tabela central (não só SELECT/clients).
+  Ciclo mútuo de policies (A→B e B→A) = recursão estrutural, independe dos dados.
+
 ### [2026-07-17 06:45] — feat: portal do cliente — revisão da tela de acompanhamento (pedido do dono)
 - **Pedido**: "revisa o link da tela do cliente pra ficar bem estruturado, pra ele acompanhar a obra da
   melhor forma". A estrutura já era sólida (header do contratante, barra de progresso, fases expansíveis
