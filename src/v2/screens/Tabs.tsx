@@ -199,6 +199,71 @@ export function ClosedChip({ kind, lg }: { kind: ClosedKind; lg?: boolean }) {
   );
 }
 
+/* ---------------- delete a job (swipe) — shared by the Jobs list AND the Home list ---------- */
+// The owner asked for it "on the first screen where the project shows up", which is Home as much
+// as Jobs. Owner only: `projects` has no office/field DELETE policy, so anyone else would swipe
+// into a no-op. Two confirms, and the first one spells out money received / signed contract.
+export function useJobDelete() {
+  const t = useT();
+  const { ownerId, role } = useAuth();
+  const qc = useQueryClient();
+  const [deleting, setDeleting] = useState(false);
+  const canDelete = role === 'owner' && !!ownerId;
+
+  const confirmDelete = (j: Job) => {
+    if (!ownerId || deleting) return;
+    setDeleting(true); // the probe below is two round-trips — freeze the row meanwhile
+    void (async () => {
+      const facts = await projectDeleteFacts(j.id);
+      setDeleting(false);
+      const warn = [
+        facts.unknown ? t('job.deleteWarnUnknown') : '',
+        facts.paid > 0 ? t('job.deleteWarnPaid', { amount: fmt(facts.paid) }) : '',
+        facts.signed ? t('job.deleteWarnSigned') : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+      const head = `${j.client || j.title}${j.addr && j.addr !== '—' ? ` · ${j.addr}` : ''}`;
+      Alert.alert(t('job.deleteTitle'), `${head}\n\n${warn ? `${warn}\n\n` : ''}${t('job.deleteBody')}`, [
+        { text: t('tabs.cancel'), style: 'cancel' },
+        {
+          text: t('job.delete'),
+          style: 'destructive',
+          // 380ms: stacked Alerts race each other's dismiss animation on iOS
+          onPress: () =>
+            setTimeout(
+              () =>
+                Alert.alert(t('job.deleteFinalTitle'), t('job.deleteFinalBody'), [
+                  { text: t('tabs.cancel'), style: 'cancel' },
+                  {
+                    text: t('job.deleteForever'),
+                    style: 'destructive',
+                    onPress: () => {
+                      void (async () => {
+                        setDeleting(true);
+                        try {
+                          await deleteProject(ownerId, j.id);
+                          qc.removeQueries({ queryKey: ['jobDetail', j.id] });
+                          await qc.invalidateQueries({ queryKey: ['jobs'] });
+                          await qc.invalidateQueries({ queryKey: ['clients'] }); // job counts moved
+                        } catch (e: any) {
+                          Alert.alert(t('job.deleteFailed'), e?.message || t('job.alert.tryAgain'));
+                        } finally {
+                          setDeleting(false);
+                        }
+                      })();
+                    },
+                  },
+                ]),
+              380
+            ),
+        },
+      ]);
+    })();
+  };
+  return { canDelete, deleting, confirmDelete };
+}
+
 /* ---------------- JOB CARD ---------------- */
 export function JobCard({ j, i, onPress }: { j: Job; i: number; onPress: () => void }) {
   const t = useT();
@@ -264,6 +329,7 @@ export function HomeScreen({ go }: NavProp) {
   const { data: profile } = useQuery({ queryKey: ['company', ownerId], queryFn: () => fetchCompanyProfile(ownerId!), enabled: !!ownerId });
   // Onda D: an expired trial soft-locks CREATION only (existing data stays fully visible)
   const { state: bState } = useBilling();
+  const { canDelete, deleting, confirmDelete } = useJobDelete(); // swipe-to-delete on the Home list too
   const newQuote = () => {
     if (bState === 'expired') {
       Alert.alert(t('tabs.expiredGateTitle'), t('tabs.expiredGateBody'));
@@ -351,7 +417,10 @@ export function HomeScreen({ go }: NavProp) {
         ) : (
           <View style={{ gap: 10 }}>
             {recent.map((j, i) => (
-              <JobCard key={j.id} j={j} i={i} onPress={() => go('job', { job: j })} />
+              // same swipe-to-delete as the Jobs list: this is "the first screen where the job shows up"
+              <SwipeRow key={j.id} enabled={canDelete && !deleting} onAction={() => confirmDelete(j)}>
+                <JobCard j={j} i={i} onPress={() => go('job', { job: j })} />
+              </SwipeRow>
             ))}
           </View>
         )}
@@ -381,58 +450,7 @@ export function JobsScreen({ go }: NavProp) {
   const qc = useQueryClient();
   const { data: jobs = [], isLoading } = useQuery({ queryKey: ['jobs', ownerId], queryFn: () => fetchJobs(ownerId!), enabled: !!ownerId });
   const { state: bState } = useBilling(); // Onda D: expired trial soft-locks creation
-  // swipe a row to delete it (field request 19+26/07 — archive/lost were the only ways out).
-  // Owner only: projects has no office DELETE policy, so anyone else would get a silent no-op.
-  const [deleting, setDeleting] = useState(false);
-  const canDelete = role === 'owner' && !!ownerId;
-  const confirmDelete = (j: Job) => {
-    if (!ownerId || deleting) return;
-    void (async () => {
-      const facts = await projectDeleteFacts(j.id);
-      const warn = [
-        facts.paid > 0 ? t('job.deleteWarnPaid', { amount: fmt(facts.paid) }) : '',
-        facts.signed ? t('job.deleteWarnSigned') : '',
-      ]
-        .filter(Boolean)
-        .join('\n');
-      const head = `${j.client || j.title}${j.addr && j.addr !== '—' ? ` · ${j.addr}` : ''}`;
-      Alert.alert(t('job.deleteTitle'), `${head}\n\n${warn ? `${warn}\n\n` : ''}${t('job.deleteBody')}`, [
-        { text: t('tabs.cancel'), style: 'cancel' },
-        {
-          text: t('job.delete'),
-          style: 'destructive',
-          // 380ms: stacked Alerts race each other's dismiss animation on iOS
-          onPress: () =>
-            setTimeout(
-              () =>
-                Alert.alert(t('job.deleteFinalTitle'), t('job.deleteFinalBody'), [
-                  { text: t('tabs.cancel'), style: 'cancel' },
-                  {
-                    text: t('job.deleteForever'),
-                    style: 'destructive',
-                    onPress: () => {
-                      void (async () => {
-                        setDeleting(true);
-                        try {
-                          await deleteProject(ownerId, j.id);
-                          qc.removeQueries({ queryKey: ['jobDetail', j.id] });
-                          await qc.invalidateQueries({ queryKey: ['jobs'] });
-                          await qc.invalidateQueries({ queryKey: ['clients'] }); // job counts moved
-                        } catch (e: any) {
-                          Alert.alert(t('job.deleteFailed'), e?.message || t('job.alert.tryAgain'));
-                        } finally {
-                          setDeleting(false);
-                        }
-                      })();
-                    },
-                  },
-                ]),
-              380
-            ),
-        },
-      ]);
-    })();
-  };
+  const { canDelete, deleting, confirmDelete } = useJobDelete();
   // field members: no stage filters (stages derive from RLS-hidden financials) and no New Quote
   const fieldMode = role === 'field';
   const filter = fieldMode ? 'All' : store.jobFilter || 'All';
@@ -473,7 +491,7 @@ export function JobsScreen({ go }: NavProp) {
         data={isLoading ? [] : list}
         keyExtractor={(j) => j.id}
         renderItem={({ item: j, index: i }) => (
-          <SwipeRow enabled={canDelete} onAction={() => confirmDelete(j)}>
+          <SwipeRow enabled={canDelete && !deleting} onAction={() => confirmDelete(j)}>
             <JobCard j={j} i={i} onPress={() => go('job', { job: j })} />
           </SwipeRow>
         )}

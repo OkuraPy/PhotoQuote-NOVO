@@ -4,6 +4,42 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-28 07:20] — fix: REVISÃO ADVERSARIAL da Onda F (4 revisores) — 17 achados corrigidos antes do build 33
+- **O que mudou**: o dono pediu "revisa tudo que vc fez" antes de mandar pra Apple. 4 revisores
+  independentes (lógica do app, banco/RLS/perda de dado, pipeline do PDF, e produto contra os 7
+  áudios do Gladson). Vereditos: 3× "pode ir pro build" e 1× "atende parcialmente" no produto.
+  Tudo que era real foi corrigido:
+- **PDF/fotos**: (1) "Save PDF" ficava até 60s mudo e um 2º toque gerava dois share sheets (o iOS
+  derruba um e mostra "Could not send") → `SendSheet` com busy/spinner, 2º toque ignorado, fecha só
+  quando termina, e timeout de 9s por foto; (2) o fallback do `ImageManipulator` com URL remota era
+  **código morto no iOS** (o nativo exige `isReadableFile`) → o resize passou a rodar no arquivo
+  BAIXADO, o que também derruba o HTML de ~3,6MB pra ~500KB; (3) data URI não passa mais pelo
+  `escapeHtml` (eram 5 cópias de ~600KB por foto antes de imprimir); (4) PNG rotulado certo;
+  (5) entrada nula em `doc_photo_urls` não derruba mais o PDF inteiro.
+- **Banco/perda de dado**: `deleteProject` confere ANTES que o job existe e é do dono (o delete de
+  `agreements` é irreversível e o PostgREST não tem transação) e usa `count:'exact'` — um delete
+  negado por RLS não "apaga" mais em silêncio; limpa também a assinatura do cliente
+  (`contract-signatures`) e pagina a limpeza do storage; `addProjectPhotos` lê os arrays DEPOIS do
+  upload (remover foto durante o envio ressuscitava a URL de um arquivo já apagado) e o strip
+  congela enquanto sobe; `projectDeleteFacts` devolve `unknown` (falha de rede virava "nada a
+  perder"); a fase "Before photos" importa as fotos **curadas** (`doc_photo_urls`), não o rolo todo.
+- **Produto (o que o Gladson reclamaria de novo)**: swipe pra deletar também na **tela inicial**
+  (ele disse "primeira tela onde aparece o projeto"); tocar na 7ª foto era no-op mudo → agora
+  explica o limite; "Add photos" virou o 1º item da tira + link no título (estava escondido no fim
+  com 8 fotos); **parcelas**: chips 3/4/6/10/12 + "dividir igualmente" — subir um plano salvo pra
+  12× criava linhas de $0,00 e **desabilitava o salvar**, provável origem real do "não me dá opção
+  de 10, 12 vezes"; data também no modo entrada+saldo (era fixa em "hoje"); "Final photos" volta
+  pro fim quando entra fase nova; nomes das fases traduzidos na tela (banco segue em inglês pro
+  portal); datas do app no idioma do dono; fotos de progresso com retry + aviso de falha;
+  long-press 350→650ms (disputava com o tap de escolher foto do documento); foto não é mais
+  removível em job arquivado; calendário respeita o ±365 do stepper; swipe não remonta o card.
+- **Arquivos**: `src/v2/lib/api.ts`, `src/v2/lib/send.ts`, `src/v2/ui.tsx`, `src/v2/screens/Job.tsx`,
+  `src/v2/screens/Tabs.tsx`.
+- **Decisão técnica**: mantido o `automaticallyAdjustKeyboardInsets` puro no iOS — ele rola até o
+  campo de notas (a queixa do dono), ao custo da barra "Save changes" ficar atrás do teclado até
+  arrastar a lista. Trocar por KAV 'padding' resolveria a barra e devolveria o bug original.
+- **Gates**: tsc limpo, jest 108/108, 27 chaves i18n novas com en/es/pt.
+
 ### [2026-07-28 06:30] — feat: ONDA F — os 5 pedidos do Gladson no uso real do build 32
 - **O que mudou**: fechados os 5 itens que o usuário real mandou por áudio/print (2 deles repetidos
   duas vezes = os que mais incomodavam):

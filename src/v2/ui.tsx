@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
+  ActivityIndicator,
   Animated,
   Keyboard,
   KeyboardAvoidingView,
@@ -519,15 +520,13 @@ export function SwipeRow({ children, onAction, actionIcon = 'trash', enabled = t
         </Pressable>
       </View>
       <Animated.View style={{ transform: [{ translateX: x }] }} {...pan.panHandlers}>
-        {/* while open, a tap anywhere on the row just closes it (never fires the row's action) */}
-        {open ? (
-          <View>
-            {children}
-            <Pressable onPress={() => slide(0)} style={StyleSheet.absoluteFill} />
-          </View>
-        ) : (
-          children
-        )}
+        {/* the wrapper is ALWAYS rendered (swapping it in/out remounted the card and made the
+            thumbnail flash grey on every swipe); only the overlay comes and goes. While open, a
+            tap anywhere on the row just closes it instead of firing the row's action. */}
+        <View>
+          {children}
+          {open ? <Pressable onPress={() => slide(0)} style={StyleSheet.absoluteFill} /> : null}
+        </View>
       </Animated.View>
     </View>
   );
@@ -537,7 +536,9 @@ export function SwipeRow({ children, onAction, actionIcon = 'trash', enabled = t
 // Zero-dependency month calendar (no @react-native-community/datetimepicker = no new native
 // module). Field request 21/07: the payment-plan due dates only moved in 5-day steps, so a date
 // the client actually agreed to ("pays on Aug 5") was unreachable.
-const localeTag = () => ({ en: 'en-US', es: 'es-ES', pt: 'pt-BR' } as Record<string, string>)[getLocale()] || 'en-US';
+// exported: the screens format their own dates with it too (the PDF/contract keep their own
+// hardcoded English formatting — those are client-facing and must never follow the app locale)
+export const localeTag = () => ({ en: 'en-US', es: 'es-ES', pt: 'pt-BR' } as Record<string, string>)[getLocale()] || 'en-US';
 export function DateSheet({ open, onClose, value, onPick, title, sub }: { open: boolean; onClose: () => void; value: string; onPick: (iso: string) => void; title?: string; sub?: string }) {
   const t = useT();
   const sel = parseDateOnly(value || toDateOnly(new Date()));
@@ -680,8 +681,15 @@ export function Sheet({ open, onClose, title, sub, children }: { open: boolean; 
   );
 }
 
-export function SendSheet({ open, onClose, what = 'quote', onSent }: { open: boolean; onClose: () => void; what?: string; onSent?: (t: string) => void }) {
+export function SendSheet({ open, onClose, what = 'quote', busy, onSent }: { open: boolean; onClose: () => void; what?: string; busy?: boolean; onSent?: (t: string) => void }) {
   const tr = useT();
+  // the PDF route now downloads and embeds every photo before printing — seconds, not milliseconds.
+  // The sheet stays up with a spinner on the row that was tapped, and a second tap is ignored:
+  // two share sheets racing each other made iOS drop one and shout "Could not send".
+  const [picked, setPicked] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) setPicked(null);
+  }, [open]);
   // key = the logical value passed to onSent/sendDoc (must stay English); label/desc are translated
   // PDF first: it's the document clients expect (field feedback 07/07) — the share sheet it opens
   // is the only way to attach a FILE (wa.me/mailto links are text-only by platform design)
@@ -696,8 +704,9 @@ export function SendSheet({ open, onClose, what = 'quote', onSent }: { open: boo
       {opts.map((o) => (
         <Pressable
           key={o.key}
-          onPress={() => onSent && onSent(o.key)}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: colors.border, marginBottom: 10 }}
+          disabled={busy}
+          onPress={() => { if (busy) return; setPicked(o.key); onSent && onSent(o.key); }}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: colors.border, marginBottom: 10, opacity: busy && picked !== o.key ? 0.5 : 1 }}
         >
           <View style={{ width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: o.bg }}>
             <Icon name={o.ico} size={20} color={o.col} />
@@ -706,7 +715,7 @@ export function SendSheet({ open, onClose, what = 'quote', onSent }: { open: boo
             <Text style={{ fontFamily: fonts.bold, fontSize: 14.5, color: colors.ink }}>{tr('ui.send.' + o.k)}</Text>
             <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 1 }}>{tr('ui.send.' + o.k + 'Desc')}</Text>
           </View>
-          <Icon name="chevR" size={18} color="#C2C9D2" />
+          {busy && picked === o.key ? <ActivityIndicator size="small" color={colors.primary} /> : <Icon name="chevR" size={18} color="#C2C9D2" />}
         </Pressable>
       ))}
     </Sheet>

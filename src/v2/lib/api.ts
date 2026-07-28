@@ -53,6 +53,7 @@ export async function getMyLocation(): Promise<Region | null> {
 }
 
 const PHOTO_BUCKET = 'project-photos';
+const SIGNATURE_BUCKET = 'contract-signatures'; // the client's signature image (portal writes it)
 
 // Resize + upload ONE photo to project-photos/${userId}/${projectId}/. Returns its public URL
 // or null when anything on the way (decode, upload, url) fails.
@@ -105,11 +106,13 @@ async function uploadProjectPhotos(userId: string, projectId: string, photos: Ph
 // field report 26/07: "it doesn't let me add more photos"). New photos also join the document
 // selection while there is room under the cap: adding a photo means wanting it on the quote.
 export async function addProjectPhotos(userId: string, projectId: string, photos: Photo[]): Promise<{ added: number; failed: number }> {
+  // upload FIRST, read the arrays after: uploading 8 photos over 4G takes seconds, and reading the
+  // arrays up front meant a photo removed meanwhile came back from the dead on this write
+  const { urls, failed } = await uploadProjectPhotos(userId, projectId, photos);
   const { data: proj, error } = await supabase.from('projects').select('photo_urls, doc_photo_urls').eq('id', projectId).maybeSingle();
   if (error) throw error;
   const all: string[] = Array.isArray(proj?.photo_urls) ? (proj!.photo_urls as string[]) : [];
   const doc: string[] = Array.isArray(proj?.doc_photo_urls) ? (proj!.doc_photo_urls as string[]) : [];
-  const { urls, failed } = await uploadProjectPhotos(userId, projectId, photos);
   if (urls.length) {
     const room = Math.max(0, DOC_PHOTO_CAP - doc.length);
     const { error: uErr } = await supabase
@@ -663,21 +666,25 @@ export async function updateProjectStatus(projectId: string, status: 'Lost' | 'A
 // What the confirmation has to be honest about before erasing everything: money already received
 // and a contract the client actually signed. Failures degrade to zeros — the second confirm still
 // spells out that the deletion is permanent.
-export async function projectDeleteFacts(projectId: string): Promise<{ paid: number; signed: boolean }> {
+// `unknown` when the check itself failed: "couldn't verify" must never be shown as "nothing to
+// lose" — that silence would read as a green light on a job holding money and a signature.
+export async function projectDeleteFacts(projectId: string): Promise<{ paid: number; signed: boolean; unknown: boolean }> {
   try {
-    const [{ data: invs }, { data: agrs }] = await Promise.all([
+    const [{ data: invs, error: iErr }, { data: agrs, error: aErr }] = await Promise.all([
       supabase.from('invoices').select('id').eq('project_id', projectId),
       supabase.from('agreements').select('id').eq('project_id', projectId).eq('status', 'signed').limit(1),
     ]);
+    if (iErr || aErr) return { paid: 0, signed: false, unknown: true };
     const ids = (invs || []).map((i: any) => i.id);
     let paid = 0;
     if (ids.length) {
-      const { data: pays } = await supabase.from('invoice_payments').select('amount').in('invoice_id', ids);
+      const { data: pays, error: pErr } = await supabase.from('invoice_payments').select('amount').in('invoice_id', ids);
+      if (pErr) return { paid: 0, signed: false, unknown: true };
       paid = paidTotal(pays || []);
     }
-    return { paid, signed: !!(agrs || []).length };
+    return { paid, signed: !!(agrs || []).length, unknown: false };
   } catch {
-    return { paid: 0, signed: false };
+    return { paid: 0, signed: false, unknown: true };
   }
 }
 
@@ -686,12 +693,17 @@ export async function projectDeleteFacts(projectId: string): Promise<{ paid: num
 // design: an object left behind is an invisible orphan, never a broken screen.
 async function removeStorageFolder(bucket: string, prefix: string, depth = 2): Promise<void> {
   try {
-    const { data, error } = await supabase.storage.from(bucket).list(prefix, { limit: 200 });
-    if (error || !data?.length) return;
-    const files = data.filter((o: any) => o.id).map((o: any) => `${prefix}/${o.name}`);
-    const folders = data.filter((o: any) => !o.id).map((o: any) => `${prefix}/${o.name}`);
-    if (files.length) await supabase.storage.from(bucket).remove(files);
-    if (depth > 0) for (const f of folders) await removeStorageFolder(bucket, f, depth - 1);
+    // re-list from the top after each sweep instead of paging with an offset: the rows we just
+    // deleted shift every offset, and a job can hold more objects than one page (156 today)
+    for (let round = 0; round < 20; round++) {
+      const { data, error } = await supabase.storage.from(bucket).list(prefix, { limit: 100 });
+      if (error || !data?.length) return;
+      const files = data.filter((o: any) => o.id).map((o: any) => `${prefix}/${o.name}`);
+      const folders = data.filter((o: any) => !o.id).map((o: any) => `${prefix}/${o.name}`);
+      if (files.length) await supabase.storage.from(bucket).remove(files);
+      if (depth > 0) for (const f of folders) await removeStorageFolder(bucket, f, depth - 1);
+      if (!files.length && !folders.length) return; // nothing moved — stop instead of spinning
+    }
   } catch {
     /* best-effort */
   }
@@ -703,12 +715,37 @@ async function removeStorageFolder(bucket: string, prefix: string, depth = 2): P
 // Storage is cleaned after the row is safely gone (an orphan file is harmless; a deleted photo
 // under a job that failed to delete is not).
 export async function deleteProject(ownerId: string, projectId: string): Promise<void> {
+  // Look BEFORE cutting: the agreements delete below is irreversible (contract html, signature,
+  // date and IP) and PostgREST gives us no transaction to roll it back if the project delete then
+  // fails. The row must exist and belong to this account — a member (whose ownerId is the owner's)
+  // gets stopped here instead of losing a signed contract to a delete that RLS would refuse.
+  const { data: proj, error: pErr } = await supabase.from('projects').select('id, user_id').eq('id', projectId).maybeSingle();
+  if (pErr) throw pErr;
+  if (!proj) throw new Error('Job not found.');
+  if (proj.user_id !== ownerId) throw new Error('Only the account owner can delete a job.');
+
+  // the client's signature image lives in its own bucket and is part of no cascade
+  const { data: agrs } = await supabase.from('agreements').select('signature_image_url').eq('project_id', projectId);
   const { error: aErr } = await supabase.from('agreements').delete().eq('project_id', projectId);
   if (aErr) throw aErr;
-  const { error } = await supabase.from('projects').delete().eq('id', projectId);
+  // count:'exact' — a delete blocked by RLS returns no error and no rows, and the screen would
+  // happily navigate away from a job that is still there
+  const { error, count } = await supabase.from('projects').delete({ count: 'exact' }).eq('id', projectId);
   if (error) throw error;
+  if (!count) throw new Error('The job was not deleted.');
+
   await removeStorageFolder(PHOTO_BUCKET, `${ownerId}/${projectId}`);
   await removeStorageFolder(PHASE_BUCKET, `${ownerId}/${projectId}`);
+  const sigs = (agrs || [])
+    .map((a: any) => String(a?.signature_image_url || '').split(`/${SIGNATURE_BUCKET}/`)[1])
+    .filter(Boolean);
+  if (sigs.length) {
+    try {
+      await supabase.storage.from(SIGNATURE_BUCKET).remove(sigs);
+    } catch {
+      /* best-effort — the signed agreement row is already gone */
+    }
+  }
 }
 
 /* ---------------- Team (Onda B): owner + field members ---------------- */
@@ -1355,7 +1392,10 @@ const BEFORE_IMPORT_CAP = 12;
 // from), so the client sees where the work started. Both are created with auto_seeded = FALSE:
 // they aren't quote items, so "sync with quote" must never sweep them away. Idempotent — matched
 // by name, and the photo import only runs while the before phase is still empty.
-export async function ensureBookendPhases(userId: string, projectId: string, estimateId: string): Promise<{ created: number; imported: number }> {
+// `alwaysBefore`: the owner tapping the button ASKED for the slot, so it is created even with no
+// photos to import (voice-only quotes have none). The automatic path leaves it out instead of
+// planting a phase that would sit empty on the client's progress bar forever.
+export async function ensureBookendPhases(userId: string, projectId: string, estimateId: string, alwaysBefore = false): Promise<{ created: number; imported: number }> {
   const { data: phases, error } = await supabase.from('project_phases').select('id, name, phase_order').eq('project_id', projectId);
   if (error) throw error;
   const byName = new Map<string, string>((phases || []).map((p: any) => [String(p.name || ''), p.id as string]));
@@ -1370,8 +1410,17 @@ export async function ensureBookendPhases(userId: string, projectId: string, est
     is_visible_to_client: true,
     auto_seeded: false,
   });
+  // what the before phase would hold: the photos the owner CURATED for the client (doc_photo_urls)
+  // when there are any — importing the whole camera roll would publish shots they chose to keep out
+  const { data: proj } = await supabase.from('projects').select('photo_urls, doc_photo_urls').eq('id', projectId).maybeSingle();
+  const docUrls: string[] = Array.isArray(proj?.doc_photo_urls) ? (proj!.doc_photo_urls as string[]) : [];
+  const allUrls: string[] = Array.isArray(proj?.photo_urls) ? (proj!.photo_urls as string[]) : [];
+  const source = (docUrls.length ? docUrls : allUrls).filter((u) => typeof u === 'string' && !!u).slice(0, BEFORE_IMPORT_CAP);
+
   const rows = [
-    ...(byName.has(BEFORE_PHASE_NAME) ? [] : [row(BEFORE_PHASE_NAME, (orders.length ? Math.min(...orders) : 0) - 1)]),
+    // seeding with no photos to show skips the before phase (it would sit empty on the client's
+    // progress bar forever); when the owner asks for it explicitly, they get the slot regardless
+    ...(byName.has(BEFORE_PHASE_NAME) || (!source.length && !alwaysBefore) ? [] : [row(BEFORE_PHASE_NAME, (orders.length ? Math.min(...orders) : 0) - 1)]),
     ...(byName.has(FINAL_PHASE_NAME) ? [] : [row(FINAL_PHASE_NAME, (orders.length ? Math.max(...orders) : 0) + 1)]),
   ];
   let created = 0;
@@ -1388,8 +1437,7 @@ export async function ensureBookendPhases(userId: string, projectId: string, est
   if (beforeId) {
     const { count } = await supabase.from('phase_photos').select('id', { count: 'exact', head: true }).eq('phase_id', beforeId);
     if (!count) {
-      const { data: proj } = await supabase.from('projects').select('photo_urls').eq('id', projectId).maybeSingle();
-      const urls: string[] = Array.isArray(proj?.photo_urls) ? (proj!.photo_urls as string[]).slice(0, BEFORE_IMPORT_CAP) : [];
+      const urls = source;
       if (urls.length) {
         // the rows point at the project-photos bucket on purpose: deleting one here only drops the
         // phase row (deletePhasePhoto's storage step keys off /phase-photos/), never the quote photo
@@ -1458,8 +1506,26 @@ export async function syncPhasesWithEstimate(userId: string, projectId: string, 
     }));
     const { error } = await supabase.from('project_phases').insert(rows);
     if (error) throw error;
+    await pushFinalPhaseLast(projectId); // new work goes ABOVE the closing "Final photos" phase
   }
   return { removed: plan.removeIds.length, created: plan.create.length };
+}
+
+// "Final photos" must stay at the BOTTOM: every new phase is created at max(order)+1, and the
+// final one IS the max — so a phase added (by hand or by the quote sync) would land under it,
+// which is exactly what the owner asked NOT to happen ("always one more item at the end").
+async function pushFinalPhaseLast(projectId: string): Promise<void> {
+  try {
+    const { data } = await supabase.from('project_phases').select('id, name, phase_order').eq('project_id', projectId);
+    const rows = data || [];
+    const fin = rows.find((p: any) => p.name === FINAL_PHASE_NAME);
+    if (!fin || rows.length < 2) return;
+    const maxOther = rows.filter((p: any) => p.id !== fin.id).reduce((m: number, p: any) => Math.max(m, Number(p.phase_order) || 0), 0);
+    if (Number(fin.phase_order) > maxOther) return;
+    await supabase.from('project_phases').update({ phase_order: maxOther + 1 }).eq('id', fin.id);
+  } catch {
+    /* cosmetic ordering — never worth failing the caller over */
+  }
 }
 
 // project_phases.estimate_id is NOT NULL — the caller passes the job's estimate id.
@@ -1474,6 +1540,7 @@ export async function createPhase(userId: string, projectId: string, estimateId:
     is_visible_to_client: true,
   });
   if (error) throw error;
+  await pushFinalPhaseLast(projectId);
 }
 
 export async function updatePhase(id: string, patch: { name?: string; status?: PhaseStatus; notes?: string | null; is_visible_to_client?: boolean }): Promise<void> {
@@ -1489,30 +1556,38 @@ export async function deletePhase(id: string): Promise<void> {
 }
 
 // Resize + upload photos to the public `phase-photos` bucket and link them to the phase.
-// Best-effort: a photo that fails is skipped. Returns how many were added.
-export async function addPhasePhotos(userId: string, projectId: string, phaseId: string, photos: Photo[]): Promise<number> {
+// Same contract as the job photos: one retry per photo and a COUNT of what still failed, so the
+// screen can say it out loud (a progress photo dying in silence is the same bug the owner
+// reported on the quote album — 8 picked, 3 arrived).
+export async function addPhasePhotos(userId: string, projectId: string, phaseId: string, photos: Photo[]): Promise<{ added: number; failed: number }> {
   const { count } = await supabase.from('phase_photos').select('id', { count: 'exact', head: true }).eq('phase_id', phaseId);
   let order = count || 0;
   let added = 0;
-  for (const photo of photos) {
+  let failed = 0;
+  const upload = async (photo: Photo): Promise<string | null> => {
     try {
       const m = await ImageManipulator.manipulateAsync(photo.uri, [{ resize: { width: 1280 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true });
-      if (!m.base64) continue;
+      if (!m.base64) return null;
       const path = `${userId}/${projectId}/${phaseId}/${Crypto.randomUUID()}.jpg`;
       // NO upsert: the name is a fresh UUID (upsert is pointless) and upsert needs a SELECT
       // policy on the object — a team member uploads into the OWNER's folder and has none
       // (same 403-in-400 class as the 07/08 B1 bug). Plain INSERT is all this path needs.
       const { error: upErr } = await supabase.storage.from(PHASE_BUCKET).upload(path, decode(m.base64), { contentType: 'image/jpeg' });
-      if (upErr) continue;
+      if (upErr) return null;
       const { data } = supabase.storage.from(PHASE_BUCKET).getPublicUrl(path);
-      if (!data?.publicUrl) continue;
-      const { error: insErr } = await supabase.from('phase_photos').insert({ phase_id: phaseId, project_id: projectId, user_id: userId, file_url: data.publicUrl, display_order: order++ });
-      if (!insErr) added++;
+      return data?.publicUrl || null;
     } catch {
-      /* skip a photo that fails, never block the others */
+      return null;
     }
+  };
+  for (const photo of photos) {
+    const url = (await upload(photo)) || (await upload(photo)); // one retry before giving up
+    if (!url) { failed++; continue; }
+    const { error: insErr } = await supabase.from('phase_photos').insert({ phase_id: phaseId, project_id: projectId, user_id: userId, file_url: url, display_order: order++ });
+    if (insErr) failed++;
+    else added++;
   }
-  return added;
+  return { added, failed };
 }
 
 // Delete one progress photo (owner/office can manage the job's photos). Removes the row (drops it

@@ -8,9 +8,9 @@ import { addDaysISO, applyMarkup, balanceAfterPayment, calcTotals, ClosedKind, d
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { addPhaseComment, addPhasePhotos, addProjectPhotos, agreementLink, assignMember, BEFORE_PHASE_NAME, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deletePhasePhoto, deleteProject, deleteProjectPhoto, deriveStage, ensureBookendPhases, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, FINAL_PHASE_NAME, JobDetail, progressLink, ProgressPhase, PhaseStatus, projectDeleteFacts, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { sendDoc } from '../lib/send';
+import { sendDoc, SendData } from '../lib/send';
 import { registerStrings, useT } from '../lib/i18n';
-import { Avatar, Between, Btn, Card, CatChip, Chip, DateSheet, DecimalInput, Divider, Empty, Field, Input, LinkBtn, Nav, NavBtn, Row, SectionTitle, SendSheet, Sheet, StageChip, Stepper, Switch, useStore } from '../ui';
+import { Avatar, Between, Btn, Card, CatChip, Chip, DateSheet, DecimalInput, Divider, Empty, Field, Input, LinkBtn, localeTag, Nav, NavBtn, Row, SectionTitle, SendSheet, Sheet, StageChip, Stepper, Switch, useStore } from '../ui';
 import { ClosedChip } from './Tabs';
 
 registerStrings({
@@ -92,6 +92,12 @@ registerStrings({
   'job.dueInDays': { en: 'Due in {n} days', es: 'Vence en {n} días', pt: 'Vence em {n} dias' },
   'job.uponCompletion': { en: 'Upon completion', es: 'Al finalizar', pt: 'Na conclusão' },
   'job.splitInto': { en: 'Split into', es: 'Dividir en', pt: 'Dividir em' },
+  'job.splitEvenly': { en: 'Split evenly', es: 'Dividir en partes iguales', pt: 'Dividir igualmente' },
+  'job.docPhotoCapTitle': { en: 'Up to {cap} photos on the document', es: 'Hasta {cap} fotos en el documento', pt: 'Até {cap} fotos no documento' },
+  'job.docPhotoCapBody': { en: 'Tap a selected photo to take it off, then pick this one.', es: 'Toca una foto seleccionada para quitarla y luego elige esta.', pt: 'Toque numa foto já marcada para tirá-la e então escolha esta.' },
+  // phase names are stored in ENGLISH (the client portal reads them) — only the display translates
+  'job.phase.beforeName': { en: 'Before photos', es: 'Fotos del antes', pt: 'Fotos do antes' },
+  'job.phase.finalName': { en: 'Final photos', es: 'Fotos finales', pt: 'Fotos finais' },
   'job.depositPreview': { en: 'Deposit {dep} · Balance {bal}', es: 'Anticipo {dep} · Saldo {bal}', pt: 'Entrada {dep} · Saldo {bal}' },
   'job.depositTooBig': { en: 'The deposit can’t exceed the total.', es: 'El anticipo no puede superar el total.', pt: 'A entrada não pode passar do total.' },
   'job.unallocated': { en: 'Unallocated: {amount}', es: 'Sin asignar: {amount}', pt: 'Falta alocar: {amount}' },
@@ -220,6 +226,11 @@ registerStrings({
   },
   'job.deleteWarnPaid': { en: 'This job has {amount} in received payments.', es: 'Este trabajo tiene {amount} en pagos recibidos.', pt: 'Este trabalho tem {amount} em pagamentos recebidos.' },
   'job.deleteWarnSigned': { en: 'The client already SIGNED the contract — that signed copy is erased too.', es: 'El cliente ya FIRMÓ el contrato: esa copia firmada también se borra.', pt: 'O cliente já ASSINOU o contrato — essa cópia assinada também é apagada.' },
+  'job.deleteWarnUnknown': {
+    en: 'Could not check whether this job has payments or a signed contract — check your connection first.',
+    es: 'No se pudo verificar si este trabajo tiene pagos o un contrato firmado; revisa tu conexión antes.',
+    pt: 'Não deu para verificar se este trabalho tem pagamentos ou contrato assinado — confira sua conexão antes.',
+  },
   'job.deleteFinalTitle': { en: 'Are you sure?', es: '¿Estás seguro?', pt: 'Tem certeza?' },
   'job.deleteFinalBody': { en: 'Last chance — this job is gone for good.', es: 'Última oportunidad: este trabajo desaparece para siempre.', pt: 'Última chance — este trabalho some para sempre.' },
   'job.deleteForever': { en: 'Delete forever', es: 'Eliminar para siempre', pt: 'Excluir para sempre' },
@@ -235,7 +246,11 @@ registerStrings({
   // before / after bookend phases (field request 22/07)
   'job.addBookends': { en: 'Add before & final photo phases', es: 'Agregar fases de fotos inicial y final', pt: 'Adicionar fases de fotos inicial e final' },
   'job.bookendsAddedTitle': { en: 'Before & final photos added', es: 'Fotos inicial y final agregadas', pt: 'Fotos inicial e final adicionadas' },
-  'job.bookendsAddedBody': { en: 'The job photos went into "Before photos". "Final photos" is waiting for the finished work.', es: 'Las fotos del trabajo fueron a "Before photos". "Final photos" espera el trabajo terminado.', pt: 'As fotos do trabalho foram para "Before photos". "Final photos" espera a obra pronta.' },
+  'job.bookendsAddedBody': {
+    en: 'The job photos went into the before phase. The final one is waiting for the finished work.',
+    es: 'Las fotos del trabajo entraron en la fase inicial. La final espera el trabajo terminado.',
+    pt: 'As fotos do trabalho entraram na fase inicial. A final está esperando a obra pronta.',
+  },
   'job.reopen': { en: 'Reopen', es: 'Reabrir', pt: 'Reabrir' },
   'job.closedBanner.lost': {
     en: 'This job is marked as lost — it no longer counts in your numbers.',
@@ -426,7 +441,13 @@ export function JobScreen({ go, back, params }: NavProp) {
   const onToggleDocPhoto = async (url: string) => {
     if (!projectId || !detail) return;
     const next = toggleDocPhoto(docPhotos, detail.photoUrls, url);
-    if (!next) return; // cap reached / unknown url — the tap is a no-op
+    if (!next) {
+      // a silent no-op at the cap is what "the app eats my photos" feels like — say the limit out loud
+      if (!docPhotos.includes(url) && docPhotos.length >= DOC_PHOTO_CAP) {
+        Alert.alert(t('job.docPhotoCapTitle', { cap: DOC_PHOTO_CAP }), t('job.docPhotoCapBody'));
+      }
+      return;
+    }
     // optimistic: the strip reflects the tap instantly; the server result re-syncs it after
     queryClient.setQueryData(['jobDetail', projectId], (old?: JobDetail) => (old ? { ...old, docPhotoUrls: next } : old));
     try {
@@ -487,6 +508,7 @@ export function JobScreen({ go, back, params }: NavProp) {
       void (async () => {
         const facts = await projectDeleteFacts(projectId);
         const warn = [
+          facts.unknown ? t('job.deleteWarnUnknown') : '',
           facts.paid > 0 ? t('job.deleteWarnPaid', { amount: fmt(facts.paid) }) : '',
           facts.signed ? t('job.deleteWarnSigned') : '',
         ]
@@ -514,6 +536,8 @@ export function JobScreen({ go, back, params }: NavProp) {
 
   /* ----- job photos: add more after the capture / drop one (field report 26/07) ----- */
   const [photoBusy, setPhotoBusy] = useState(false);
+  // the PDF now embeds its photos before printing — long enough that a second tap would race
+  const [sendBusy, setSendBusy] = useState(false);
   const addJobPhotos = () => {
     if (!projectId || !ownerId || photoBusy) return;
     askPhotoSource(t, (mode) => {
@@ -896,7 +920,8 @@ export function JobScreen({ go, back, params }: NavProp) {
             onToggleDocPhoto={detail ? onToggleDocPhoto : undefined}
             // photos can join the job at any time now, not only during the capture flow
             onAddPhotos={projectId && !closed ? addJobPhotos : undefined}
-            onRemovePhoto={projectId ? removeJobPhoto : undefined}
+            // a closed job is the archive: it can't gain photos, so it must not lose them either
+            onRemovePhoto={projectId && !closed ? removeJobPhoto : undefined}
             photoBusy={photoBusy}
             onEdit={
               est && projectId
@@ -926,6 +951,9 @@ export function JobScreen({ go, back, params }: NavProp) {
             // owner's folders so the whole team (and the client portal) sees one project album
             userId={ownerId || null}
             items={items}
+            // how many capture photos exist: with none, there is nothing to put in a "Before
+            // photos" phase, so the offer to create the bookends shouldn't nag forever
+            jobPhotos={(detail?.photoUrls || []).length}
             // comments sign with the member's own name; the owner keeps signing as the company
             authorName={role !== 'owner' && memberName ? memberName : (company as any)?.company_name || t('job.companyFallback')}
           />
@@ -934,14 +962,15 @@ export function JobScreen({ go, back, params }: NavProp) {
 
       <SendSheet
         open={store.sheet}
-        onClose={() => up({ sheet: false })}
+        onClose={() => (sendBusy ? undefined : up({ sheet: false }))}
         what={tab === 'invoice' ? 'invoice' : tab === 'contract' ? 'contract' : 'quote'}
+        busy={sendBusy}
         onSent={(option: string) => {
-          up({ sheet: false });
+          if (sendBusy) return;
           const kind = tab === 'invoice' ? 'invoice' : tab === 'contract' ? 'contract' : 'quote';
           const tt = kind === 'invoice' ? invoiceTotals : quoteTotals;
           const co = (company as any) || {};
-          sendDoc(option, {
+          const payload: SendData = {
             kind,
             // English on purpose: docLabel prints on the PDF header and the email subject (client-facing)
             docLabel: kind === 'invoice' ? 'Invoice' : kind === 'contract' ? 'Agreement' : 'Quote',
@@ -964,6 +993,16 @@ export function JobScreen({ go, back, params }: NavProp) {
                     received: inv.payments.map((p) => ({ date: p.paidAt, method: p.method, amount: p.amount })),
                   }
                 : undefined,
+          };
+          // The PDF route embeds every photo before printing (seconds). Keep the sheet up with its
+          // spinner until it returns, so the contractor never taps twice and races two share sheets;
+          // the text routes (mail/sms/whatsapp) are instant and close right away as before.
+          const isPdf = option === 'Save PDF';
+          if (!isPdf) up({ sheet: false });
+          setSendBusy(true);
+          void sendDoc(option, payload).finally(() => {
+            setSendBusy(false);
+            if (isPdf) up({ sheet: false });
           });
           // stamp 'Sent' only while the quote is still pre-approval — re-sending a copy of an
           // Approved (or further) quote must not regress the pipeline (api guards this too)
@@ -1109,25 +1148,12 @@ function QuoteTab({ items, totals, markupPercent = 0, customerNote, go, photos, 
     <View style={{ marginTop: 16 }}>
       {photos.length || onAddPhotos ? (
         <>
-          <SectionTitle title={t('job.photos', { n: photos.length })} />
+          {/* the link duplicates the tile below on purpose: with 8 photos the tile sits off-screen
+              at the end of the strip, which is exactly how "it won't let me add photos" happened */}
+          <SectionTitle title={t('job.photos', { n: photos.length })} link={onAddPhotos && !photoBusy ? t('job.addPhotos') : undefined} onLink={onAddPhotos} />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingVertical: 2 }}>
-            {photos.map((u, i) => {
-              const onDoc = docPhotos.includes(u);
-              return (
-                // tap = toggle "prints on the quote PDF" (G2) — green check marks the selected ones;
-                // press and hold removes the photo from the job altogether
-                <Pressable key={i} onPress={onToggleDocPhoto ? () => onToggleDocPhoto(u) : undefined} onLongPress={onRemovePhoto ? () => onRemovePhoto(u) : undefined} delayLongPress={350}>
-                  <Image source={{ uri: u }} style={{ width: 96, height: 96, borderRadius: 14, backgroundColor: colors.chipBg, borderWidth: onDoc ? 2 : 0, borderColor: colors.success }} />
-                  {onDoc ? (
-                    <View style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.success, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: '#fff' }}>
-                      <Icon name="check" size={12} sw={3} color="#fff" />
-                    </View>
-                  ) : null}
-                </Pressable>
-              );
-            })}
             {onAddPhotos ? (
-              // the capture flow is no longer the only door: photos can be added to a saved job
+              // FIRST in the strip, not last: the add tile has to be visible without scrolling
               <Pressable onPress={photoBusy ? undefined : onAddPhotos} style={{ width: 96, height: 96, borderRadius: 14, borderWidth: 1.5, borderStyle: 'dashed', borderColor: colors.borderStrong, alignItems: 'center', justifyContent: 'center', gap: 5 }}>
                 {photoBusy ? (
                   <ActivityIndicator color={colors.primary} />
@@ -1139,6 +1165,24 @@ function QuoteTab({ items, totals, markupPercent = 0, customerNote, go, photos, 
                 )}
               </Pressable>
             ) : null}
+            {photos.map((u, i) => {
+              const onDoc = docPhotos.includes(u);
+              return (
+                // tap = toggle "prints on the quote PDF" (G2) — green check marks the selected ones;
+                // press and hold removes the photo from the job altogether. Both are frozen while an
+                // upload is in flight: that write rebuilds the array and would resurrect a removed url.
+                // 650ms (not 350): picking which photos print is a deliberate, slightly slow tap —
+                // a short threshold fired the destructive "Remove photo?" instead of selecting
+                <Pressable key={i} onPress={photoBusy || !onToggleDocPhoto ? undefined : () => onToggleDocPhoto(u)} onLongPress={photoBusy || !onRemovePhoto ? undefined : () => onRemovePhoto(u)} delayLongPress={650}>
+                  <Image source={{ uri: u }} style={{ width: 96, height: 96, borderRadius: 14, backgroundColor: colors.chipBg, borderWidth: onDoc ? 2 : 0, borderColor: colors.success }} />
+                  {onDoc ? (
+                    <View style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.success, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: '#fff' }}>
+                      <Icon name="check" size={12} sw={3} color="#fff" />
+                    </View>
+                  ) : null}
+                </Pressable>
+              );
+            })}
           </ScrollView>
           {onToggleDocPhoto && photos.length ? (
             <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 8 }}>
@@ -1210,7 +1254,12 @@ function rowLabel(t: (k: string, v?: Record<string, string | number>) => string,
 // method keys are stored in English (Cash/Check/Card/ACH/Other) — translate for display
 const METHOD_KEY: Record<string, string> = { Cash: 'job.method.cash', Check: 'job.method.check', Card: 'job.method.card', ACH: 'job.method.ach', Other: 'job.method.other' };
 const methodLabel = (t: (k: string) => string, m: string) => (METHOD_KEY[m] ? t(METHOD_KEY[m]) : m);
-const mdDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+// app-side date chip ("Aug 5" / "5 de ago"): follows the CONTRACTOR's language. The documents
+// keep their own English formatting in send.ts / createAgreement — those are the client's.
+const mdDate = (d: Date) => d.toLocaleDateString(localeTag(), { month: 'short', day: 'numeric' });
+// phase names are stored in English (the client portal reads them straight from the DB); the app
+// shows them in the contractor's language
+const phaseLabel = (t: Tr, name: string) => (name === BEFORE_PHASE_NAME ? t('job.phase.beforeName') : name === FINAL_PHASE_NAME ? t('job.phase.finalName') : name);
 
 function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, quoteTotal, genning, onGen, onRecordPayment, onEditPlan, onReceipt, receiptBusyId, setSheet }: { stage: Stage; items: LineItem[]; totals: Totals; client: JobDetail['client']; jobSite?: string; company?: any; invoice?: JobDetail['invoice']; quoteTotal?: number; genning: boolean; onGen: () => void; onRecordPayment: () => void; onEditPlan: () => void; onReceipt?: (p: PaymentRecord) => void; receiptBusyId?: string | null; setSheet: (b: boolean) => void }) {
   const t = useT();
@@ -1465,6 +1514,7 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
   // never leak a half-edited plan anywhere else.
   const [mode, setMode] = useState<PaymentMode>('full');
   const [fullDays, setFullDays] = useState(15);
+  const [depDays, setDepDays] = useState(0); // deposit due date — used to be hardcoded to "today"
   const [depMode, setDepMode] = useState<'pct' | 'amt'>('pct');
   const [depPct, setDepPct] = useState(25);
   const [depAmt, setDepAmt] = useState(0);
@@ -1475,13 +1525,14 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
   // which due date the calendar is editing: 'full' or an installment index (null = closed).
   // The ± steppers moved in 5-day jumps and could never land on the day the client agreed to;
   // now they step by 1 AND the date itself opens a calendar (field request 21/07).
-  const [dateFor, setDateFor] = useState<null | 'full' | number>(null);
+  const [dateFor, setDateFor] = useState<null | 'full' | 'deposit' | number>(null);
 
   // re-seed from the defaults/invoice every time the sheet opens (the Modal stays mounted closed)
   useEffect(() => {
     if (!open) return;
     setMode(initial.mode);
     setFullDays(initial.mode === 'full' ? daysFromToday(initial.dueDate) : 15);
+    setDepDays(initial.mode === 'deposit' ? daysFromToday(initial.dueDate) : 0);
     const pct = initial.depositPercent ?? 25;
     setDepMode(initial.mode === 'deposit' && initial.depositPercent == null && initial.depositAmount > 0 ? 'amt' : 'pct');
     setDepPct(Math.min(100, Math.max(0, Math.round(pct))));
@@ -1508,8 +1559,9 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
 
   const buildPlan = (): PaymentPlan => {
     if (mode === 'deposit') {
-      // deposit due on receipt (today); the balance is due upon completion (null)
-      return { mode, dueDate: addDaysISO(0), depositPercent: depMode === 'pct' ? depPct : null, depositAmount: depValue, installments: [] };
+      // the deposit's due date is now pickable too (it used to be hardcoded to today, so a deposit
+      // agreed for next Monday printed as due on signing day); the balance is due upon completion
+      return { mode, dueDate: addDaysISO(depDays), depositPercent: depMode === 'pct' ? depPct : null, depositAmount: depValue, installments: [] };
     }
     if (mode === 'installments') {
       return { mode, dueDate: null, depositPercent: null, depositAmount: 0, installments: rows.map((r, i) => ({ label: r.label, amount: round2(r.amount), dueDate: addDaysISO(r.days), sort: i })) };
@@ -1567,6 +1619,16 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
                 </Between>
                 {depMode === 'amt' ? <DecimalInput value={depAmt} onChangeValue={setDepAmt} style={{ marginTop: 10 }} /> : null}
                 {depTooBig ? <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.error, marginTop: 8 }}>{t('job.depositTooBig')}</Text> : null}
+                <Between style={{ marginTop: 12 }}>
+                  <Pressable onPress={() => setDateFor('deposit')} hitSlop={6}>
+                    <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: depDays < 0 ? colors.warning : colors.ink }}>{dueDays(t, depDays)}</Text>
+                    <Row style={{ gap: 5, marginTop: 2 }}>
+                      <Icon name="calendar" size={12} color={colors.primary} />
+                      <Text style={{ fontFamily: fonts.bold, fontSize: 11.5, color: colors.primary }}>{mdDate(parseDateOnly(addDaysISO(depDays)))}</Text>
+                    </Row>
+                  </Pressable>
+                  <Stepper value={String(depDays)} width={44} onMinus={() => setDepDays((d) => Math.max(-365, d - 1))} onPlus={() => setDepDays((d) => Math.min(365, d + 1))} />
+                </Between>
                 <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.ink2, marginTop: 10 }}>
                   {t('job.depositPreview', { dep: fmt(Math.min(depValue, total)), bal: fmt(invoiceBalance(total, Math.min(depValue, total))) })}
                 </Text>
@@ -1585,6 +1647,28 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
                     onPlus={() => setRows((r) => (rowsDirty ? resizeDraftRows(r, Math.min(12, r.length + 1), total) : draftRows(total, Math.min(12, r.length + 1))))}
                   />
                 </Between>
+                {/* ten taps on "+" to reach 12× is what "it doesn't give me 10, 12 payments" felt
+                    like — one tap now, and "split evenly" fills the rows the resize left at $0 */}
+                <Row style={{ gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                  {[3, 4, 6, 10, 12].map((n) => (
+                    <Chip
+                      key={n}
+                      label={`${n}×`}
+                      selected={rows.length === n}
+                      onPress={() => setRows((r) => (rowsDirty ? resizeDraftRows(r, n, total) : draftRows(total, n)))}
+                    />
+                  ))}
+                  <LinkBtn
+                    icon="percent"
+                    title={t('job.splitEvenly')}
+                    onPress={() =>
+                      setRows((r) => {
+                        const parts = splitInstallments(total, r.length);
+                        return r.map((x, i) => ({ ...x, amount: parts[i] ?? 0 })); // dates/labels kept
+                      })
+                    }
+                  />
+                </Row>
                 <ScrollView style={{ maxHeight: 250, marginTop: 10 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                   {rows.map((r, i) => (
                     <View key={i} style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 10, marginBottom: 8, backgroundColor: colors.card }}>
@@ -1630,11 +1714,22 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
         open={dateFor !== null}
         onClose={() => setDateFor(null)}
         title={t('job.pickDueDate')}
-        sub={typeof dateFor === 'number' && rows[dateFor] ? rowLabel(t, rows[dateFor].label) : undefined}
-        value={dateFor === 'full' ? addDaysISO(fullDays) : typeof dateFor === 'number' && rows[dateFor] ? addDaysISO(rows[dateFor].days) : addDaysISO(0)}
+        sub={typeof dateFor === 'number' && rows[dateFor] ? rowLabel(t, rows[dateFor].label) : dateFor === 'deposit' ? t('job.rowDeposit') : undefined}
+        value={
+          dateFor === 'full'
+            ? addDaysISO(fullDays)
+            : dateFor === 'deposit'
+              ? addDaysISO(depDays)
+              : typeof dateFor === 'number' && rows[dateFor]
+                ? addDaysISO(rows[dateFor].days)
+                : addDaysISO(0)
+        }
         onPick={(picked) => {
-          const days = daysFromToday(picked);
+          // clamped to the same ±365 the steppers use — a date beyond it would jump back to 365
+          // the moment the user tapped "+" once
+          const days = Math.max(-365, Math.min(365, daysFromToday(picked)));
           if (dateFor === 'full') setFullDays(days);
+          else if (dateFor === 'deposit') setDepDays(days);
           else if (typeof dateFor === 'number') {
             setRowsDirty(true);
             setRows((rs) => rs.map((x, xi) => (xi === dateFor ? { ...x, days } : x)));
@@ -1684,7 +1779,7 @@ const PHASE_STAT: Record<PhaseStatus, [string, string, string]> = {
 };
 const NEXT_PHASE_STATUS: Record<PhaseStatus, PhaseStatus> = { not_started: 'in_progress', in_progress: 'completed', completed: 'not_started' };
 
-function ProgressTab({ projectId, estimateId, userId, items, authorName }: { projectId: string | null; estimateId: string | null; userId: string | null; items: LineItem[]; authorName: string }) {
+function ProgressTab({ projectId, estimateId, userId, items, authorName, jobPhotos = 0 }: { projectId: string | null; estimateId: string | null; userId: string | null; items: LineItem[]; authorName: string; jobPhotos?: number }) {
   const t = useT();
   const qc = useQueryClient();
   // Field members work the phases (status/photos/comments) but don't reshape the plan or share
@@ -1787,7 +1882,7 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName }: { pro
   };
 
   const removePhase = (p: ProgressPhase) => {
-    Alert.alert(t('job.alert.deletePhaseTitle'), t('job.alert.deletePhaseBody', { name: p.name }), [
+    Alert.alert(t('job.alert.deletePhaseTitle'), t('job.alert.deletePhaseBody', { name: phaseLabel(t, p.name) }), [
       { text: t('job.cancel'), style: 'cancel' },
       { text: t('job.delete'), style: 'destructive', onPress: async () => { try { await deletePhase(p.id); refresh(); } catch (e: any) { Alert.alert(t('job.error'), e?.message || t('job.couldNotDelete')); } } },
     ]);
@@ -1797,9 +1892,11 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName }: { pro
   const uploadAssets = async (p: ProgressPhase, assets: { uri: string }[]) => {
     if (!userId || !assets.length) return;
     try {
-      const n = await addPhasePhotos(userId, projectId, p.id, assets.map((a) => ({ uri: a.uri })));
+      const { added, failed } = await addPhasePhotos(userId, projectId, p.id, assets.map((a) => ({ uri: a.uri })));
       refresh();
-      if (!n) Alert.alert(t('job.alert.uploadFailed'), t('job.alert.noPhotosAdded'));
+      // same rule as the quote album: a photo that didn't make it is said, never swallowed
+      if (failed) Alert.alert(t('job.alert.uploadFailed'), t('job.photosFailed', { n: failed }));
+      else if (!added) Alert.alert(t('job.alert.uploadFailed'), t('job.alert.noPhotosAdded'));
     } catch (e: any) {
       Alert.alert(t('job.alert.couldNotAddPhotos'), e?.message || t('job.alert.tryAgain'));
     }
@@ -1817,12 +1914,15 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName }: { pro
   // before/after bookends (field request 22/07): a slot holding the job's own capture photos and
   // one waiting for the finished work. Jobs whose phases were created before this exists get the link.
   const [bookendBusy, setBookendBusy] = useState(false);
-  const hasBookends = phases.some((p) => p.name === BEFORE_PHASE_NAME) && phases.some((p) => p.name === FINAL_PHASE_NAME);
+  // a job with no capture photos never gets a "Before photos" phase (it would stay empty on the
+  // client's progress bar) — so having the final one is all this offer can deliver there
+  const hasBookends = phases.some((p) => p.name === FINAL_PHASE_NAME) && (jobPhotos === 0 || phases.some((p) => p.name === BEFORE_PHASE_NAME));
   const addBookends = async () => {
     if (!userId || !estimateId || !projectId || bookendBusy) return;
     setBookendBusy(true);
     try {
-      const { imported } = await ensureBookendPhases(userId, projectId, estimateId);
+      // asked for explicitly → the before slot is created even with no photos to import
+      const { imported } = await ensureBookendPhases(userId, projectId, estimateId, true);
       refresh();
       if (imported) Alert.alert(t('job.bookendsAddedTitle'), t('job.bookendsAddedBody'));
     } catch (e: any) {
@@ -1880,6 +1980,20 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName }: { pro
         )}
       </Between>
 
+      {/* right under the header, not buried at the bottom of a long phase list: this is the
+          "before & after photos" the owner asked for, and it has to be findable */}
+      {!fieldMode && !hasBookends && !!userId && !!estimateId && phases.length > 0 ? (
+        <Btn
+          variant="soft"
+          sm
+          icon={bookendBusy ? undefined : 'camera'}
+          title={bookendBusy ? t('job.working') : t('job.addBookends')}
+          disabled={bookendBusy}
+          onPress={() => { void addBookends(); }}
+          style={{ marginBottom: 12 }}
+        />
+      ) : null}
+
       {isLoading ? (
         <View style={{ paddingVertical: 24, alignItems: 'center' }}><ActivityIndicator color={colors.primary} /></View>
       ) : phases.length === 0 ? (
@@ -1908,7 +2022,7 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName }: { pro
                       {p.status === 'completed' ? <Icon name="check" size={17} sw={3} color={c} /> : <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: c }}>{i + 1}</Text>}
                     </Pressable>
                     <Pressable onPress={() => cycleStatus(p)} style={{ flex: 1 }}>
-                      <Text style={{ fontFamily: fonts.extrabold, fontSize: 14.5, color: colors.ink }}>{p.name}</Text>
+                      <Text style={{ fontFamily: fonts.extrabold, fontSize: 14.5, color: colors.ink }}>{phaseLabel(t, p.name)}</Text>
                       <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: c }}>{t('job.tapToAdvance', { label: t(labKey) })}</Text>
                     </Pressable>
                   </Row>
@@ -1951,12 +2065,6 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName }: { pro
         </View>
       ) : null}
 
-      {!fieldMode && !hasBookends && !!userId && !!estimateId && phases.length > 0 ? (
-        <View style={{ alignItems: 'center', marginTop: 14 }}>
-          <LinkBtn icon="camera" title={bookendBusy ? t('job.working') : t('job.addBookends')} onPress={() => { void addBookends(); }} />
-        </View>
-      ) : null}
-
       {/* creating phases needs the estimate id (NOT NULL) — a no-financials member can't have it */}
       {fieldMode ? null : <Btn icon="plus" title={t('job.addPhase')} variant="soft" onPress={() => setSheet(true)} style={{ marginTop: 14 }} />}
 
@@ -1965,7 +2073,7 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName }: { pro
         <Btn title={busy ? t('job.adding') : t('job.addPhase')} disabled={busy} onPress={addPhase} />
       </Sheet>
 
-      <Sheet open={!!cmPhaseId} onClose={() => { setCmPhaseId(null); setCmText(''); }} title={t('job.comments')} sub={cmPhase?.name}>
+      <Sheet open={!!cmPhaseId} onClose={() => { setCmPhaseId(null); setCmText(''); }} title={t('job.comments')} sub={cmPhase ? phaseLabel(t, cmPhase.name) : undefined}>
         <ScrollView style={{ maxHeight: 320 }} contentContainerStyle={{ gap: 10, paddingBottom: 8 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           {cmPhase && cmPhase.comments.length ? (
             cmPhase.comments.map((c) => (

@@ -32,41 +32,61 @@ export function escapeHtml(s: unknown): string {
 /* ---------------- photos on the PDF: inline them, never let the renderer race the network ------- */
 // expo-print snapshots the rendered HTML: a remote <img> that hasn't finished downloading simply
 // doesn't make it into the PDF (owner's field report 26/07 — "I put 8 photos on the quote and only
-// 3 came out"). Each photo is fetched and turned into a data URI BEFORE printing, so nothing is
-// left to load. Two independent mechanisms are tried (file download, then the image pipeline); if
-// both fail the original URL is kept — that's exactly today's behavior, so this can only improve it.
+// 3 came out"). Each photo is downloaded to the cache and turned into a data URI BEFORE printing,
+// so nothing is left to load. The downloaded LOCAL file is then resized through the image pipeline
+// (the manipulator refuses remote urls on iOS, so it can only run on the local copy); any failure
+// keeps the original URL — that's exactly today's behavior, so this can only improve it.
+const PHOTO_TIMEOUT = 9000; // a stalled download must not hold the whole document hostage
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const id = setTimeout(() => reject(new Error('photo timeout')), ms);
+    p.then(
+      (v) => { clearTimeout(id); resolve(v); },
+      (e) => { clearTimeout(id); reject(e); }
+    );
+  });
+}
 async function toDataUri(url: string, i: number): Promise<string> {
-  if (url.startsWith('data:')) return url;
-  // structural type on purpose: downloadFileAsync is typed against the base File class, which
-  // doesn't line up with the exported subclass in this SDK's typings
-  let tmp: { base64: () => Promise<string>; delete: () => void } | null = null;
+  // the whole body is guarded: ANY throw here would reject the Promise.all and cost the user the
+  // entire PDF, which is worse than the missing photo we're fixing
   try {
-    // unique destination name: two jobs can hold photos with the same file name
-    tmp = await File.downloadFileAsync(url, new File(Paths.cache, `pqimg_${Date.now()}_${i}.jpg`));
-    const b64 = await tmp.base64();
-    if (b64) return `data:image/jpeg;base64,${b64}`;
-  } catch {
-    /* fall through to the image pipeline */
-  } finally {
+    if (url.startsWith('data:')) return url;
+    // structural type on purpose: downloadFileAsync is typed against the base File class, which
+    // doesn't line up with the exported subclass in this SDK's typings
+    let tmp: { uri: string; base64: () => Promise<string>; delete: () => void } | null = null;
     try {
-      tmp?.delete();
-    } catch {
-      /* a leftover cache file is reclaimed by the OS */
+      // unique destination name: two jobs can hold photos with the same file name
+      tmp = await withTimeout(File.downloadFileAsync(url, new File(Paths.cache, `pqimg_${Date.now()}_${i}.jpg`)), PHOTO_TIMEOUT);
+      // resize the LOCAL file (never the remote url — on iOS the manipulator only reads local
+      // paths). The page prints each photo at ~500px, so shipping the 1-2MB original would only
+      // bloat the HTML the print WebView has to swallow.
+      try {
+        const m = await ImageManipulator.manipulateAsync(tmp.uri, [{ resize: { width: 900 } }], {
+          compress: 0.6,
+          format: ImageManipulator.SaveFormat.JPEG,
+          base64: true,
+        });
+        if (m.base64) return `data:image/jpeg;base64,${m.base64}`;
+      } catch {
+        /* fall back to the bytes as downloaded */
+      }
+      const b64 = await tmp.base64();
+      if (b64) return `data:${/\.png(\?|$)/i.test(url) ? 'image/png' : 'image/jpeg'};base64,${b64}`;
+    } finally {
+      try {
+        tmp?.delete();
+      } catch {
+        /* a leftover cache file is reclaimed by the OS */
+      }
     }
-  }
-  try {
-    const m = await ImageManipulator.manipulateAsync(url, [{ resize: { width: 1100 } }], {
-      compress: 0.6,
-      format: ImageManipulator.SaveFormat.JPEG,
-      base64: true,
-    });
-    if (m.base64) return `data:image/jpeg;base64,${m.base64}`;
   } catch {
-    /* keep the remote url as the last resort */
+    /* keep the remote url as the last resort — that is exactly today's behavior */
   }
   return url;
 }
-const inlinePhotos = (urls: string[]) => Promise.all(urls.slice(0, DOC_PHOTO_CAP).map(toDataUri));
+// a null/garbage entry in doc_photo_urls must not blow up the document
+const inlinePhotos = (urls: string[]) =>
+  Promise.all(urls.filter((u) => typeof u === 'string' && !!u).slice(0, DOC_PHOTO_CAP).map(toDataUri));
 
 export type SendData = {
   kind: 'quote' | 'invoice' | 'contract' | 'receipt';
@@ -199,7 +219,9 @@ function buildHtml(d: SendData): string {
         ? `<div class="lab" style="margin-top:22px">Job photos</div>
     <div style="margin-top:8px">${d.photos
       .slice(0, DOC_PHOTO_CAP)
-      .map((u) => `<div style="display:inline-block;width:48%;margin:0 1% 8px 0;vertical-align:top;page-break-inside:avoid"><img src="${escapeHtml(u)}" style="width:100%;height:220px;object-fit:cover;border-radius:8px"/></div>`)
+      // a data URI is OUR bytes (base64 alphabet, nothing to escape) — running the 5-pass escape
+      // over a ~600KB string per photo is pure copying right before the print
+      .map((u) => `<div style="display:inline-block;width:48%;margin:0 1% 8px 0;vertical-align:top;page-break-inside:avoid"><img src="${u.startsWith('data:') ? u : escapeHtml(u)}" style="width:100%;height:220px;object-fit:cover;border-radius:8px"/></div>`)
       .join('')}</div>`
         : ''
     }
