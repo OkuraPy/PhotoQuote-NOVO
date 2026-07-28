@@ -4,6 +4,45 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-07-28 06:30] — feat: ONDA F — os 5 pedidos do Gladson no uso real do build 32
+- **O que mudou**: fechados os 5 itens que o usuário real mandou por áudio/print (2 deles repetidos
+  duas vezes = os que mais incomodavam):
+  1. **Deletar job de vez** (só o dono): arrastando o card da lista pra esquerda (SwipeRow em
+     PanResponder puro — sem native module novo) e no menu ⋮ do job. Duas confirmações, e a primeira
+     DIZ o que morre junto (valor já recebido / contrato assinado). No banco: `agreements.project_id`
+     é o único filho com FK NO ACTION → é apagado antes; todo o resto (estimate/itens/fatura/
+     schedule/pagamentos/fases/fotos/comentários/tokens) vai por CASCADE; storage limpo depois.
+  2. **Teclado cobrindo "Notes for the client"**: a EstimateScreen era a única tela com input no fim
+     sem tratamento de teclado — agora `automaticallyAdjustKeyboardInsets` (iOS insere o inset E rola
+     até o campo) + KAV 'padding' só no Android (a janela edge-to-edge não redimensiona lá).
+  3. **Fotos**: (a) **causa raiz do "coloco 8, aparece 3"** — o expo-print tira o snapshot do HTML sem
+     esperar `<img>` remoto; agora cada foto é baixada e embutida como data URI antes de gerar o PDF
+     (dois mecanismos: download de arquivo → pipeline de imagem → em último caso a URL remota).
+     (b) **"Add photos" no job salvo** (câmera ou galeria) — antes só dava pra pôr foto na captura
+     inicial; entram também na seleção do documento enquanto couber. (c) segurar a foto = remover.
+     (d) upload em lotes de 3 com 1 retentativa, e **falha de foto agora é avisada** (era silenciosa).
+     (e) o padrão do documento passou de 4 pras 6 fotos do cap.
+  4. **Plano de pagamento**: os dias andavam de 5 em 5 (0/5/10/15) e a data combinada com o cliente era
+     inalcançável → passo de 1 em 1 **e a data virou botão**: abre um calendário mensal (DateSheet,
+     zero dependência nova) e escolhe o dia exato.
+  5. **Progresso**: fases "Before photos" (já nascendo com as fotos do orçamento importadas e marcada
+     como concluída) e "Final photos" — automáticas ao criar as fases do orçamento, e um link
+     "Add before & final photo phases" para os jobs que já existiam. Criadas com `auto_seeded=false`
+     para o "sync with quote" nunca varrer.
+- **Arquivos**: `src/v2/lib/api.ts` (deleteProject/projectDeleteFacts/addProjectPhotos/
+  deleteProjectPhoto/ensureBookendPhases/upload em lote), `src/v2/lib/send.ts` (fotos embutidas no
+  PDF), `src/v2/ui.tsx` (SwipeRow + DateSheet), `src/v2/screens/Job.tsx`, `Tabs.tsx`, `Flow.tsx`.
+- **Decisão técnica**: deletar é sempre permitido pro dono (ele pediu), mas a 1ª confirmação mostra
+  dinheiro recebido e contrato assinado; office/field não veem a opção porque `projects` não tem
+  policy de DELETE pra eles (botão seria no-op silencioso). Swipe feito em PanResponder de propósito:
+  react-native-gesture-handler seria um módulo nativo novo só pra isso.
+- **Bug corrigido**: fotos sumindo do PDF do orçamento (raiz: corrida do expo-print com imagem remota)
+  e perda silenciosa de foto no upload.
+- **Provado em prod**: job sintético com cliente+estimate+itens+fatura+schedule+pagamento+contrato
+  ASSINADO+fase+foto+comentário+token → delete sem agreements primeiro **falha** (FK 23503, como
+  esperado) e a sequência do app (agreements → project) apaga tudo (12 contagens em 0) mantendo o
+  **cliente** intacto. Gates: tsc limpo, jest 108/108.
+
 ### [2026-07-18 02:30] — fix: PENTE FINO COMPLETO (dono pediu após o hotfix) — 3 frentes, 2 nits corrigidos
 - **3 frentes** (o ângulo que faltou quando o bug de recursão escapou): (1) análise de ciclos de RLS,
   (2) teste de ESCRITA REAL em prod, (3) fluxo/lógica do app. Vereditos:

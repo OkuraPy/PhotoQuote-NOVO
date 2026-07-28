@@ -1,6 +1,6 @@
 // PhotoQuote v2 — priority flow: Camera (photo-first + voice), Estimate (AI + editing), Attach client
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Easing, Image, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -118,6 +118,13 @@ registerStrings({
   'flow.newClient': { en: 'New client', es: 'Nuevo cliente', pt: 'Novo cliente' },
   'flow.couldNotSave': { en: 'Could not save', es: 'No se pudo guardar', pt: 'Não foi possível salvar' },
   'flow.skip': { en: 'Save without client', es: 'Guardar sin cliente', pt: 'Salvar sem cliente' },
+  // photos are best-effort, but a photo that didn't upload must never be lost in silence
+  'flow.photosFailedTitle': { en: 'Some photos didn’t upload', es: 'Algunas fotos no se subieron', pt: 'Algumas fotos não subiram' },
+  'flow.photosFailedBody': {
+    en: '{n} photo(s) couldn’t be uploaded. Open the job and use "Add photos" to try again.',
+    es: 'No se pudieron subir {n} foto(s). Abre el trabajo y usa "Agregar fotos" para intentarlo de nuevo.',
+    pt: 'Não foi possível enviar {n} foto(s). Abra o trabalho e use "Adicionar fotos" para tentar de novo.',
+  },
   'flow.saving': { en: 'Saving…', es: 'Guardando…', pt: 'Salvando…' },
   'flow.saveJob': { en: 'Save job', es: 'Guardar trabajo', pt: 'Salvar trabalho' },
 });
@@ -627,9 +634,20 @@ export function EstimateScreen({ go, back, params }: NavProp) {
   };
 
   return (
-    <>
+    // The "Notes for the client" box sits at the very bottom of this screen and the keyboard used
+    // to cover it — typing (or pasting) into it was impossible (owner's report, twice: 21+26/07).
+    // iOS: automaticallyAdjustKeyboardInsets both insets the scroll view AND scrolls the focused
+    // input into view. Android: the edge-to-edge window never resizes, so the KAV has to pad it —
+    // but on iOS that padding would fight the inset, hence the platform-split behavior.
+    <KeyboardAvoidingView behavior={Platform.OS === 'android' ? 'padding' : undefined} style={{ flex: 1 }}>
       <Nav title={tr('flow.estimate')} center onBack={back} />
-      <ScrollView contentContainerStyle={scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={scroll}
+        showsVerticalScrollIndicator={false}
+        automaticallyAdjustKeyboardInsets
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+      >
         {/* AI status banner (hidden while editing an existing job — no AI run there) */}
         {editJob ? null : analyzing ? (
           <LinearGradient colors={[colors.primaryTint, colors.card]} style={{ flexDirection: 'row', alignItems: 'center', gap: 13, borderRadius: radii.lg, padding: 16, borderWidth: 1, borderColor: colors.primaryTint2 }}>
@@ -792,7 +810,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
           />
         ) : null}
       </Sheet>
-    </>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -970,7 +988,7 @@ export function AttachScreen({ go, back }: NavProp) {
       // PERSISTED title is client-facing (contract "Project:", portal header) — locked rule:
       // everything the client sees is English. Screens translate for display on their own.
       const jobTitle = store.svcs[0] ? `${store.svcs[0]} job` : 'New quote';
-      const { projectId } = await createJob({
+      const { projectId, photosFailed } = await createJob({
         userId: ownerId,
         clientId,
         name: jobTitle,
@@ -996,6 +1014,9 @@ export function AttachScreen({ go, back }: NavProp) {
       up(FLOW_RESET); // the flow is over — clear it so nothing leaks into the next quote
       // pass the saved title along: the store is already reset, so the job header can't derive it
       go('job', { id: projectId, title: jobTitle }, 'reset'); // stack → [home, job]: back never re-enters the dead flow
+      // a photo that didn't upload is SAID, never swallowed (that's how "8 photos" became 3 on the
+      // quote). 400ms so the alert lands on the job screen, not mid-transition.
+      if (photosFailed) setTimeout(() => Alert.alert(t('flow.photosFailedTitle'), t('flow.photosFailedBody', { n: photosFailed })), 400);
     } catch (e: any) {
       Alert.alert(t('flow.couldNotSave'), e?.message || t('flow.tryAgainPeriod'));
     } finally {

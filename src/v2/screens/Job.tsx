@@ -6,11 +6,11 @@ import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
 import { addDaysISO, applyMarkup, balanceAfterPayment, calcTotals, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { addPhaseComment, addPhasePhotos, agreementLink, assignMember, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deletePhasePhoto, deriveStage, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, JobDetail, progressLink, ProgressPhase, PhaseStatus, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
+import { addPhaseComment, addPhasePhotos, addProjectPhotos, agreementLink, assignMember, BEFORE_PHASE_NAME, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deletePhasePhoto, deleteProject, deleteProjectPhoto, deriveStage, ensureBookendPhases, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, FINAL_PHASE_NAME, JobDetail, progressLink, ProgressPhase, PhaseStatus, projectDeleteFacts, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { sendDoc } from '../lib/send';
 import { registerStrings, useT } from '../lib/i18n';
-import { Avatar, Between, Btn, Card, CatChip, Chip, DecimalInput, Divider, Empty, Field, Input, LinkBtn, Nav, NavBtn, Row, SectionTitle, SendSheet, Sheet, StageChip, Stepper, Switch, useStore } from '../ui';
+import { Avatar, Between, Btn, Card, CatChip, Chip, DateSheet, DecimalInput, Divider, Empty, Field, Input, LinkBtn, Nav, NavBtn, Row, SectionTitle, SendSheet, Sheet, StageChip, Stepper, Switch, useStore } from '../ui';
 import { ClosedChip } from './Tabs';
 
 registerStrings({
@@ -210,6 +210,32 @@ registerStrings({
   },
   'job.menu.archive': { en: 'Archive job', es: 'Archivar trabajo', pt: 'Arquivar trabalho' },
   'job.menu.reopen': { en: 'Reopen job', es: 'Reabrir trabajo', pt: 'Reabrir trabalho' },
+  // delete for good (field request 19+26/07) — owner only, two confirms, honest about what dies
+  'job.menu.delete': { en: 'Delete job', es: 'Eliminar trabajo', pt: 'Excluir trabalho' },
+  'job.deleteTitle': { en: 'Delete this job?', es: '¿Eliminar este trabajo?', pt: 'Excluir este trabalho?' },
+  'job.deleteBody': {
+    en: 'Everything goes with it: quote, invoice, contract, payments, photos and progress. This cannot be undone — archiving keeps it out of your list without erasing anything.',
+    es: 'Se va todo con él: cotización, factura, contrato, pagos, fotos y progreso. No se puede deshacer; archivarlo lo saca de tu lista sin borrar nada.',
+    pt: 'Vai tudo junto: orçamento, fatura, contrato, pagamentos, fotos e progresso. Não dá para desfazer — arquivar tira da sua lista sem apagar nada.',
+  },
+  'job.deleteWarnPaid': { en: 'This job has {amount} in received payments.', es: 'Este trabajo tiene {amount} en pagos recibidos.', pt: 'Este trabalho tem {amount} em pagamentos recebidos.' },
+  'job.deleteWarnSigned': { en: 'The client already SIGNED the contract — that signed copy is erased too.', es: 'El cliente ya FIRMÓ el contrato: esa copia firmada también se borra.', pt: 'O cliente já ASSINOU o contrato — essa cópia assinada também é apagada.' },
+  'job.deleteFinalTitle': { en: 'Are you sure?', es: '¿Estás seguro?', pt: 'Tem certeza?' },
+  'job.deleteFinalBody': { en: 'Last chance — this job is gone for good.', es: 'Última oportunidad: este trabajo desaparece para siempre.', pt: 'Última chance — este trabalho some para sempre.' },
+  'job.deleteForever': { en: 'Delete forever', es: 'Eliminar para siempre', pt: 'Excluir para sempre' },
+  'job.deleteFailed': { en: 'Could not delete the job', es: 'No se pudo eliminar el trabajo', pt: 'Não foi possível excluir o trabalho' },
+  // job photos on the quote: add more / remove one
+  'job.addPhotos': { en: 'Add photos', es: 'Agregar fotos', pt: 'Adicionar fotos' },
+  'job.photosFailed': { en: '{n} photo(s) could not be uploaded. Try adding them again.', es: 'No se pudieron subir {n} foto(s). Intenta agregarlas de nuevo.', pt: 'Não foi possível enviar {n} foto(s). Tente adicionar de novo.' },
+  'job.removePhotoTitle': { en: 'Remove photo?', es: '¿Quitar la foto?', pt: 'Remover a foto?' },
+  'job.removePhotoBody': { en: 'It leaves this job and the documents it prints on.', es: 'Sale de este trabajo y de los documentos donde aparece.', pt: 'Ela sai deste trabalho e dos documentos onde aparece.' },
+  'job.longPressToRemove': { en: 'Press and hold a photo to remove it.', es: 'Mantén presionada una foto para quitarla.', pt: 'Segure numa foto para removê-la.' },
+  // due dates: pick the real day the client agreed to (field request 21/07)
+  'job.pickDueDate': { en: 'Due date', es: 'Fecha de pago', pt: 'Data do pagamento' },
+  // before / after bookend phases (field request 22/07)
+  'job.addBookends': { en: 'Add before & final photo phases', es: 'Agregar fases de fotos inicial y final', pt: 'Adicionar fases de fotos inicial e final' },
+  'job.bookendsAddedTitle': { en: 'Before & final photos added', es: 'Fotos inicial y final agregadas', pt: 'Fotos inicial e final adicionadas' },
+  'job.bookendsAddedBody': { en: 'The job photos went into "Before photos". "Final photos" is waiting for the finished work.', es: 'Las fotos del trabajo fueron a "Before photos". "Final photos" espera el trabajo terminado.', pt: 'As fotos do trabalho foram para "Before photos". "Final photos" espera a obra pronta.' },
   'job.reopen': { en: 'Reopen', es: 'Reabrir', pt: 'Reabrir' },
   'job.closedBanner.lost': {
     en: 'This job is marked as lost — it no longer counts in your numbers.',
@@ -271,6 +297,34 @@ const CLIENT_SHARE = {
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
 type Totals = { subtotal: number; taxableSubtotal: number; tax: number; total: number; taxRate: number };
+type Tr = (k: string, v?: Record<string, string | number>) => string;
+
+/* ----- shooting or picking photos: the same two-way choice for job photos and phase photos ----- */
+function askPhotoSource(t: Tr, onPick: (mode: 'camera' | 'gallery') => void) {
+  Alert.alert(t('job.addPhotoTitle'), undefined, [
+    { text: t('job.takePhoto'), onPress: () => onPick('camera') },
+    { text: t('job.chooseFromGallery'), onPress: () => onPick('gallery') },
+    { text: t('job.cancel'), style: 'cancel' },
+  ]);
+}
+async function choosePhotos(t: Tr, mode: 'camera' | 'gallery'): Promise<{ uri: string }[]> {
+  try {
+    if (mode === 'camera') {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(t('job.cameraDeniedTitle'), t('job.cameraDeniedBody'));
+        return [];
+      }
+      const shot = await ImagePicker.launchCameraAsync({ quality: 0.8 });
+      return shot.canceled ? [] : (shot.assets || []).map((a) => ({ uri: a.uri }));
+    }
+    const res = await ImagePicker.launchImageLibraryAsync({ allowsMultipleSelection: true, quality: 0.8, selectionLimit: 10 });
+    return res.canceled ? [] : (res.assets || []).map((a) => ({ uri: a.uri }));
+  } catch (e: any) {
+    Alert.alert(t('job.error'), e?.message || t('job.alert.tryAgain'));
+    return [];
+  }
+}
 
 // NEXT maps each stage to its action + icon; the label is resolved at render via t('job.next.<act>').
 const NEXT: Record<Stage, { ico: string; act: string }> = {
@@ -407,6 +461,103 @@ export function JobScreen({ go, back, params }: NavProp) {
       setClosingBusy(false);
     }
   };
+  /* ----- delete the job for good (owner only — the RLS has no office DELETE on projects) ----- */
+  const [deletingJob, setDeletingJob] = useState(false);
+  const doDeleteJob = async () => {
+    if (!projectId || !ownerId || deletingJob) return;
+    setDeletingJob(true);
+    try {
+      await deleteProject(ownerId, projectId);
+      queryClient.removeQueries({ queryKey: ['jobDetail', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      await queryClient.invalidateQueries({ queryKey: ['clients'] }); // the client's job count changed
+      go('jobs', {}, 'tab'); // the screen we're on no longer exists — never `back()` into it
+    } catch (e: any) {
+      Alert.alert(t('job.deleteFailed'), e?.message || t('job.alert.tryAgain'));
+    } finally {
+      setDeletingJob(false);
+    }
+  };
+  // two confirms, and the first one SAYS what is about to die (money received / signed contract)
+  const confirmDeleteJob = () => {
+    if (!projectId) return;
+    setMenuOpen(false);
+    // 380ms: an Alert presented while the menu Modal is still dismissing dies with it on iOS
+    setTimeout(() => {
+      void (async () => {
+        const facts = await projectDeleteFacts(projectId);
+        const warn = [
+          facts.paid > 0 ? t('job.deleteWarnPaid', { amount: fmt(facts.paid) }) : '',
+          facts.signed ? t('job.deleteWarnSigned') : '',
+        ]
+          .filter(Boolean)
+          .join('\n');
+        Alert.alert(t('job.deleteTitle'), warn ? `${warn}\n\n${t('job.deleteBody')}` : t('job.deleteBody'), [
+          { text: t('job.cancel'), style: 'cancel' },
+          {
+            text: t('job.delete'),
+            style: 'destructive',
+            onPress: () =>
+              setTimeout(
+                () =>
+                  Alert.alert(t('job.deleteFinalTitle'), t('job.deleteFinalBody'), [
+                    { text: t('job.cancel'), style: 'cancel' },
+                    { text: t('job.deleteForever'), style: 'destructive', onPress: () => { void doDeleteJob(); } },
+                  ]),
+                380
+              ),
+          },
+        ]);
+      })();
+    }, 380);
+  };
+
+  /* ----- job photos: add more after the capture / drop one (field report 26/07) ----- */
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const addJobPhotos = () => {
+    if (!projectId || !ownerId || photoBusy) return;
+    askPhotoSource(t, (mode) => {
+      void (async () => {
+        const assets = await choosePhotos(t, mode);
+        if (!assets.length) return;
+        setPhotoBusy(true);
+        try {
+          const { added, failed } = await addProjectPhotos(ownerId, projectId, assets);
+          await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
+          await queryClient.invalidateQueries({ queryKey: ['jobs'] }); // the card thumbnail/count
+          // never silent: a photo that didn't make it is said out loud (that's how 8 became 3)
+          if (failed) Alert.alert(t('job.alert.uploadFailed'), t('job.photosFailed', { n: failed }));
+          else if (!added) Alert.alert(t('job.alert.uploadFailed'), t('job.alert.noPhotosAdded'));
+        } catch (e: any) {
+          Alert.alert(t('job.alert.couldNotAddPhotos'), e?.message || t('job.alert.tryAgain'));
+        } finally {
+          setPhotoBusy(false);
+        }
+      })();
+    });
+  };
+  const removeJobPhoto = (url: string) => {
+    if (!projectId) return;
+    Alert.alert(t('job.removePhotoTitle'), t('job.removePhotoBody'), [
+      { text: t('job.cancel'), style: 'cancel' },
+      {
+        text: t('job.delete'),
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            try {
+              await deleteProjectPhoto(projectId, url);
+              await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
+              await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+            } catch (e: any) {
+              Alert.alert(t('job.error'), e?.message || t('job.couldNotDelete'));
+            }
+          })();
+        },
+      },
+    ]);
+  };
+
   // losing a job pulls it out of the numbers — confirm first (archive/reopen are one tap, both undoable)
   const confirmMarkLost = () => {
     Alert.alert(t('job.menu.markLostConfirmTitle'), t('job.menu.markLostConfirmBody'), [
@@ -743,6 +894,10 @@ export function JobScreen({ go, back, params }: NavProp) {
             photos={detail?.photoUrls || []}
             docPhotos={docPhotos}
             onToggleDocPhoto={detail ? onToggleDocPhoto : undefined}
+            // photos can join the job at any time now, not only during the capture flow
+            onAddPhotos={projectId && !closed ? addJobPhotos : undefined}
+            onRemovePhoto={projectId ? removeJobPhoto : undefined}
+            photoBusy={photoBusy}
             onEdit={
               est && projectId
                 ? () => {
@@ -832,14 +987,18 @@ export function JobScreen({ go, back, params }: NavProp) {
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
         closed={closed}
-        busy={closingBusy}
+        busy={closingBusy || deletingJob}
         canApprove={canApproveDirectly}
         canAssign={role === 'owner' && !!projectId}
+        // deleting is the owner's alone: projects has no office DELETE policy, so the office
+        // button would report success on 0 rows and the job would come right back
+        canDelete={role === 'owner' && !!projectId}
         onAssign={openAssign}
         onApprove={() => { setMenuOpen(false); void setEstimateStatus('Approved', 'Approved'); }}
         onMarkLost={confirmMarkLost}
         onArchive={() => { void setProjectStatus('Archived'); }}
         onReopen={() => { void setProjectStatus('Active'); }}
+        onDelete={confirmDeleteJob}
       />
       {role === 'owner' && projectId && user?.id ? (
         <AssignSheet open={assignOpen} onClose={() => setAssignOpen(false)} projectId={projectId} ownerId={ownerId} assignedBy={user.id} goTeam={() => { setAssignOpen(false); go('team'); }} />
@@ -851,15 +1010,19 @@ export function JobScreen({ go, back, params }: NavProp) {
 /* ---------------- Job menu sheet: assign team / mark lost / archive / reopen (+ approve) ---------------- */
 // Same local-state pattern as the payment sheets. "Closed" is projects.status — the underlying
 // quote/invoice keep their statuses, so reopening restores the exact pipeline stage.
-function JobMenuSheet({ open, onClose, closed, busy, canApprove, canAssign, onAssign, onApprove, onMarkLost, onArchive, onReopen }: { open: boolean; onClose: () => void; closed: ClosedKind | null; busy: boolean; canApprove: boolean; canAssign: boolean; onAssign: () => void; onApprove: () => void; onMarkLost: () => void; onArchive: () => void; onReopen: () => void }) {
+function JobMenuSheet({ open, onClose, closed, busy, canApprove, canAssign, canDelete, onAssign, onApprove, onMarkLost, onArchive, onReopen, onDelete }: { open: boolean; onClose: () => void; closed: ClosedKind | null; busy: boolean; canApprove: boolean; canAssign: boolean; canDelete: boolean; onAssign: () => void; onApprove: () => void; onMarkLost: () => void; onArchive: () => void; onReopen: () => void; onDelete: () => void }) {
   const t = useT();
+  // delete sits LAST and stays available on a closed job too — "I made one just to try it and
+  // want it gone" is exactly the case the owner reported, and those end up archived first
+  const deleteRow = canDelete ? [{ key: 'delete', ico: 'trash', col: colors.error, bg: colors.errorTint, label: t('job.menu.delete'), onPress: onDelete }] : [];
   const rows: { key: string; ico: string; col: string; bg: string; label: string; onPress: () => void }[] = closed
-    ? [{ key: 'reopen', ico: 'trend', col: colors.primary, bg: colors.primaryTint, label: t('job.menu.reopen'), onPress: onReopen }]
+    ? [{ key: 'reopen', ico: 'trend', col: colors.primary, bg: colors.primaryTint, label: t('job.menu.reopen'), onPress: onReopen }, ...deleteRow]
     : [
         ...(canAssign ? [{ key: 'assign', ico: 'users', col: colors.primary, bg: colors.primaryTint, label: t('job.menu.assignTeam'), onPress: onAssign }] : []),
         ...(canApprove ? [{ key: 'approve', ico: 'check', col: colors.success, bg: colors.successTint, label: t('job.approveDirectly'), onPress: onApprove }] : []),
         { key: 'lost', ico: 'flag', col: colors.error, bg: colors.errorTint, label: t('job.menu.markLost'), onPress: onMarkLost },
         { key: 'archive', ico: 'layers', col: colors.muted, bg: colors.chipBg, label: t('job.menu.archive'), onPress: onArchive },
+        ...deleteRow,
       ];
   return (
     <Sheet open={open} onClose={onClose} title={t('job.menu.title')}>
@@ -868,7 +1031,7 @@ function JobMenuSheet({ open, onClose, closed, busy, canApprove, canAssign, onAs
           <View style={{ width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: r.bg }}>
             <Icon name={r.ico} size={20} color={r.col} />
           </View>
-          <Text style={{ flex: 1, fontFamily: fonts.bold, fontSize: 14.5, color: r.key === 'lost' ? colors.error : colors.ink }}>{r.label}</Text>
+          <Text style={{ flex: 1, fontFamily: fonts.bold, fontSize: 14.5, color: r.key === 'lost' || r.key === 'delete' ? colors.error : colors.ink }}>{r.label}</Text>
           {busy ? <ActivityIndicator size="small" color={colors.muted} /> : <Icon name="chevR" size={18} color="#C2C9D2" />}
         </Pressable>
       ))}
@@ -940,19 +1103,20 @@ function TotRow({ label, value, bold, color }: { label: string; value: string; b
   );
 }
 
-function QuoteTab({ items, totals, markupPercent = 0, customerNote, go, photos, docPhotos = [], onToggleDocPhoto, onEdit, onSend }: { items: LineItem[]; totals: Totals; markupPercent?: number; customerNote?: string | null; go: NavProp['go']; photos: string[]; docPhotos?: string[]; onToggleDocPhoto?: (url: string) => void; onEdit?: () => void; onSend?: () => void }) {
+function QuoteTab({ items, totals, markupPercent = 0, customerNote, go, photos, docPhotos = [], onToggleDocPhoto, onAddPhotos, onRemovePhoto, photoBusy, onEdit, onSend }: { items: LineItem[]; totals: Totals; markupPercent?: number; customerNote?: string | null; go: NavProp['go']; photos: string[]; docPhotos?: string[]; onToggleDocPhoto?: (url: string) => void; onAddPhotos?: () => void; onRemovePhoto?: (url: string) => void; photoBusy?: boolean; onEdit?: () => void; onSend?: () => void }) {
   const t = useT();
   return (
     <View style={{ marginTop: 16 }}>
-      {photos.length ? (
+      {photos.length || onAddPhotos ? (
         <>
           <SectionTitle title={t('job.photos', { n: photos.length })} />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingVertical: 2 }}>
             {photos.map((u, i) => {
               const onDoc = docPhotos.includes(u);
               return (
-                // tap = toggle "prints on the quote PDF" (G2) — green check marks the selected ones
-                <Pressable key={i} onPress={onToggleDocPhoto ? () => onToggleDocPhoto(u) : undefined}>
+                // tap = toggle "prints on the quote PDF" (G2) — green check marks the selected ones;
+                // press and hold removes the photo from the job altogether
+                <Pressable key={i} onPress={onToggleDocPhoto ? () => onToggleDocPhoto(u) : undefined} onLongPress={onRemovePhoto ? () => onRemovePhoto(u) : undefined} delayLongPress={350}>
                   <Image source={{ uri: u }} style={{ width: 96, height: 96, borderRadius: 14, backgroundColor: colors.chipBg, borderWidth: onDoc ? 2 : 0, borderColor: colors.success }} />
                   {onDoc ? (
                     <View style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.success, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: '#fff' }}>
@@ -962,10 +1126,24 @@ function QuoteTab({ items, totals, markupPercent = 0, customerNote, go, photos, 
                 </Pressable>
               );
             })}
+            {onAddPhotos ? (
+              // the capture flow is no longer the only door: photos can be added to a saved job
+              <Pressable onPress={photoBusy ? undefined : onAddPhotos} style={{ width: 96, height: 96, borderRadius: 14, borderWidth: 1.5, borderStyle: 'dashed', borderColor: colors.borderStrong, alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                {photoBusy ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : (
+                  <>
+                    <Icon name="camera" size={20} color={colors.primary} />
+                    <Text style={{ fontFamily: fonts.bold, fontSize: 11.5, color: colors.primary }}>{t('job.addPhotos')}</Text>
+                  </>
+                )}
+              </Pressable>
+            ) : null}
           </ScrollView>
-          {onToggleDocPhoto ? (
+          {onToggleDocPhoto && photos.length ? (
             <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 8 }}>
               {t('job.onDocument', { n: docPhotos.length, cap: DOC_PHOTO_CAP })}
+              {onRemovePhoto ? ` · ${t('job.longPressToRemove')}` : ''}
             </Text>
           ) : null}
         </>
@@ -1294,6 +1472,10 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
   // once the rows carry stored/hand-edited amounts, the N× stepper must PRESERVE them
   // (resizeDraftRows) instead of re-splitting evenly and wiping the edits
   const [rowsDirty, setRowsDirty] = useState(false);
+  // which due date the calendar is editing: 'full' or an installment index (null = closed).
+  // The ± steppers moved in 5-day jumps and could never land on the day the client agreed to;
+  // now they step by 1 AND the date itself opens a calendar (field request 21/07).
+  const [dateFor, setDateFor] = useState<null | 'full' | number>(null);
 
   // re-seed from the defaults/invoice every time the sheet opens (the Modal stays mounted closed)
   useEffect(() => {
@@ -1360,11 +1542,15 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
 
             {on && c.key === 'full' ? (
               <Between style={{ marginTop: 12 }}>
-                <View>
+                {/* the date is the button — tapping it opens the calendar on that month */}
+                <Pressable onPress={() => setDateFor('full')} hitSlop={6}>
                   <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: fullDays < 0 ? colors.warning : colors.ink }}>{dueDays(t, fullDays)}</Text>
-                  <Text style={{ fontFamily: fonts.semibold, fontSize: 11.5, color: colors.muted, marginTop: 2 }}>{mdDate(parseDateOnly(addDaysISO(fullDays)))}</Text>
-                </View>
-                <Stepper value={String(fullDays)} width={44} onMinus={() => setFullDays((d) => Math.max(-365, d - 5))} onPlus={() => setFullDays((d) => Math.min(365, d + 5))} />
+                  <Row style={{ gap: 5, marginTop: 2 }}>
+                    <Icon name="calendar" size={12} color={colors.primary} />
+                    <Text style={{ fontFamily: fonts.bold, fontSize: 11.5, color: colors.primary }}>{mdDate(parseDateOnly(addDaysISO(fullDays)))}</Text>
+                  </Row>
+                </Pressable>
+                <Stepper value={String(fullDays)} width={44} onMinus={() => setFullDays((d) => Math.max(-365, d - 1))} onPlus={() => setFullDays((d) => Math.min(365, d + 1))} />
               </Between>
             ) : null}
 
@@ -1409,14 +1595,18 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
                         </View>
                       </Between>
                       <Between style={{ marginTop: 8 }}>
-                        <Text style={{ fontFamily: fonts.semibold, fontSize: 11.5, color: r.days < 0 ? colors.warning : colors.muted }}>
-                          {dueDays(t, r.days)} · {mdDate(parseDateOnly(addDaysISO(r.days)))}
-                        </Text>
+                        <Pressable onPress={() => setDateFor(i)} hitSlop={6}>
+                          <Row style={{ gap: 5 }}>
+                            <Icon name="calendar" size={12} color={colors.primary} />
+                            <Text style={{ fontFamily: fonts.bold, fontSize: 11.5, color: colors.primary }}>{mdDate(parseDateOnly(addDaysISO(r.days)))}</Text>
+                            <Text style={{ fontFamily: fonts.semibold, fontSize: 11.5, color: r.days < 0 ? colors.warning : colors.muted }}>· {dueDays(t, r.days)}</Text>
+                          </Row>
+                        </Pressable>
                         <Stepper
                           value={String(r.days)}
                           width={44}
-                          onMinus={() => { setRowsDirty(true); setRows((rs) => rs.map((x, xi) => (xi === i ? { ...x, days: Math.max(-365, x.days - 5) } : x))); }}
-                          onPlus={() => { setRowsDirty(true); setRows((rs) => rs.map((x, xi) => (xi === i ? { ...x, days: Math.min(365, x.days + 5) } : x))); }}
+                          onMinus={() => { setRowsDirty(true); setRows((rs) => rs.map((x, xi) => (xi === i ? { ...x, days: Math.max(-365, x.days - 1) } : x))); }}
+                          onPlus={() => { setRowsDirty(true); setRows((rs) => rs.map((x, xi) => (xi === i ? { ...x, days: Math.min(365, x.days + 1) } : x))); }}
                         />
                       </Between>
                     </View>
@@ -1434,6 +1624,23 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
       })}
       {hasPayments ? <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, textAlign: 'center', marginBottom: 10 }}>{t('job.editPlanKeepsPayments')}</Text> : null}
       <Btn title={busy ? t('job.working') : confirmLabel} icon={busy ? undefined : 'check'} disabled={!canConfirm} onPress={() => onConfirm(buildPlan())} style={{ marginTop: 4 }} />
+      {/* nested INSIDE this sheet's content on purpose — that's how a second Modal presents
+          reliably over the first on iOS. Picking a day converts it back into the plan's day count. */}
+      <DateSheet
+        open={dateFor !== null}
+        onClose={() => setDateFor(null)}
+        title={t('job.pickDueDate')}
+        sub={typeof dateFor === 'number' && rows[dateFor] ? rowLabel(t, rows[dateFor].label) : undefined}
+        value={dateFor === 'full' ? addDaysISO(fullDays) : typeof dateFor === 'number' && rows[dateFor] ? addDaysISO(rows[dateFor].days) : addDaysISO(0)}
+        onPick={(picked) => {
+          const days = daysFromToday(picked);
+          if (dateFor === 'full') setFullDays(days);
+          else if (typeof dateFor === 'number') {
+            setRowsDirty(true);
+            setRows((rs) => rs.map((x, xi) => (xi === dateFor ? { ...x, days } : x)));
+          }
+        }}
+      />
     </Sheet>
   );
 }
@@ -1597,33 +1804,32 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName }: { pro
       Alert.alert(t('job.alert.couldNotAddPhotos'), e?.message || t('job.alert.tryAgain'));
     }
   };
-  const shootPhoto = async (p: ProgressPhase) => {
-    try {
-      const perm = await ImagePicker.requestCameraPermissionsAsync();
-      if (!perm.granted) { Alert.alert(t('job.cameraDeniedTitle'), t('job.cameraDeniedBody')); return; }
-      const res = await ImagePicker.launchCameraAsync({ quality: 0.8 });
-      if (res.canceled || !res.assets?.length) return;
-      await uploadAssets(p, res.assets.map((a) => ({ uri: a.uri })));
-    } catch (e: any) {
-      Alert.alert(t('job.error'), e?.message || t('job.alert.tryAgain'));
-    }
-  };
-  const pickFromGallery = async (p: ProgressPhase) => {
-    try {
-      const res = await ImagePicker.launchImageLibraryAsync({ allowsMultipleSelection: true, quality: 0.8, selectionLimit: 10 });
-      if (res.canceled || !res.assets?.length) return;
-      await uploadAssets(p, res.assets.map((a) => ({ uri: a.uri })));
-    } catch (e: any) {
-      Alert.alert(t('job.error'), e?.message || t('job.alert.tryAgain'));
-    }
-  };
   const addPhotos = (p: ProgressPhase) => {
     if (!userId) return;
-    Alert.alert(t('job.addPhotoTitle'), undefined, [
-      { text: t('job.takePhoto'), onPress: () => void shootPhoto(p) },
-      { text: t('job.chooseFromGallery'), onPress: () => void pickFromGallery(p) },
-      { text: t('job.cancel'), style: 'cancel' },
-    ]);
+    askPhotoSource(t, (mode) => {
+      void (async () => {
+        const assets = await choosePhotos(t, mode);
+        if (assets.length) await uploadAssets(p, assets);
+      })();
+    });
+  };
+
+  // before/after bookends (field request 22/07): a slot holding the job's own capture photos and
+  // one waiting for the finished work. Jobs whose phases were created before this exists get the link.
+  const [bookendBusy, setBookendBusy] = useState(false);
+  const hasBookends = phases.some((p) => p.name === BEFORE_PHASE_NAME) && phases.some((p) => p.name === FINAL_PHASE_NAME);
+  const addBookends = async () => {
+    if (!userId || !estimateId || !projectId || bookendBusy) return;
+    setBookendBusy(true);
+    try {
+      const { imported } = await ensureBookendPhases(userId, projectId, estimateId);
+      refresh();
+      if (imported) Alert.alert(t('job.bookendsAddedTitle'), t('job.bookendsAddedBody'));
+    } catch (e: any) {
+      Alert.alert(t('job.alert.couldNotAddPhase'), e?.message || t('job.alert.tryAgain'));
+    } finally {
+      setBookendBusy(false);
+    }
   };
   // owner/office manage the job's photos — tap one to remove it (field only adds)
   const removePhoto = (photoId: string, url: string) => {
@@ -1742,6 +1948,12 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName }: { pro
         // the quote was edited after the seeding — offer to re-align the untouched seeded phases
         <View style={{ alignItems: 'center', marginTop: 14 }}>
           <LinkBtn icon="trend" title={seedBusy ? t('job.working') : t('job.syncWithQuote')} onPress={syncWithQuote} />
+        </View>
+      ) : null}
+
+      {!fieldMode && !hasBookends && !!userId && !!estimateId && phases.length > 0 ? (
+        <View style={{ alignItems: 'center', marginTop: 14 }}>
+          <LinkBtn icon="camera" title={bookendBusy ? t('job.working') : t('job.addBookends')} onPress={() => { void addBookends(); }} />
         </View>
       ) : null}
 

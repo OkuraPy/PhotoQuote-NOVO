@@ -1,14 +1,14 @@
 // PhotoQuote v2 — tab roots: Home, Jobs, Clients, Profile
-import React from 'react';
+import React, { useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
-import { billingState, ClosedKind, fmt0, homeMetrics, initials, Job, split, STAGES, trialDaysLeft } from '../data';
-import { Avatar, Between, Btn, Card, Empty, NavBtn, Row, SearchBar, SectionTitle, StageChip, Switch, useStore } from '../ui';
+import { billingState, ClosedKind, fmt, fmt0, homeMetrics, initials, Job, split, STAGES, trialDaysLeft } from '../data';
+import { Avatar, Between, Btn, Card, Empty, NavBtn, Row, SearchBar, SectionTitle, StageChip, Switch, SwipeRow, useStore } from '../ui';
 import { useAuth } from '../lib/auth';
-import { deleteAccount, fetchClients, fetchCompanyProfile, fetchJobs, fetchOwnBilling } from '../lib/api';
+import { deleteAccount, deleteProject, fetchClients, fetchCompanyProfile, fetchJobs, fetchOwnBilling, projectDeleteFacts } from '../lib/api';
 import { LOCALES, registerStrings, useLocale, useT } from '../lib/i18n';
 
 // Owner-only billing pulse (Onda D): members never see billing; anything but an
@@ -378,8 +378,61 @@ export function JobsScreen({ go }: NavProp) {
   const t = useT();
   const { store, up } = useStore();
   const { ownerId, role } = useAuth();
+  const qc = useQueryClient();
   const { data: jobs = [], isLoading } = useQuery({ queryKey: ['jobs', ownerId], queryFn: () => fetchJobs(ownerId!), enabled: !!ownerId });
   const { state: bState } = useBilling(); // Onda D: expired trial soft-locks creation
+  // swipe a row to delete it (field request 19+26/07 — archive/lost were the only ways out).
+  // Owner only: projects has no office DELETE policy, so anyone else would get a silent no-op.
+  const [deleting, setDeleting] = useState(false);
+  const canDelete = role === 'owner' && !!ownerId;
+  const confirmDelete = (j: Job) => {
+    if (!ownerId || deleting) return;
+    void (async () => {
+      const facts = await projectDeleteFacts(j.id);
+      const warn = [
+        facts.paid > 0 ? t('job.deleteWarnPaid', { amount: fmt(facts.paid) }) : '',
+        facts.signed ? t('job.deleteWarnSigned') : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+      const head = `${j.client || j.title}${j.addr && j.addr !== '—' ? ` · ${j.addr}` : ''}`;
+      Alert.alert(t('job.deleteTitle'), `${head}\n\n${warn ? `${warn}\n\n` : ''}${t('job.deleteBody')}`, [
+        { text: t('tabs.cancel'), style: 'cancel' },
+        {
+          text: t('job.delete'),
+          style: 'destructive',
+          // 380ms: stacked Alerts race each other's dismiss animation on iOS
+          onPress: () =>
+            setTimeout(
+              () =>
+                Alert.alert(t('job.deleteFinalTitle'), t('job.deleteFinalBody'), [
+                  { text: t('tabs.cancel'), style: 'cancel' },
+                  {
+                    text: t('job.deleteForever'),
+                    style: 'destructive',
+                    onPress: () => {
+                      void (async () => {
+                        setDeleting(true);
+                        try {
+                          await deleteProject(ownerId, j.id);
+                          qc.removeQueries({ queryKey: ['jobDetail', j.id] });
+                          await qc.invalidateQueries({ queryKey: ['jobs'] });
+                          await qc.invalidateQueries({ queryKey: ['clients'] }); // job counts moved
+                        } catch (e: any) {
+                          Alert.alert(t('job.deleteFailed'), e?.message || t('job.alert.tryAgain'));
+                        } finally {
+                          setDeleting(false);
+                        }
+                      })();
+                    },
+                  },
+                ]),
+              380
+            ),
+        },
+      ]);
+    })();
+  };
   // field members: no stage filters (stages derive from RLS-hidden financials) and no New Quote
   const fieldMode = role === 'field';
   const filter = fieldMode ? 'All' : store.jobFilter || 'All';
@@ -419,7 +472,11 @@ export function JobsScreen({ go }: NavProp) {
       <FlatList
         data={isLoading ? [] : list}
         keyExtractor={(j) => j.id}
-        renderItem={({ item: j, index: i }) => <JobCard j={j} i={i} onPress={() => go('job', { job: j })} />}
+        renderItem={({ item: j, index: i }) => (
+          <SwipeRow enabled={canDelete} onAction={() => confirmDelete(j)}>
+            <JobCard j={j} i={i} onPress={() => go('job', { job: j })} />
+          </SwipeRow>
+        )}
         contentContainerStyle={[scroll, { paddingTop: 14, gap: 10 }]}
         showsVerticalScrollIndicator={false}
         initialNumToRender={8}

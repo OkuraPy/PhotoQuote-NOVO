@@ -54,32 +54,100 @@ export async function getMyLocation(): Promise<Region | null> {
 
 const PHOTO_BUCKET = 'project-photos';
 
-// Resize + upload each photo to project-photos/${userId}/${projectId}/ and return the public URLs.
-// Best-effort: a photo that fails to upload is skipped, never blocks saving the job.
-async function uploadProjectPhotos(userId: string, projectId: string, photos: Photo[]): Promise<string[]> {
-  const results = await Promise.all(
-    photos.map(async (photo, i): Promise<string | null> => {
-      try {
-        const m = await ImageManipulator.manipulateAsync(photo.uri, [{ resize: { width: 1280 } }], {
-          compress: 0.7,
-          format: ImageManipulator.SaveFormat.JPEG,
-          base64: true,
-        });
-        if (!m.base64) return null;
-        const path = `${userId}/${projectId}/photo_${i}.jpg`;
-        // NO upsert: x-upsert demands a SELECT policy the office role doesn't have on the
-        // owner's folder (the recurring B1 class — 3rd bite, caught by the Onda E reviewer).
-        // The path contains a freshly created projectId, so overwrite semantics buy nothing.
-        const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, decode(m.base64), { contentType: 'image/jpeg' });
-        if (error) return null;
-        const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
-        return data?.publicUrl || null;
-      } catch {
-        return null; // skip a photo that fails, never block the save
-      }
-    })
-  );
-  return results.filter((u): u is string => !!u);
+// Resize + upload ONE photo to project-photos/${userId}/${projectId}/. Returns its public URL
+// or null when anything on the way (decode, upload, url) fails.
+async function uploadOneProjectPhoto(userId: string, projectId: string, photo: Photo, name: string): Promise<string | null> {
+  try {
+    const m = await ImageManipulator.manipulateAsync(photo.uri, [{ resize: { width: 1280 } }], {
+      compress: 0.7,
+      format: ImageManipulator.SaveFormat.JPEG,
+      base64: true,
+    });
+    if (!m.base64) return null;
+    const path = `${userId}/${projectId}/${name}.jpg`;
+    // NO upsert: x-upsert demands a SELECT policy the office role doesn't have on the
+    // owner's folder (the recurring B1 class — 3rd bite, caught by the Onda E reviewer).
+    // The name carries a random suffix, so overwrite semantics buy nothing.
+    const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, decode(m.base64), { contentType: 'image/jpeg' });
+    if (error) return null;
+    const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+    return data?.publicUrl || null;
+  } catch {
+    return null;
+  }
+}
+
+// Upload a batch of photos. THREE at a time, each retried once: the old version fired all of
+// them at Promise.all, and a 8-12 photo capture had some silently die (field report 26/07 —
+// "I put in 8 photos, only 3 show up"). Every photo that still fails after the retry is COUNTED
+// and reported to the caller: losing a photo in silence is what made this unfixable for a year.
+const PHOTO_BATCH = 3;
+async function uploadProjectPhotos(userId: string, projectId: string, photos: Photo[]): Promise<{ urls: string[]; failed: number }> {
+  const urls: string[] = [];
+  let failed = 0;
+  const stamp = Date.now().toString(36);
+  for (let i = 0; i < photos.length; i += PHOTO_BATCH) {
+    const batch = photos.slice(i, i + PHOTO_BATCH);
+    const out = await Promise.all(
+      batch.map(async (photo, k) => {
+        const base = `photo_${stamp}_${i + k}`;
+        const first = await uploadOneProjectPhoto(userId, projectId, photo, base);
+        // one retry under a different name (a half-written object would reject the same path)
+        return first || (await uploadOneProjectPhoto(userId, projectId, photo, `${base}r`));
+      })
+    );
+    out.forEach((u) => (u ? urls.push(u) : failed++));
+  }
+  return { urls, failed };
+}
+
+// Add photos to an EXISTING job (the capture flow is not the only moment a photo shows up —
+// field report 26/07: "it doesn't let me add more photos"). New photos also join the document
+// selection while there is room under the cap: adding a photo means wanting it on the quote.
+export async function addProjectPhotos(userId: string, projectId: string, photos: Photo[]): Promise<{ added: number; failed: number }> {
+  const { data: proj, error } = await supabase.from('projects').select('photo_urls, doc_photo_urls').eq('id', projectId).maybeSingle();
+  if (error) throw error;
+  const all: string[] = Array.isArray(proj?.photo_urls) ? (proj!.photo_urls as string[]) : [];
+  const doc: string[] = Array.isArray(proj?.doc_photo_urls) ? (proj!.doc_photo_urls as string[]) : [];
+  const { urls, failed } = await uploadProjectPhotos(userId, projectId, photos);
+  if (urls.length) {
+    const room = Math.max(0, DOC_PHOTO_CAP - doc.length);
+    const { error: uErr } = await supabase
+      .from('projects')
+      .update({ photo_urls: [...all, ...urls], doc_photo_urls: room ? [...doc, ...urls.slice(0, room)] : doc })
+      .eq('id', projectId);
+    if (uErr) throw uErr;
+  }
+  return { added: urls.length, failed };
+}
+
+// Remove one job photo: out of photo_urls AND of the document selection, then the storage object
+// (best-effort — only the OWNER has the delete policy on the bucket folder).
+export async function deleteProjectPhoto(projectId: string, url: string): Promise<void> {
+  const { data: proj, error } = await supabase.from('projects').select('photo_urls, doc_photo_urls').eq('id', projectId).maybeSingle();
+  if (error) throw error;
+  const all: string[] = Array.isArray(proj?.photo_urls) ? (proj!.photo_urls as string[]) : [];
+  const doc: string[] = Array.isArray(proj?.doc_photo_urls) ? (proj!.doc_photo_urls as string[]) : [];
+  const { error: uErr } = await supabase
+    .from('projects')
+    .update({ photo_urls: all.filter((u) => u !== url), doc_photo_urls: doc.filter((u) => u !== url) })
+    .eq('id', projectId);
+  if (uErr) throw uErr;
+  // the same URL may have been imported into the "Before photos" phase — drop those rows too, or
+  // the progress tab and the client portal would keep showing a photo whose file is about to die
+  try {
+    await supabase.from('phase_photos').delete().eq('project_id', projectId).eq('file_url', url);
+  } catch {
+    /* best-effort */
+  }
+  const path = url.split(`/${PHOTO_BUCKET}/`)[1];
+  if (path) {
+    try {
+      await supabase.storage.from(PHOTO_BUCKET).remove([path]);
+    } catch {
+      /* orphan object is harmless — the array the app reads is already clean */
+    }
+  }
 }
 
 /* ---------------- Clients ---------------- */
@@ -174,7 +242,7 @@ export async function createJob(input: {
   photos?: Photo[];
   zip?: string;
   state?: string;
-}): Promise<{ projectId: string; estimateId: string }> {
+}): Promise<{ projectId: string; estimateId: string; photosFailed: number }> {
   const serviceType = (input.services && input.services[0]) || null;
   const title = input.name.trim() || 'New estimate';
 
@@ -238,13 +306,17 @@ export async function createJob(input: {
   }
 
   // photos are best-effort — the estimate is already safely saved, so a failed upload won't lose it.
-  // The first 4 also seed doc_photo_urls (G2): photos print on the quote by default (owner's call).
+  // The first ones (up to the cap) also seed doc_photo_urls (G2): photos print on the quote by
+  // default (owner's call). `photosFailed` travels back so the save screen can SAY that a photo
+  // didn't make it instead of leaving the contractor to discover it on the client's PDF.
+  let photosFailed = 0;
   if (input.photos?.length) {
-    const urls = await uploadProjectPhotos(input.userId, proj.id, input.photos);
-    if (urls.length) await supabase.from('projects').update({ photo_urls: urls, doc_photo_urls: urls.slice(0, 4) }).eq('id', proj.id);
+    const { urls, failed } = await uploadProjectPhotos(input.userId, proj.id, input.photos);
+    photosFailed = failed;
+    if (urls.length) await supabase.from('projects').update({ photo_urls: urls, doc_photo_urls: urls.slice(0, DOC_PHOTO_CAP) }).eq('id', proj.id);
   }
 
-  return { projectId: proj.id, estimateId: est.id };
+  return { projectId: proj.id, estimateId: est.id, photosFailed };
 }
 
 /* ---------------- Update an existing estimate (Edit from the job screen) ---------------- */
@@ -585,6 +657,58 @@ export async function updateJobSite(projectId: string, site: { address?: string 
 export async function updateProjectStatus(projectId: string, status: 'Lost' | 'Archived' | 'Active'): Promise<void> {
   const { error } = await supabase.from('projects').update({ status }).eq('id', projectId);
   if (error) throw error;
+}
+
+/* ---------------- Delete a job for good (owner only — RLS has no office DELETE on projects) --- */
+// What the confirmation has to be honest about before erasing everything: money already received
+// and a contract the client actually signed. Failures degrade to zeros — the second confirm still
+// spells out that the deletion is permanent.
+export async function projectDeleteFacts(projectId: string): Promise<{ paid: number; signed: boolean }> {
+  try {
+    const [{ data: invs }, { data: agrs }] = await Promise.all([
+      supabase.from('invoices').select('id').eq('project_id', projectId),
+      supabase.from('agreements').select('id').eq('project_id', projectId).eq('status', 'signed').limit(1),
+    ]);
+    const ids = (invs || []).map((i: any) => i.id);
+    let paid = 0;
+    if (ids.length) {
+      const { data: pays } = await supabase.from('invoice_payments').select('amount').in('invoice_id', ids);
+      paid = paidTotal(pays || []);
+    }
+    return { paid, signed: !!(agrs || []).length };
+  } catch {
+    return { paid: 0, signed: false };
+  }
+}
+
+// Recursively empty a storage prefix. `list` returns folders with a null id — those are walked
+// one extra level (phase photos live at ${owner}/${project}/${phase}/file.jpg). Best-effort by
+// design: an object left behind is an invisible orphan, never a broken screen.
+async function removeStorageFolder(bucket: string, prefix: string, depth = 2): Promise<void> {
+  try {
+    const { data, error } = await supabase.storage.from(bucket).list(prefix, { limit: 200 });
+    if (error || !data?.length) return;
+    const files = data.filter((o: any) => o.id).map((o: any) => `${prefix}/${o.name}`);
+    const folders = data.filter((o: any) => !o.id).map((o: any) => `${prefix}/${o.name}`);
+    if (files.length) await supabase.storage.from(bucket).remove(files);
+    if (depth > 0) for (const f of folders) await removeStorageFolder(bucket, f, depth - 1);
+  } catch {
+    /* best-effort */
+  }
+}
+
+// Erase the job and everything hanging off it. estimates/line items, invoices/schedule/payments,
+// phases/photos/comments, share tokens and assignments all CASCADE from projects — agreements are
+// the one child FK declared NO ACTION, so they're deleted first or Postgres refuses the delete.
+// Storage is cleaned after the row is safely gone (an orphan file is harmless; a deleted photo
+// under a job that failed to delete is not).
+export async function deleteProject(ownerId: string, projectId: string): Promise<void> {
+  const { error: aErr } = await supabase.from('agreements').delete().eq('project_id', projectId);
+  if (aErr) throw aErr;
+  const { error } = await supabase.from('projects').delete().eq('id', projectId);
+  if (error) throw error;
+  await removeStorageFolder(PHOTO_BUCKET, `${ownerId}/${projectId}`);
+  await removeStorageFolder(PHASE_BUCKET, `${ownerId}/${projectId}`);
 }
 
 /* ---------------- Team (Onda B): owner + field members ---------------- */
@@ -1211,7 +1335,77 @@ export async function seedPhasesFromEstimate(userId: string, projectId: string, 
   }));
   const { error: insErr } = await supabase.from('project_phases').insert(rows);
   if (insErr) throw insErr;
+  // bookends come along with the seeding — a failure there never costs the item phases
+  try {
+    await ensureBookendPhases(userId, projectId, estimateId);
+  } catch {
+    /* the Progress tab's own "before & after" link still covers it */
+  }
   return rows.length;
+}
+
+/* ----- before / after bookend phases (field request 22/07) ----- */
+// Client-facing names (they show on the portal) → English, like every other client-visible string.
+export const BEFORE_PHASE_NAME = 'Before photos';
+export const FINAL_PHASE_NAME = 'Final photos';
+const BEFORE_IMPORT_CAP = 12;
+
+// "A place for the initial photos, and always one more item at the bottom for the finished work."
+// The before phase is pre-filled with the job's OWN capture photos (the ones the quote was made
+// from), so the client sees where the work started. Both are created with auto_seeded = FALSE:
+// they aren't quote items, so "sync with quote" must never sweep them away. Idempotent — matched
+// by name, and the photo import only runs while the before phase is still empty.
+export async function ensureBookendPhases(userId: string, projectId: string, estimateId: string): Promise<{ created: number; imported: number }> {
+  const { data: phases, error } = await supabase.from('project_phases').select('id, name, phase_order').eq('project_id', projectId);
+  if (error) throw error;
+  const byName = new Map<string, string>((phases || []).map((p: any) => [String(p.name || ''), p.id as string]));
+  const orders = (phases || []).map((p: any) => Number(p.phase_order) || 0);
+  const row = (name: string, order: number) => ({
+    project_id: projectId,
+    estimate_id: estimateId,
+    user_id: userId,
+    name,
+    phase_order: order,
+    status: 'not_started',
+    is_visible_to_client: true,
+    auto_seeded: false,
+  });
+  const rows = [
+    ...(byName.has(BEFORE_PHASE_NAME) ? [] : [row(BEFORE_PHASE_NAME, (orders.length ? Math.min(...orders) : 0) - 1)]),
+    ...(byName.has(FINAL_PHASE_NAME) ? [] : [row(FINAL_PHASE_NAME, (orders.length ? Math.max(...orders) : 0) + 1)]),
+  ];
+  let created = 0;
+  if (rows.length) {
+    const { data: ins, error: insErr } = await supabase.from('project_phases').insert(rows).select('id, name');
+    if (insErr) throw insErr;
+    (ins || []).forEach((p: any) => byName.set(String(p.name), p.id));
+    created = rows.length;
+  }
+
+  // pull the job photos into the before phase — once, and only while it has none of its own
+  const beforeId = byName.get(BEFORE_PHASE_NAME);
+  let imported = 0;
+  if (beforeId) {
+    const { count } = await supabase.from('phase_photos').select('id', { count: 'exact', head: true }).eq('phase_id', beforeId);
+    if (!count) {
+      const { data: proj } = await supabase.from('projects').select('photo_urls').eq('id', projectId).maybeSingle();
+      const urls: string[] = Array.isArray(proj?.photo_urls) ? (proj!.photo_urls as string[]).slice(0, BEFORE_IMPORT_CAP) : [];
+      if (urls.length) {
+        // the rows point at the project-photos bucket on purpose: deleting one here only drops the
+        // phase row (deletePhasePhoto's storage step keys off /phase-photos/), never the quote photo
+        const { error: pErr } = await supabase
+          .from('phase_photos')
+          .insert(urls.map((u, i) => ({ phase_id: beforeId, project_id: projectId, user_id: userId, file_url: u, display_order: i })));
+        if (!pErr) {
+          imported = urls.length;
+          // the "before" record is by definition already done — leaving it "Not started" with
+          // photos in it reads wrong on the client portal (and would hold the progress bar back)
+          await supabase.from('project_phases').update({ status: 'completed' }).eq('id', beforeId);
+        }
+      }
+    }
+  }
+  return { created, imported };
 }
 
 // Re-align the seeded phases with the CURRENT quote items after an edit (G4). All the decision

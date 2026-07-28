@@ -2,9 +2,11 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
+  Animated,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleProp,
@@ -18,11 +20,13 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Icon } from './Icon';
+import { parseDateOnly, toDateOnly } from './data';
 import { colors, fonts, radii, shadow, Stage, stageColors } from './theme';
-import { registerStrings, useT } from './lib/i18n';
+import { getLocale, registerStrings, useT } from './lib/i18n';
 
 registerStrings({
   'ui.optional': { en: 'optional', es: 'opcional', pt: 'opcional' },
+  'ui.today': { en: 'Today', es: 'Hoy', pt: 'Hoje' },
   // pipeline stage labels (the Stage value stays English in logic; only the label is translated)
   'stage.Draft': { en: 'Draft', es: 'Borrador', pt: 'Rascunho' },
   'stage.Quoted': { en: 'Quoted', es: 'Cotizado', pt: 'Orçado' },
@@ -472,6 +476,120 @@ export function Stepper({ value, onMinus, onPlus, width = 54 }: { value: string;
       <Text style={{ fontFamily: fonts.num, fontSize: 15, color: colors.ink, width, textAlign: 'center' }}>{value}</Text>
       <NavBtn icon="fwd" size={14} onPress={onPlus} />
     </Row>
+  );
+}
+
+/* ============================ swipe-to-delete row ============================ */
+// Pure RN (PanResponder + Animated) on purpose: react-native-gesture-handler isn't in this app
+// and a new native module would mean a new binary just for a swipe. Drag left to reveal the
+// action, tap it to fire (the caller confirms), tap the row to close it again.
+const SWIPE_W = 92;
+export function SwipeRow({ children, onAction, actionIcon = 'trash', enabled = true }: { children: React.ReactNode; onAction: () => void; actionIcon?: string; enabled?: boolean }) {
+  const x = React.useRef(new Animated.Value(0)).current;
+  const [open, setOpen] = useState(false);
+  const slide = (to: number) => {
+    setOpen(to !== 0);
+    Animated.spring(x, { toValue: to, useNativeDriver: true, bounciness: 0, speed: 18 }).start();
+  };
+  const pan = React.useMemo(
+    () =>
+      PanResponder.create({
+        // only horizontal drags — the vertical bias keeps the list scrolling normally
+        onMoveShouldSetPanResponder: (_e, g) => enabled && Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 1.6,
+        onPanResponderMove: (_e, g) => {
+          const base = open ? -SWIPE_W : 0;
+          const next = Math.min(0, Math.max(-SWIPE_W - 20, base + g.dx));
+          x.setValue(next);
+        },
+        onPanResponderRelease: (_e, g) => {
+          const base = open ? -SWIPE_W : 0;
+          slide(base + g.dx < -SWIPE_W / 2 ? -SWIPE_W : 0);
+        },
+        onPanResponderTerminate: () => slide(open ? -SWIPE_W : 0),
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [enabled, open]
+  );
+  if (!enabled) return <>{children}</>;
+  return (
+    <View style={{ justifyContent: 'center' }}>
+      <View style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: SWIPE_W, borderRadius: radii.lg, backgroundColor: colors.error, alignItems: 'center', justifyContent: 'center' }}>
+        <Pressable onPress={() => { slide(0); onAction(); }} hitSlop={6} style={{ width: SWIPE_W, alignItems: 'center', justifyContent: 'center', paddingVertical: 22 }}>
+          <Icon name={actionIcon} size={22} color="#fff" />
+        </Pressable>
+      </View>
+      <Animated.View style={{ transform: [{ translateX: x }] }} {...pan.panHandlers}>
+        {/* while open, a tap anywhere on the row just closes it (never fires the row's action) */}
+        {open ? (
+          <View>
+            {children}
+            <Pressable onPress={() => slide(0)} style={StyleSheet.absoluteFill} />
+          </View>
+        ) : (
+          children
+        )}
+      </Animated.View>
+    </View>
+  );
+}
+
+/* ============================ date picker sheet ============================ */
+// Zero-dependency month calendar (no @react-native-community/datetimepicker = no new native
+// module). Field request 21/07: the payment-plan due dates only moved in 5-day steps, so a date
+// the client actually agreed to ("pays on Aug 5") was unreachable.
+const localeTag = () => ({ en: 'en-US', es: 'es-ES', pt: 'pt-BR' } as Record<string, string>)[getLocale()] || 'en-US';
+export function DateSheet({ open, onClose, value, onPick, title, sub }: { open: boolean; onClose: () => void; value: string; onPick: (iso: string) => void; title?: string; sub?: string }) {
+  const t = useT();
+  const sel = parseDateOnly(value || toDateOnly(new Date()));
+  const [cursor, setCursor] = useState(() => new Date(sel.getFullYear(), sel.getMonth(), 1));
+  // reopening on a different value must land on that value's month, not the last one browsed
+  useEffect(() => {
+    if (open) setCursor(new Date(sel.getFullYear(), sel.getMonth(), 1));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, value]);
+
+  const today = new Date();
+  const todayIso = toDateOnly(today);
+  const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+  const daysInMonth = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+  const cells: (number | null)[] = [...Array(first.getDay()).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+  while (cells.length % 7) cells.push(null);
+  const weekdays = Array.from({ length: 7 }, (_, i) => new Date(2024, 8, 1 + i).toLocaleDateString(localeTag(), { weekday: 'narrow' }));
+  const monthLabel = cursor.toLocaleDateString(localeTag(), { month: 'long', year: 'numeric' });
+  const iso = (day: number) => toDateOnly(new Date(cursor.getFullYear(), cursor.getMonth(), day));
+
+  return (
+    <Sheet open={open} onClose={onClose} title={title} sub={sub}>
+      <Between style={{ marginBottom: 10 }}>
+        <NavBtn icon="back" size={15} onPress={() => setCursor((c) => new Date(c.getFullYear(), c.getMonth() - 1, 1))} />
+        <Text style={{ fontFamily: fonts.extrabold, fontSize: 15, color: colors.ink, textTransform: 'capitalize' }}>{monthLabel}</Text>
+        <NavBtn icon="fwd" size={15} onPress={() => setCursor((c) => new Date(c.getFullYear(), c.getMonth() + 1, 1))} />
+      </Between>
+      <Row style={{ gap: 0 }}>
+        {weekdays.map((w, i) => (
+          <Text key={i} style={{ flex: 1, textAlign: 'center', fontFamily: fonts.bold, fontSize: 11, color: colors.faint }}>{w.toUpperCase()}</Text>
+        ))}
+      </Row>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 }}>
+        {cells.map((d, i) => {
+          if (d == null) return <View key={i} style={{ width: `${100 / 7}%`, height: 42 }} />;
+          const dIso = iso(d);
+          const on = dIso === value;
+          const isToday = dIso === todayIso;
+          return (
+            <View key={i} style={{ width: `${100 / 7}%`, height: 42, alignItems: 'center', justifyContent: 'center' }}>
+              <Pressable
+                onPress={() => { onPick(dIso); onClose(); }}
+                style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? colors.primary : isToday ? colors.primaryTint : 'transparent' }}
+              >
+                <Text style={{ fontFamily: on ? fonts.extrabold : fonts.semibold, fontSize: 14, color: on ? '#fff' : isToday ? colors.primary : colors.ink }}>{d}</Text>
+              </Pressable>
+            </View>
+          );
+        })}
+      </View>
+      <Btn variant="ghost" sm title={t('ui.today')} onPress={() => { onPick(todayIso); onClose(); }} style={{ marginTop: 12 }} />
+    </Sheet>
   );
 }
 
