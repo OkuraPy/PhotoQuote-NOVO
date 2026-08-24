@@ -4,6 +4,18 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-08-24 23:20] — build: BUILD 35 (substitui a 34) — corrige o contrato da fatura complementar
+- EAS iOS production `--auto-submit` do worktree `pq-build24` @ `d6b86cc`. Version 2.0.0,
+  **buildNumber 35**. Build `05c9c0fe-553b-41ce-88e9-b81a767c4f54`, submission
+  `f313d017-357c-4023-8f4b-a3e54b75814c` — enviada sem erro.
+- **Por que existiu**: a revisão final (feita DEPOIS da build 34 já estar com a Apple) achou o ALTO
+  do contrato congelando a fatura errada. A 34 fica de pé para tudo que existe em produção hoje
+  (todo job tem no máximo uma fatura), mas a 35 é a que pode ser usada sem essa armadilha.
+- Diferença 34 → 35: contrato sempre na fatura #1 · a tela cai na complementar recém-criada · a
+  linha de imposto do PDF diz sobre o que incide · o teste do change order valida a base impressa.
+
+---
+
 ### [2026-08-24 23:10] — fix: revisão final pegou um ALTO que EU criei — contrato congelava a fatura errada
 - **Contexto**: revisão da própria correção do bloqueante (`b557f1c`), que tinha sido escrita depois
   que o revisor anterior terminou e não tinha passado por ninguém. Era onde eu mais tinha mexido em
