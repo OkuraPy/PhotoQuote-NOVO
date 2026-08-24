@@ -1,4 +1,4 @@
-import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, jobSiteLine, needsPhaseSync, NO_DISCOUNT, phaseNameFromItem, resolveDiscount, seedPhasePlan, syncPhasePlan, toggleDocPhoto } from '../../data';
+import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobSiteLine, needsPhaseSync, NO_DISCOUNT, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitByTaxShare, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
 import type { ClosedKind, LineItem, SyncPhase } from '../../data';
 import type { Stage } from '../../theme';
 
@@ -486,5 +486,72 @@ describe('discountFromTarget ("deu 1.099, quer deixar 1.000 redondo")', () => {
   });
   it('an empty quote cannot be targeted', () => {
     expect(discountFromTarget(0, 0, 7, 100)).toBe(0);
+  });
+});
+
+/* ---------------- G-9: more than one invoice on the same job ---------------- */
+describe('invoiceRollup', () => {
+  it('adds up every invoice on the job', () => {
+    const r = invoiceRollup([{ total: 8000, amountPaid: 8000 }, { total: 2400, amountPaid: 0 }]);
+    expect(r.total).toBe(10400);
+    expect(r.paid).toBe(8000);
+    expect(r.balance).toBe(2400);
+    expect(r.status).toBe('Partially Paid');
+  });
+  it('is Paid only when every dollar landed', () => {
+    expect(invoiceRollup([{ total: 8000, amountPaid: 8000 }, { total: 2400, amountPaid: 2400 }]).status).toBe('Paid');
+  });
+  it('a paid first invoice plus a fresh second one is NOT Paid', () => {
+    // the whole point: a complementary invoice pulls the job back to "still owes money"
+    const r = invoiceRollup([{ total: 500, amountPaid: 500 }, { total: 100, amountPaid: 0 }]);
+    expect(r.status).toBe('Partially Paid');
+    expect(r.balance).toBe(100);
+  });
+  it('no invoices is an empty roll-up, not a paid job', () => {
+    const r = invoiceRollup([]);
+    expect(r.count).toBe(0);
+    expect(r.total).toBe(0);
+    expect(r.status).toBe('Unpaid');
+  });
+  it('overpayment never makes the balance negative', () => {
+    expect(invoiceRollup([{ total: 100, amountPaid: 150 }]).balance).toBe(0);
+  });
+  it('keeps cents honest across many invoices', () => {
+    const r = invoiceRollup([{ total: 0.1, amountPaid: 0 }, { total: 0.2, amountPaid: 0 }]);
+    expect(r.total).toBe(0.3);
+  });
+});
+
+describe('uninvoiced (what a complementary invoice starts at)', () => {
+  it('is the part of the quote not yet billed', () => {
+    expect(uninvoiced(10400, 8000)).toBe(2400);
+  });
+  it('is zero when everything is already billed', () => {
+    expect(uninvoiced(8000, 8000)).toBe(0);
+  });
+  it('never goes negative when the quote shrank below what was billed', () => {
+    expect(uninvoiced(5000, 8000)).toBe(0);
+  });
+});
+
+describe('splitByTaxShare (the extra invoice carries the quote proportions)', () => {
+  it('keeps the same tax share as the quote', () => {
+    // quote: 10,000 total with 700 of tax → 7% of the total is tax
+    const s = splitByTaxShare(2400, 10000, 700);
+    expect(s.tax).toBe(168);
+    expect(s.subtotal).toBe(2232);
+    expect(s.subtotal + s.tax).toBe(2400);
+  });
+  it('a tax-free quote makes a tax-free extra invoice', () => {
+    const s = splitByTaxShare(1000, 5000, 0);
+    expect(s.tax).toBe(0);
+    expect(s.subtotal).toBe(1000);
+  });
+  it('the parts always add back to the amount, cents included', () => {
+    const s = splitByTaxShare(333.33, 1000, 77.77);
+    expect(round2(s.subtotal + s.tax)).toBe(333.33);
+  });
+  it('an empty quote cannot dictate a share', () => {
+    expect(splitByTaxShare(500, 0, 0)).toEqual({ subtotal: 500, tax: 0, total: 500 });
   });
 });

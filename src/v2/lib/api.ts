@@ -408,6 +408,14 @@ async function voidUnsignedAgreements(invoiceId: string): Promise<void> {
 
 async function syncInvoiceWithEstimate(estimateId: string): Promise<void> {
   try {
+    // G-9: auto-sync is a ONE-INVOICE convenience. Once the job carries a complementary invoice,
+    // "the newest invoice" is the change order — rewriting it with the FULL quote total would
+    // double-bill the client. From two invoices on, the owner drives the amounts explicitly.
+    const { count: invCount } = await supabase
+      .from('invoices')
+      .select('id', { count: 'exact', head: true })
+      .eq('estimate_id', estimateId);
+    if ((invCount || 0) > 1) return;
     const { data: inv } = await supabase
       .from('invoices')
       .select('id, status, total, deposit_percent')
@@ -507,7 +515,15 @@ async function insertScheduleRows(userId: string, invoiceId: string, plan: Payme
 // Copies the estimate's totals (the DB trigger keeps those correct), assigns a sequential
 // per-user invoice number INV-YYYY-NNNN (no trigger exists, so we mint it here) and stores the
 // payment plan the contractor picked in the sheet (mode/due/deposit + installment rows).
-export async function createInvoice(userId: string, estimateId: string, projectId: string, plan: PaymentPlan): Promise<{ id: string; number: string; downgraded: boolean }> {
+// `override` (G-9) creates a COMPLEMENTARY invoice for an explicit amount instead of copying the
+// quote: the first invoice keeps what the client already paid and the extra work is billed apart.
+export async function createInvoice(
+  userId: string,
+  estimateId: string,
+  projectId: string,
+  plan: PaymentPlan,
+  override?: { subtotal: number; tax: number; total: number }
+): Promise<{ id: string; number: string; downgraded: boolean }> {
   const { data: est, error: eErr } = await supabase
     .from('estimates')
     .select('subtotal, tax_rate, tax_percent, tax_amount, margin_rate, margin_amount, total, grand_total, discount_percent, discount_amount')
@@ -528,16 +544,18 @@ export async function createInvoice(userId: string, estimateId: string, projectI
       project_id: projectId,
       invoice_number: number,
       status: 'Unpaid',
-      subtotal: Number(est?.subtotal ?? 0),
+      subtotal: override ? override.subtotal : Number(est?.subtotal ?? 0),
       tax_rate: Number(est?.tax_rate ?? est?.tax_percent ?? 0),
-      tax_amount: Number(est?.tax_amount ?? 0),
+      tax_amount: override ? override.tax : Number(est?.tax_amount ?? 0),
       margin_rate: Number(est?.margin_rate ?? 0),
-      margin_amount: Number(est?.margin_amount ?? 0),
+      margin_amount: override ? 0 : Number(est?.margin_amount ?? 0),
       // G-1: the invoice is a frozen snapshot of the quote — it carries the discount that produced
-      // this total, so the invoice PDF can print the same "Discount" line the quote printed
-      discount_percent: Number(est?.discount_percent ?? 0),
-      discount_amount: Number(est?.discount_amount ?? 0),
-      total: Number(est?.total ?? est?.grand_total ?? 0),
+      // this total, so the invoice PDF can print the same "Discount" line the quote printed.
+      // A complementary invoice bills an amount, not the quote: the discount already came off the
+      // quote total it was derived from, so repeating it here would discount the same work twice.
+      discount_percent: override ? 0 : Number(est?.discount_percent ?? 0),
+      discount_amount: override ? 0 : Number(est?.discount_amount ?? 0),
+      total: override ? override.total : Number(est?.total ?? est?.grand_total ?? 0),
       ...invoicePlanColumns(plan),
     })
     .select('id, invoice_number')
@@ -1032,13 +1050,26 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
   (est.data || []).forEach((e: any) => {
     if (!estByProj.has(e.project_id)) estByProj.set(e.project_id, e); // first = newest (ordered desc)
   });
-  const invByProj = new Map<string, any>();
-  (inv.data || []).forEach((i: any) => { if (!invByProj.has(i.project_id)) invByProj.set(i.project_id, i); }); // newest invoice wins (matches fetchJobDetail)
+  // G-9: a job can carry more than one invoice — the money it is worth is the SUM of them, not
+  // the newest one. Without this a $10,400 job with a paid $8,000 and a fresh $2,400 would read
+  // as $2,400 on the Home list and in the metrics.
+  const invsByProj = new Map<string, any[]>();
+  (inv.data || []).forEach((i: any) => {
+    const list = invsByProj.get(i.project_id);
+    if (list) list.push(i);
+    else invsByProj.set(i.project_id, [i]);
+  });
 
   return (proj.data || []).map((p: any) => {
     const e = estByProj.get(p.id);
-    const iv = invByProj.get(p.id);
-    const value = Number(iv?.total ?? e?.total ?? e?.grand_total ?? 0) || 0;
+    const ivs = invsByProj.get(p.id) || [];
+    const invoicedTotal = round2(ivs.reduce((sum: number, i: any) => sum + (Number(i.total) || 0), 0));
+    const value = ivs.length ? invoicedTotal : Number(e?.total ?? e?.grand_total ?? 0) || 0;
+    // stage/partial read the WHOLE set: all invoices paid = Paid, any money in with a balance
+    // left = partial. `paid` here is the invoice STATUS (the ledger lives in fetchJobDetail).
+    const allPaid = ivs.length > 0 && ivs.every((i: any) => String(i.status || '').toLowerCase() === 'paid');
+    const anyMoneyIn = ivs.some((i: any) => ['paid', 'partially paid'].includes(String(i.status || '').toLowerCase()));
+    const aggStatus = ivs.length ? (allPaid ? 'Paid' : 'Unpaid') : undefined;
     return {
       id: p.id,
       projectId: p.id,
@@ -1046,9 +1077,9 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
       client: clients.get(p.client_id) || null,
       addr: p.address || p.city || '—',
       title: p.name || 'Untitled',
-      stage: deriveStage(e?.status, iv?.status),
-      // invoices.status is written by recordInvoicePayment (statusFromPayments) — no extra query
-      partial: String(iv?.status || '').toLowerCase() === 'partially paid',
+      stage: deriveStage(e?.status, aggStatus),
+      // partial = money already landed but the job is not settled (G-5, now across every invoice)
+      partial: !allPaid && anyMoneyIn,
       value,
       photos: Array.isArray(p.photo_urls) ? p.photo_urls.length : 0,
       thumb: Array.isArray(p.photo_urls) && p.photo_urls[0] ? String(p.photo_urls[0]) : null,
@@ -1151,7 +1182,28 @@ export async function uploadCompanyLogo(userId: string, uri: string): Promise<st
   return `${data.publicUrl}?v=${Date.now()}`;
 }
 
-/* ---------------- Job detail (real estimate + line items + invoice) ---------------- */
+/* ---------------- Job detail (real estimate + line items + invoices) ---------------- */
+// F12: paymentMode/dueDate/deposit* + schedule re-hydrate the plan; payments is the ledger and
+// amountPaid its Σ (a legacy 'Paid' invoice without ledger rows counts as fully paid).
+export type JobInvoice = {
+  id: string;
+  number: string;
+  status: string;
+  subtotal: number;
+  taxRate: number;
+  tax: number;
+  discount: number; // G-1: dollars, frozen with the invoice
+  total: number;
+  created: string;
+  paymentMode: PaymentMode;
+  dueDate: string | null;
+  depositPercent: number | null;
+  depositAmount: number | null;
+  schedule: ScheduleRow[];
+  payments: PaymentRecord[];
+  amountPaid: number;
+};
+
 export type JobDetail = {
   // markupPercent = new scheme (% already embedded in unit prices); legacyMarginRate = old scheme
   // (margin summed on top by the trigger) — kept so Edit can fold it into the prices.
@@ -1161,26 +1213,10 @@ export type JobDetail = {
   // and `amount` the resolved dollars the DB trigger stored.
   estimate: { id: string; total: number; subtotal: number; taxRate: number; tax: number; discount: Discount; markupPercent: number; legacyMarginRate: number; status: string; notes: string | null; customerNote: string | null; customerNoteSrc: string | null } | null;
   items: LineItem[];
-  // F12: paymentMode/dueDate/deposit* + schedule re-hydrate the plan; payments is the ledger and
-  // amountPaid its Σ (a legacy 'Paid' invoice without ledger rows counts as fully paid).
-  invoice: {
-    id: string;
-    number: string;
-    status: string;
-    subtotal: number;
-    taxRate: number;
-    tax: number;
-    discount: number; // G-1: dollars, frozen with the invoice
-    total: number;
-    created: string;
-    paymentMode: PaymentMode;
-    dueDate: string | null;
-    depositPercent: number | null;
-    depositAmount: number | null;
-    schedule: ScheduleRow[];
-    payments: PaymentRecord[];
-    amountPaid: number;
-  } | null;
+  // G-9: every invoice on the job, oldest first. `invoice` (singular) is the one the screen acts
+  // on by default — the newest — and is the same object as the last entry here.
+  invoices: JobInvoice[];
+  invoice: JobInvoice | null;
   client: { name: string; addr: string; city: string; email: string; phone: string } | null;
   // job-site address (projects.address/city/zip/property_state) — the WORK address (G5).
   // Legacy rows may still hold the client's address there (old createJob wrote client.addr).
@@ -1230,31 +1266,58 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
     });
   }
 
+  // G-9: a job can hold more than one invoice (the original + a complementary one for work added
+  // after the client already paid). Oldest first — #1 is the one the contract froze.
   const invRes = await supabase
     .from('invoices')
     .select('id, invoice_number, status, subtotal, tax_rate, tax_amount, discount_amount, total, created_at, deposit_percent, payment_mode, due_date, deposit_amount')
     .eq('project_id', projectId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order('created_at', { ascending: true });
   if (invRes.error) throw invRes.error;
-  const inv = invRes.data;
+  const invRows = invRes.data || [];
 
-  // the invoice's agreed plan (installments) + received-payments ledger, in parallel
-  let schedule: ScheduleRow[] = [];
-  let payments: PaymentRecord[] = [];
-  if (inv?.id) {
+  // every invoice's agreed plan (installments) + received-payments ledger, in two queries total
+  const invIds = invRows.map((r: any) => r.id);
+  const schedByInv: Record<string, ScheduleRow[]> = {};
+  const paysByInv: Record<string, PaymentRecord[]> = {};
+  if (invIds.length) {
     const [schRes, payRes] = await Promise.all([
-      supabase.from('invoice_schedule').select('id, label, amount, due_date, phase_id, sort').eq('invoice_id', inv.id).order('sort', { ascending: true }),
+      supabase.from('invoice_schedule').select('invoice_id, id, label, amount, due_date, phase_id, sort').in('invoice_id', invIds).order('sort', { ascending: true }),
       // created_at tiebreaker: paid_at is date-only, and same-day payments must keep a stable
       // order so a re-issued receipt always shows the same running balance
-      supabase.from('invoice_payments').select('id, amount, paid_at, method, schedule_id, note').eq('invoice_id', inv.id).order('paid_at', { ascending: true }).order('created_at', { ascending: true }),
+      supabase.from('invoice_payments').select('invoice_id, id, amount, paid_at, method, schedule_id, note').in('invoice_id', invIds).order('paid_at', { ascending: true }).order('created_at', { ascending: true }),
     ]);
     if (schRes.error) throw schRes.error;
     if (payRes.error) throw payRes.error;
-    schedule = (schRes.data || []).map((r: any) => ({ id: r.id, label: r.label || '', amount: Number(r.amount) || 0, dueDate: r.due_date ?? null, phaseId: r.phase_id ?? null, sort: r.sort ?? 0 }));
-    payments = (payRes.data || []).map((r: any) => ({ id: r.id, amount: Number(r.amount) || 0, paidAt: r.paid_at, method: r.method ?? null, scheduleId: r.schedule_id ?? null, note: r.note ?? null }));
+    (schRes.data || []).forEach((r: any) => {
+      (schedByInv[r.invoice_id] ||= []).push({ id: r.id, label: r.label || '', amount: Number(r.amount) || 0, dueDate: r.due_date ?? null, phaseId: r.phase_id ?? null, sort: r.sort ?? 0 });
+    });
+    (payRes.data || []).forEach((r: any) => {
+      (paysByInv[r.invoice_id] ||= []).push({ id: r.id, amount: Number(r.amount) || 0, paidAt: r.paid_at, method: r.method ?? null, scheduleId: r.schedule_id ?? null, note: r.note ?? null });
+    });
   }
+  const invoices = invRows.map((row: any) => {
+    const payments = paysByInv[row.id] || [];
+    return {
+      id: row.id,
+      number: row.invoice_number,
+      status: row.status,
+      subtotal: Number(row.subtotal ?? 0),
+      taxRate: Number(row.tax_rate ?? 0),
+      tax: Number(row.tax_amount ?? 0),
+      discount: Number(row.discount_amount ?? 0), // G-1: frozen with the invoice
+      total: Number(row.total ?? 0),
+      created: row.created_at,
+      paymentMode: asPaymentMode(row.payment_mode),
+      dueDate: row.due_date ?? null,
+      depositPercent: row.deposit_percent ?? null,
+      depositAmount: row.deposit_amount != null ? Number(row.deposit_amount) : null,
+      schedule: schedByInv[row.id] || [],
+      payments,
+      // legacy rule: an invoice marked Paid before the ledger existed counts as fully paid
+      amountPaid: payments.length ? paidTotal(payments) : String(row.status).toLowerCase() === 'paid' ? Number(row.total ?? 0) : 0,
+    };
+  });
 
   const agrRes = await supabase
     .from('agreements')
@@ -1283,27 +1346,10 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
       ? { id: est.id, total: Number(est.total ?? est.grand_total ?? 0), subtotal: Number(est.subtotal ?? 0), taxRate: Number(est.tax_rate ?? 0), tax: Number(est.tax_amount ?? 0), discount: { percent: Number(est.discount_percent ?? 0), amount: Number(est.discount_amount ?? 0) }, markupPercent: markupPct, legacyMarginRate: Number(est.margin_rate ?? 0), status: est.status, notes: est.notes ?? est.estimate_notes ?? null, customerNote: est.customer_note ?? null, customerNoteSrc: est.customer_note_src ?? null }
       : null,
     items,
-    invoice: inv
-      ? {
-          id: inv.id,
-          number: inv.invoice_number,
-          status: inv.status,
-          subtotal: Number(inv.subtotal ?? 0),
-          taxRate: Number(inv.tax_rate ?? 0),
-          tax: Number(inv.tax_amount ?? 0),
-          discount: Number(inv.discount_amount ?? 0), // G-1: frozen with the invoice
-          total: Number(inv.total ?? 0),
-          created: inv.created_at,
-          paymentMode: asPaymentMode(inv.payment_mode),
-          dueDate: inv.due_date ?? null,
-          depositPercent: inv.deposit_percent ?? null,
-          depositAmount: inv.deposit_amount != null ? Number(inv.deposit_amount) : null,
-          schedule,
-          payments,
-          // legacy rule: an invoice marked Paid before the ledger existed counts as fully paid
-          amountPaid: payments.length ? paidTotal(payments) : String(inv.status).toLowerCase() === 'paid' ? Number(inv.total ?? 0) : 0,
-        }
-      : null,
+    invoices,
+    // the one the screen acts on by default: the NEWEST, which is what this call returned before
+    // there could be more than one. The contract stays with invoices[0] (owner's D6).
+    invoice: invoices.length ? invoices[invoices.length - 1] : null,
     client,
     jobSite: {
       address: projRes.data?.address || '',

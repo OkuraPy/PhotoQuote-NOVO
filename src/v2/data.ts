@@ -282,6 +282,42 @@ export function statusFromPayments(total: number, paid: number): InvoicePayStatu
 export const unallocated = (total: number, rows: { amount: number }[]) =>
   round2(total - rows.reduce((s, r) => s + (Number(r.amount) || 0), 0));
 
+/* ---------------- G-9: a job can hold more than one invoice ---------------- */
+// "quando alterar o orçamento… a gente tem que gerar um novo invoice, tem que ter outros invoices
+// gerados ali" (dono, 24/08). The first invoice keeps everything the client already paid; the extra
+// work becomes a SECOND invoice. Every number the job header, the list and the metrics show is then
+// the roll-up of all of them — a $10,400 job must never read as $2,400 because that is the newest
+// invoice. `amountPaid` already accounts for the legacy 'Paid'-without-ledger case upstream.
+export type InvoiceLike = { total: number; amountPaid: number };
+export function invoiceRollup(list: InvoiceLike[]) {
+  const total = round2(list.reduce((s, i) => s + (Number(i.total) || 0), 0));
+  const paid = round2(list.reduce((s, i) => s + (Number(i.amountPaid) || 0), 0));
+  return {
+    count: list.length,
+    total,
+    paid,
+    balance: invoiceBalance(total, paid),
+    // no invoice at all is NOT "Unpaid" money — the caller distinguishes with count
+    status: statusFromPayments(total, paid),
+  };
+}
+
+// What the quote still has NOT put on any invoice — the amount a complementary invoice starts at.
+// Negative (the quote shrank below what was already billed) reads as zero: there is nothing new to
+// charge, and the app must never offer a negative invoice.
+export const uninvoiced = (quoteTotal: number, invoicedTotal: number) =>
+  round2(Math.max(0, (Number(quoteTotal) || 0) - (Number(invoicedTotal) || 0)));
+
+// Split a complementary invoice's amount into subtotal + tax keeping the SAME tax proportion the
+// quote carries, so the extra invoice reads like the original instead of a tax-free lump. The two
+// parts always add back up to the amount exactly (the tax absorbs the rounding).
+export function splitByTaxShare(amount: number, quoteTotal: number, quoteTax: number) {
+  const amt = round2(Math.max(0, Number(amount) || 0));
+  const share = quoteTotal > 0 ? Math.min(Math.max(0, (Number(quoteTax) || 0) / quoteTotal), 1) : 0;
+  const tax = round2(amt * share);
+  return { subtotal: round2(amt - tax), tax, total: amt };
+}
+
 // Resize the installments editor's draft rows to `n` WITHOUT re-splitting rows the user already
 // edited (the pristine path keeps the even re-split). Growing appends rows that soak up whatever
 // the total still lacks (never negative), due 30 days after the previous row; shrinking drops

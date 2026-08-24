@@ -4,6 +4,44 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-08-24 20:30] — feat: ONDA G / onda 3, parte 2 — múltiplas faturas por job (G-9)
+- **O que mudou**: o job passa a poder ter mais de uma fatura. Quando o orçamento cresce depois que
+  o cliente já pagou, a fatura original **fica intacta** (é o que ele pagou) e a diferença vira uma
+  **fatura complementar** com plano de pagamento próprio. Antes disso o app mostrava "out of sync"
+  e não havia saída nenhuma — era o pedido do dono no áudio de 24/08.
+- **Com UMA fatura a tela é idêntica à de hoje.** O bloco de faturas só aparece a partir da segunda:
+  resumo ("Total do trabalho $10.400 · Pago $8.000 · Saldo $2.400") + um chip por fatura pra
+  escolher qual está na tela (pagamento, plano, PDF e recibo agem na escolhida).
+- **O trabalho real não foi o botão** — foi tudo que assumia UMA fatura:
+  - `fetchJobDetail` devolve `invoices[]` (mais antiga primeiro) com o plano e o ledger de cada uma,
+    ainda em duas queries (`in (...)`); `invoice` (singular) continua existindo e aponta pra mais nova.
+  - **Etapa**: `Paid` só quando TODAS estão pagas — uma complementar puxa o job de volta pra
+    "Invoiced", que é a verdade (ainda há dinheiro a receber).
+  - **Lista da Home e métricas**: o valor do job virou a SOMA das faturas. Sem isso um job de
+    $10.400 apareceria como $2.400 (a mais nova) na lista e no "faturado" do painel.
+  - **Cabeçalho do job**: total, pago, saldo e o chip de parcial passam a ser o agregado.
+  - **`syncInvoiceWithEstimate` desliga a partir da segunda fatura**: com duas, "a mais nova" é a
+    complementar, e sincronizá-la com o total CHEIO do orçamento cobraria o cliente duas vezes.
+  - **Aviso de "orçamento mudou"** passa a comparar com a soma das faturas, e some quando a
+    diferença já está sendo oferecida como fatura nova.
+  - **Contrato preso à fatura #1** (decisão D6): change order não reabre contrato assinado.
+- **Como a complementar é montada**: valor = orçamento − já faturado (`uninvoiced`), dividido em
+  subtotal/imposto pela MESMA proporção de imposto do orçamento (`splitByTaxShare`, as duas partes
+  sempre somam o valor exato). Sem desconto próprio — o desconto já saiu no total do orçamento de
+  onde a diferença veio, aplicá-lo de novo descontaria o mesmo trabalho duas vezes.
+- **Migration**: NENHUMA. `invoices.project_id` e a numeração por usuário/ano já existiam; em
+  produção são 30 faturas em 30 projetos distintos, então não há dado legado pra migrar.
+- **Provado em produção** (transação com ROLLBACK, nada real tocado): job sintético com duas
+  faturas (uma $8.000 paga, outra $2.400 em aberto) → a lista calcula **$10.400** (não $2.400),
+  "todas pagas" = false (etapa segue Invoiced), "entrou dinheiro" = true (chip parcial), pago
+  $8.000. Contagens depois do teste: 87 projetos / 30 faturas / 23 pagamentos, zero sobra.
+- **Arquivos**: `src/v2/data.ts` (`invoiceRollup`, `uninvoiced`, `splitByTaxShare`),
+  `src/v2/lib/api.ts` (invoices[], createInvoice com valor explícito, sync desligado, fetchJobs
+  agregado), `src/v2/screens/Job.tsx` (seleção, resumo, CTA, etapa, contrato na #1).
+- **Gates**: tsc limpo, jest 135/135 (13 testes novos), `expo export ios` OK (3,25 MB).
+
+---
+
 ### [2026-08-24 19:40] — feat: ONDA G / onda 3, parte 1 — desconto no orçamento (G-1)
 - **O que mudou**: o orçamento passa a ter desconto para BAIXO, do jeito que o Gladson pediu: um
   stepper de **%** (o caso "contractor -30%") e um campo de **total final** onde ele digita o número
