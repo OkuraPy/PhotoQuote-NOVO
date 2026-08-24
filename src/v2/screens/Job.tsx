@@ -51,6 +51,8 @@ registerStrings({
   'job.viewSignedContract': { en: 'Open the signed contract', es: 'Abrir el contrato firmado', pt: 'Abrir o contrato assinado' },
   // G-2: uploading photos used to be a silent 20-30s
   'job.uploadingCount': { en: 'Sending {done} of {total}…', es: 'Enviando {done} de {total}…', pt: 'Enviando {done} de {total}…' },
+  // G-6: check number / bank on the payment — prints on the client's receipt
+  'job.referenceLabel': { en: 'Reference (check #, bank)', es: 'Referencia (n.º de cheque, banco)', pt: 'Referência (nº do cheque, banco)' },
   // G-5: the money that already landed, said out loud on the job header
   'job.paidOfTotal': { en: 'Paid {paid} of {total}', es: 'Pagado {paid} de {total}', pt: 'Pago {paid} de {total}' },
   'job.balanceLeft': { en: '{amount} left', es: 'Faltan {amount}', pt: 'Faltam {amount}' },
@@ -713,7 +715,7 @@ export function JobScreen({ go, back, params }: NavProp) {
   // "Mark paid" became "Record payment": money received goes to the ledger and the status
   // (Unpaid / Partially Paid / Paid) is derived server-side from Σ(payments) vs total.
   // After a successful record the contractor is offered a receipt for it (G3).
-  const confirmPayment = async (amount: number, method: string | null) => {
+  const confirmPayment = async (amount: number, method: string | null, note: string) => {
     if (!ownerId || !inv?.id) return;
     // guard a fat-finger overpayment ($9409 for a $940.90 balance): the ledger is append-only,
     // there's no in-app refund, and the receipt would print a wrong "Paid in full" (final-review M1)
@@ -724,19 +726,19 @@ export function JobScreen({ go, back, params }: NavProp) {
         t('job.overpayBody', { amount: fmt(amount), balance: fmt(balanceNow) }),
         [
           { text: t('job.notNow'), style: 'cancel' },
-          { text: t('job.overpayConfirm'), onPress: () => void doRecordPayment(amount, method) },
+          { text: t('job.overpayConfirm'), onPress: () => void doRecordPayment(amount, method, note) },
         ]
       );
       return;
     }
-    void doRecordPayment(amount, method);
+    void doRecordPayment(amount, method, note);
   };
-  const doRecordPayment = async (amount: number, method: string | null) => {
+  const doRecordPayment = async (amount: number, method: string | null, note: string) => {
     if (!ownerId || !inv?.id) return;
     const invoice = inv; // freeze — detail refetches under the alert below
     setSavingPay(true);
     try {
-      const { id: paymentId } = await recordInvoicePayment(ownerId, invoice.id, { amount, method });
+      const { id: paymentId } = await recordInvoicePayment(ownerId, invoice.id, { amount, method, note });
       await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
       setPaySheet(false);
@@ -747,7 +749,7 @@ export function JobScreen({ go, back, params }: NavProp) {
         { text: t('job.notNow'), style: 'cancel' },
         {
           text: t('job.sendReceipt'),
-          onPress: () => requireCompany(() => { void sendReceipt(paymentId, { amount, method, date: toDateOnly(new Date()), balanceAfter }, invoice.number); }),
+          onPress: () => requireCompany(() => { void sendReceipt(paymentId, { amount, method, note, date: toDateOnly(new Date()), balanceAfter }, invoice.number); }),
         },
       ]), 380);
     } catch (e: any) {
@@ -760,7 +762,7 @@ export function JobScreen({ go, back, params }: NavProp) {
   // Receipt (G3): mint the number once (re-issues reuse it) and go straight to the PDF share
   // sheet — a receipt is always a PDF, so the SendSheet chooser is skipped on purpose.
   const [receiptBusy, setReceiptBusy] = useState<string | null>(null);
-  const sendReceipt = async (paymentId: string, p: { amount: number; method: string | null; date: string; balanceAfter: number }, invoiceNumber?: string) => {
+  const sendReceipt = async (paymentId: string, p: { amount: number; method: string | null; note?: string | null; date: string; balanceAfter: number }, invoiceNumber?: string) => {
     if (receiptBusy) return;
     setReceiptBusy(paymentId);
     try {
@@ -770,11 +772,11 @@ export function JobScreen({ go, back, params }: NavProp) {
         kind: 'receipt',
         docLabel: 'Receipt', // client-facing, English by design
         number,
-        company: { name: co.company_name || t('job.yourCompany'), license: co.company_license, address: co.company_address, phone: co.company_phone, email: co.company_email },
+        company: { name: co.company_name || t('job.yourCompany'), license: co.company_license, address: co.company_address, phone: co.company_phone, email: co.company_email, logo: co.logo_url },
         client: realClient,
         items: [],
         totals: { subtotal: 0, tax: 0, total: p.amount, taxRate: 0 }, // unused by the receipt branch
-        receipt: { number, date: p.date, method: p.method, amount: p.amount, invoiceNumber, balanceAfter: p.balanceAfter },
+        receipt: { number, date: p.date, method: p.method, reference: p.note || null, amount: p.amount, invoiceNumber, balanceAfter: p.balanceAfter },
       });
     } catch (e: any) {
       Alert.alert(t('job.couldNotCreateReceipt'), e?.message || t('job.alert.tryAgain'));
@@ -785,7 +787,7 @@ export function JobScreen({ go, back, params }: NavProp) {
   // re-issue from a ledger row: the balance shown is the one AS OF that payment
   const onReceiptRow = (p: PaymentRecord) => {
     if (!inv) return;
-    requireCompany(() => { void sendReceipt(p.id, { amount: p.amount, method: p.method, date: p.paidAt, balanceAfter: balanceAfterPayment(inv.total, inv.payments, p.id) }, inv.number); });
+    requireCompany(() => { void sendReceipt(p.id, { amount: p.amount, method: p.method, note: p.note, date: p.paidAt, balanceAfter: balanceAfterPayment(inv.total, inv.payments, p.id) }, inv.number); });
   };
 
   // contract / service agreement → generate (from the invoice) and share the signing link
@@ -1028,7 +1030,7 @@ export function JobScreen({ go, back, params }: NavProp) {
             // English on purpose: docLabel prints on the PDF header and the email subject (client-facing)
             docLabel: kind === 'invoice' ? 'Invoice' : kind === 'contract' ? 'Agreement' : 'Quote',
             number: kind === 'invoice' ? inv?.number : undefined,
-            company: { name: co.company_name || t('job.yourCompany'), license: co.company_license, address: co.company_address, phone: co.company_phone, email: co.company_email },
+            company: { name: co.company_name || t('job.yourCompany'), license: co.company_license, address: co.company_address, phone: co.company_phone, email: co.company_email, logo: co.logo_url },
             client: realClient,
             jobSite: jobSite || undefined, // English job-site line on quote & invoice (G5)
             customerNote: (kind !== 'contract' && est?.customerNote) || undefined, // "Notes" section (G1)
@@ -1439,19 +1441,24 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, q
           <View style={{ paddingHorizontal: 20, paddingVertical: 14, borderTopWidth: 1, borderTopColor: colors.border }}>
             <DpLab text={t('job.paymentsReceived')} />
             {invoice.payments.map((p) => (
-              <Between key={p.id} style={{ marginTop: 8 }}>
-                <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{mdDate(parseDateOnly(p.paidAt))}{p.method ? ` · ${methodLabel(t, p.method)}` : ''}</Text>
-                {onReceipt ? (
-                  // (re)issue the receipt for this payment — reuses its number once minted (G3)
-                  <Pressable onPress={() => onReceipt(p)} disabled={!!receiptBusyId} hitSlop={8}>
-                    <Row style={{ gap: 4 }}>
-                      <Icon name="receipt" size={13} color={colors.primary} />
-                      <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.primary }}>{receiptBusyId === p.id ? t('job.working') : t('job.receiptLink')}</Text>
-                    </Row>
-                  </Pressable>
-                ) : null}
-                <Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.success }}>{fmt(p.amount)}</Text>
-              </Between>
+              <View key={p.id} style={{ marginTop: 8 }}>
+                <Between>
+                  <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{mdDate(parseDateOnly(p.paidAt))}{p.method ? ` · ${methodLabel(t, p.method)}` : ''}</Text>
+                  {onReceipt ? (
+                    // (re)issue the receipt for this payment — reuses its number once minted (G3)
+                    <Pressable onPress={() => onReceipt(p)} disabled={!!receiptBusyId} hitSlop={8}>
+                      <Row style={{ gap: 4 }}>
+                        <Icon name="receipt" size={13} color={colors.primary} />
+                        <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.primary }}>{receiptBusyId === p.id ? t('job.working') : t('job.receiptLink')}</Text>
+                      </Row>
+                    </Pressable>
+                  ) : null}
+                  <Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.success }}>{fmt(p.amount)}</Text>
+                </Between>
+                {/* G-6: the check number is only useful if you can read it back later — and this is
+                    the same line the client sees on the receipt */}
+                {p.note ? <Text numberOfLines={1} style={{ fontFamily: fonts.semibold, fontSize: 11.5, color: colors.faint, marginTop: 2 }}>{p.note}</Text> : null}
+              </View>
             ))}
           </View>
         ) : null}
@@ -1805,13 +1812,14 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
 }
 
 /* ---------------- Record payment sheet (F12): money received → ledger ---------------- */
-function RecordPaymentSheet({ open, onClose, balance, busy, onConfirm }: { open: boolean; onClose: () => void; balance: number; busy: boolean; onConfirm: (amount: number, method: string | null) => void }) {
+function RecordPaymentSheet({ open, onClose, balance, busy, onConfirm }: { open: boolean; onClose: () => void; balance: number; busy: boolean; onConfirm: (amount: number, method: string | null, note: string) => void }) {
   const t = useT();
   const [amount, setAmount] = useState(0);
   const [method, setMethod] = useState<string | null>(null);
+  const [note, setNote] = useState(''); // G-6: check number / bank — prints on the receipt
   // pre-fill with the outstanding balance on every open (fresh per job/press — local state)
   useEffect(() => {
-    if (open) { setAmount(round2(balance)); setMethod(null); }
+    if (open) { setAmount(round2(balance)); setMethod(null); setNote(''); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
   // method KEYS stay English in the DB; only the chip labels are translated
@@ -1826,11 +1834,17 @@ function RecordPaymentSheet({ open, onClose, balance, busy, onConfirm }: { open:
           ))}
         </Row>
       </Field>
+      {/* G-6: "quando o cara paga em cheque a gente coloca o número do cheque, e o nome do banco".
+          Client-facing on purpose — it prints on the receipt, so the hint is in English like every
+          other string that reaches the client. 120 = the DB CHECK. */}
+      <Field label={t('job.referenceLabel')} opt>
+        <Input value={note} onChangeText={setNote} placeholder="Check #1234 · Chase" maxLength={120} autoCapitalize="words" />
+      </Field>
       <Row style={{ gap: 6 }}>
         <Icon name="calendar" size={14} color={colors.muted} />
         <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{t('job.receivedToday', { date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) })}</Text>
       </Row>
-      <Btn title={busy ? t('job.working') : t('job.recordPayment')} icon={busy ? undefined : 'check'} disabled={busy || !(amount > 0)} onPress={() => onConfirm(round2(amount), method)} style={{ marginTop: 16 }} />
+      <Btn title={busy ? t('job.working') : t('job.recordPayment')} icon={busy ? undefined : 'check'} disabled={busy || !(amount > 0)} onPress={() => onConfirm(round2(amount), method, note)} style={{ marginTop: 16 }} />
     </Sheet>
   );
 }

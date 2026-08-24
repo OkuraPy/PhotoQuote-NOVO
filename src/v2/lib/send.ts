@@ -46,7 +46,10 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
     );
   });
 }
-async function toDataUri(url: string, i: number): Promise<string> {
+// maxWidth = null skips the resize entirely: the company logo (G-8) is small AND often a PNG with
+// a transparent background, and the manipulator's JPEG re-encode would paint that transparency
+// black right in the document header.
+async function toDataUri(url: string, i: number, maxWidth: number | null = 900): Promise<string> {
   // the whole body is guarded: ANY throw here would reject the Promise.all and cost the user the
   // entire PDF, which is worse than the missing photo we're fixing
   try {
@@ -60,15 +63,17 @@ async function toDataUri(url: string, i: number): Promise<string> {
       // resize the LOCAL file (never the remote url — on iOS the manipulator only reads local
       // paths). The page prints each photo at ~500px, so shipping the 1-2MB original would only
       // bloat the HTML the print WebView has to swallow.
-      try {
-        const m = await ImageManipulator.manipulateAsync(tmp.uri, [{ resize: { width: 900 } }], {
-          compress: 0.6,
-          format: ImageManipulator.SaveFormat.JPEG,
-          base64: true,
-        });
-        if (m.base64) return `data:image/jpeg;base64,${m.base64}`;
-      } catch {
-        /* fall back to the bytes as downloaded */
+      if (maxWidth) {
+        try {
+          const m = await ImageManipulator.manipulateAsync(tmp.uri, [{ resize: { width: maxWidth } }], {
+            compress: 0.6,
+            format: ImageManipulator.SaveFormat.JPEG,
+            base64: true,
+          });
+          if (m.base64) return `data:image/jpeg;base64,${m.base64}`;
+        } catch {
+          /* fall back to the bytes as downloaded */
+        }
       }
       const b64 = await tmp.base64();
       if (b64) return `data:${/\.png(\?|$)/i.test(url) ? 'image/png' : 'image/jpeg'};base64,${b64}`;
@@ -86,13 +91,25 @@ async function toDataUri(url: string, i: number): Promise<string> {
 }
 // a null/garbage entry in doc_photo_urls must not blow up the document
 const inlinePhotos = (urls: string[]) =>
-  Promise.all(urls.filter((u) => typeof u === 'string' && !!u).slice(0, DOC_PHOTO_CAP).map(toDataUri));
+  Promise.all(urls.filter((u) => typeof u === 'string' && !!u).slice(0, DOC_PHOTO_CAP).map((u, i) => toDataUri(u, i)));
+
+// G-8: the logo only goes on the page if it came back as REAL bytes. toDataUri falls back to the
+// remote url when the download fails, and a remote <img> in expo-print prints as a broken-image
+// box — on the company header, that is worse than no logo at all.
+async function inlineLogo(url?: string | null): Promise<string | null> {
+  if (!url || typeof url !== 'string') return null;
+  const inlined = await toDataUri(url, 0, null);
+  return inlined.startsWith('data:') ? inlined : null;
+}
 
 export type SendData = {
   kind: 'quote' | 'invoice' | 'contract' | 'receipt';
   docLabel: string; // "Quote" | "Invoice" | "Receipt"
   number?: string;
-  company: { name: string; license?: string; address?: string; phone?: string; email?: string };
+  // G-8: `logo` is the company logo the owner already uploads in the profile — it was stored and
+  // never printed on anything. Passed as the storage URL; inlined as a data URI before printing
+  // (expo-print snapshots the HTML without waiting for remote <img>, the Onda F lesson).
+  company: { name: string; license?: string; address?: string; phone?: string; email?: string; logo?: string | null };
   client: { name?: string; email?: string; phone?: string; addr?: string; city?: string } | null;
   jobSite?: string; // pre-formatted English job-site line ("123 Main St, Miami, FL, 33101")
   customerNote?: string; // client-facing note (G1, English) — printed as a "Notes" section
@@ -111,14 +128,31 @@ export type SendData = {
     number: string;
     date: string; // date-only 'YYYY-MM-DD' (paid_at)
     method: string | null; // English DB key (Cash / Check / …)
+    reference?: string | null; // G-6: check number / bank, as the owner typed it
     amount: number;
     invoiceNumber?: string;
     balanceAfter: number; // remaining balance right after this payment (0 = paid in full)
   };
 };
 
+/* ---------------- G-8: logo in the header + print pagination ---------------- */
+// The logo the owner uploads in the profile was stored and printed nowhere. `logo` here is
+// already a data URI (inlineLogo) — OUR bytes, base64 alphabet, nothing to escape.
+const LOGO_CSS = `.co{display:flex;align-items:center;gap:12px}.logo{height:46px;max-width:170px;object-fit:contain;display:block}`;
+const logoImg = (logo?: string | null) => (logo && logo.startsWith('data:') ? `<img class="logo" src="${logo}"/>` : '');
+
+// "tem que formatar melhor isso daí, paginar melhor" (Gladson, 31/07): a line item was being cut
+// in half by the page break and a section heading could end up alone at the bottom of a page.
+// WebKit (what expo-print renders with) honours break-inside on table rows and blocks; both the
+// legacy `page-break-*` and the modern `break-*` spellings are emitted so neither engine misses it.
+const PAGE_CSS = `
+    tr,.row,.grand,.tot,.shot{page-break-inside:avoid;break-inside:avoid}
+    .lab{page-break-after:avoid;break-after:avoid}
+    .head,.parties{page-break-after:avoid}
+    img{max-width:100%}`;
+
 // Receipt PDF (G3): a confirmation, not a bill — company header, big green "Amount received",
-// then the plain facts (date / method / invoice ref / remaining balance). Always English.
+// then the plain facts (date / method / reference / invoice ref / remaining balance). Always English.
 function buildReceiptHtml(d: SendData, r: NonNullable<SendData['receipt']>): string {
   const c = d.company;
   const cl = d.client;
@@ -146,10 +180,12 @@ function buildReceiptHtml(d: SendData, r: NonNullable<SendData['receipt']>): str
     .amt{text-align:right;white-space:nowrap}
     .ok{color:#1E9E6A;font-weight:800}
     .foot{color:#8A93A3;font-size:11px;margin-top:28px}
+    ${LOGO_CSS}
+    ${PAGE_CSS}
   </style></head>
   <body>
     <div class="head">
-      <div><div class="brand">${escapeHtml(c.name)}</div><div class="muted">${escapeHtml(c.license || '')}</div></div>
+      <div class="co">${logoImg(c.logo)}<div><div class="brand">${escapeHtml(c.name)}</div><div class="muted">${escapeHtml(c.license || '')}</div></div></div>
       <div style="text-align:right"><div class="lab">Receipt</div><div class="num">${escapeHtml(r.number)}</div></div>
     </div>
     <div class="parties">
@@ -160,6 +196,7 @@ function buildReceiptHtml(d: SendData, r: NonNullable<SendData['receipt']>): str
     <table>
       ${row('Date', dateTxt)}
       ${r.method ? row('Method', r.method) : ''}
+      ${r.reference ? row('Reference', r.reference) : ''}
       ${r.invoiceNumber ? row('Invoice', r.invoiceNumber) : ''}
       ${paidInFull ? row('Remaining balance', 'Paid in full', 'ok') : row('Remaining balance', fmt(r.balanceAfter))}
     </table>
@@ -203,10 +240,14 @@ function buildHtml(d: SendData): string {
     .foot{color:#8A93A3;font-size:11px;margin-top:28px}
     .ok{color:#1E9E6A}
     .due{color:#5B6573;text-align:right;white-space:nowrap;font-size:12px}
+    .shot{display:inline-block;width:48%;margin:0 1% 8px 0;vertical-align:top}
+    .shot img{width:100%;height:210px;object-fit:cover;border-radius:8px}
+    ${LOGO_CSS}
+    ${PAGE_CSS}
   </style></head>
   <body>
     <div class="head">
-      <div><div class="brand">${escapeHtml(c.name)}</div><div class="muted">${escapeHtml(c.license || '')}</div></div>
+      <div class="co">${logoImg(c.logo)}<div><div class="brand">${escapeHtml(c.name)}</div><div class="muted">${escapeHtml(c.license || '')}</div></div></div>
       <div style="text-align:right"><div class="lab">${escapeHtml(d.docLabel)}</div><div class="num">${escapeHtml(d.number || '')}</div></div>
     </div>
     <div class="parties">
@@ -214,17 +255,6 @@ function buildHtml(d: SendData): string {
       <div><div class="lab">Bill to</div><div class="name">${escapeHtml(cl?.name || '')}</div><div class="muted">${escapeHtml(cl?.addr || '')}<br>${escapeHtml(cl?.city || '')}<br>${escapeHtml(cl?.email || '')}</div></div>
       ${d.jobSite ? `<div><div class="lab">Job site</div><div class="muted" style="margin-top:5px">${escapeHtml(d.jobSite)}</div></div>` : ''}
     </div>
-    ${
-      d.photos?.length
-        ? `<div class="lab" style="margin-top:22px">Job photos</div>
-    <div style="margin-top:8px">${d.photos
-      .slice(0, DOC_PHOTO_CAP)
-      // a data URI is OUR bytes (base64 alphabet, nothing to escape) — running the 5-pass escape
-      // over a ~600KB string per photo is pure copying right before the print
-      .map((u) => `<div style="display:inline-block;width:48%;margin:0 1% 8px 0;vertical-align:top;page-break-inside:avoid"><img src="${u.startsWith('data:') ? u : escapeHtml(u)}" style="width:100%;height:220px;object-fit:cover;border-radius:8px"/></div>`)
-      .join('')}</div>`
-        : ''
-    }
     <table>${rows}</table>
     ${
       d.payment
@@ -259,6 +289,21 @@ function buildHtml(d: SendData): string {
     <div style="white-space:pre-wrap;font-size:12.5px;line-height:1.55;margin-top:6px">${escapeHtml(d.customerNote)}</div>`
         : ''
     }
+    ${
+      // G-8: the photos moved from ABOVE the line items to the end of the document. Six 220px
+      // tiles right under the header ate page 1 whole and pushed the item table into the page
+      // break — the client opened the quote and saw pictures, not the price. Money first, photos
+      // as the closing evidence.
+      d.photos?.length
+        ? `<div class="lab" style="margin-top:26px">Job photos</div>
+    <div style="margin-top:8px">${d.photos
+      .slice(0, DOC_PHOTO_CAP)
+      // a data URI is OUR bytes (base64 alphabet, nothing to escape) — running the 5-pass escape
+      // over a ~600KB string per photo is pure copying right before the print
+      .map((u) => `<div class="shot"><img src="${u.startsWith('data:') ? u : escapeHtml(u)}"/></div>`)
+      .join('')}</div>`
+        : ''
+    }
     <div class="foot">Thank you for your business.</div>
   </body></html>`;
 }
@@ -266,7 +311,7 @@ function buildHtml(d: SendData): string {
 function buildText(d: SendData): string {
   if (d.kind === 'receipt' && d.receipt) {
     const r = d.receipt;
-    return `Receipt ${r.number} — ${d.company.name}\n${d.client?.name ? `For: ${d.client.name}\n` : ''}\nAmount received: ${fmt(r.amount)}\nDate: ${dueTxt(r.date)}${r.method ? `\nMethod: ${r.method}` : ''}${r.invoiceNumber ? `\nInvoice: ${r.invoiceNumber}` : ''}\n${r.balanceAfter > 0.005 ? `Remaining balance: ${fmt(r.balanceAfter)}` : 'Paid in full'}\n\nThank you for your payment.`;
+    return `Receipt ${r.number} — ${d.company.name}\n${d.client?.name ? `For: ${d.client.name}\n` : ''}\nAmount received: ${fmt(r.amount)}\nDate: ${dueTxt(r.date)}${r.method ? `\nMethod: ${r.method}` : ''}${r.reference ? `\nReference: ${r.reference}` : ''}${r.invoiceNumber ? `\nInvoice: ${r.invoiceNumber}` : ''}\n${r.balanceAfter > 0.005 ? `Remaining balance: ${fmt(r.balanceAfter)}` : 'Paid in full'}\n\nThank you for your payment.`;
   }
   const lines = d.items.map((it) => `• ${it.desc} — ${fmt(it.qty * it.price)}`).join('\n');
   const pay = d.payment
@@ -298,8 +343,10 @@ export async function sendDoc(option: string, d: SendData) {
       if (phone) await Linking.openURL(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`);
       else await Share.share({ message: text });
     } else {
-      // Save PDF — the photos are inlined first (see toDataUri) so the renderer never races them
-      const doc = d.photos?.length ? { ...d, photos: await inlinePhotos(d.photos) } : d;
+      // Save PDF — photos AND the company logo are inlined first (see toDataUri) so the renderer
+      // never races them. Both run together: the logo is one small file next to up to 6 photos.
+      const [photos, logo] = await Promise.all([d.photos?.length ? inlinePhotos(d.photos) : Promise.resolve(null), inlineLogo(d.company.logo)]);
+      const doc: SendData = { ...d, company: { ...d.company, logo }, ...(photos ? { photos } : {}) };
       const { uri } = await Print.printToFileAsync({ html: buildHtml(doc) });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: `${d.docLabel} ${d.number || ''}` });
       else Alert.alert(translate('send.pdfSaved'), uri);

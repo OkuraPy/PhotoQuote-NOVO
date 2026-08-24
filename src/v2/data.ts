@@ -131,7 +131,9 @@ export type PaymentMode = 'full' | 'deposit' | 'installments';
 // null = due upon completion. label is stored in ENGLISH (documents; the UI translates its own).
 export type ScheduleRow = { id?: string; label: string; amount: number; dueDate: string | null; phaseId?: string | null; sort: number };
 // One received payment (invoice_payments ledger row).
-export type PaymentRecord = { id: string; amount: number; paidAt: string; method: string | null; scheduleId: string | null };
+// `note` (G-6) is the client-facing reference the owner types when recording the payment —
+// "Check #1234 · Chase". It prints on the receipt, so it is never a private remark.
+export type PaymentRecord = { id: string; amount: number; paidAt: string; method: string | null; scheduleId: string | null; note: string | null };
 // What the contractor picked in the payment-plan sheet (and what a stored invoice re-hydrates into).
 export type PaymentPlan = {
   mode: PaymentMode;

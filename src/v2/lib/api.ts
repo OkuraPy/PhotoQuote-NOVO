@@ -549,10 +549,13 @@ export async function updateInvoicePlan(userId: string, invoiceId: string, plan:
 export async function recordInvoicePayment(
   userId: string,
   invoiceId: string,
-  p: { amount: number; paidAt?: string; method?: string | null; scheduleId?: string | null }
+  p: { amount: number; paidAt?: string; method?: string | null; scheduleId?: string | null; note?: string | null }
 ): Promise<{ id: string }> {
   const amount = round2(p.amount);
   if (!(amount > 0)) throw new Error('Enter an amount greater than zero.');
+  // G-6: the reference prints on the receipt. Trim + cap at the DB's 120 (a paste of a whole
+  // email would otherwise come back as a CHECK violation the owner cannot act on).
+  const note = (p.note || '').trim().slice(0, 120) || null;
   const [{ data: inv, error: iErr }, { count }] = await Promise.all([
     supabase.from('invoices').select('status, total').eq('id', invoiceId).maybeSingle(),
     supabase.from('invoice_payments').select('id', { count: 'exact', head: true }).eq('invoice_id', invoiceId),
@@ -570,6 +573,7 @@ export async function recordInvoicePayment(
       paid_at: p.paidAt || toDateOnly(new Date()),
       method: p.method || null,
       schedule_id: p.scheduleId || null,
+      note,
     })
     .select('id')
     .single();
@@ -1222,12 +1226,12 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
       supabase.from('invoice_schedule').select('id, label, amount, due_date, phase_id, sort').eq('invoice_id', inv.id).order('sort', { ascending: true }),
       // created_at tiebreaker: paid_at is date-only, and same-day payments must keep a stable
       // order so a re-issued receipt always shows the same running balance
-      supabase.from('invoice_payments').select('id, amount, paid_at, method, schedule_id').eq('invoice_id', inv.id).order('paid_at', { ascending: true }).order('created_at', { ascending: true }),
+      supabase.from('invoice_payments').select('id, amount, paid_at, method, schedule_id, note').eq('invoice_id', inv.id).order('paid_at', { ascending: true }).order('created_at', { ascending: true }),
     ]);
     if (schRes.error) throw schRes.error;
     if (payRes.error) throw payRes.error;
     schedule = (schRes.data || []).map((r: any) => ({ id: r.id, label: r.label || '', amount: Number(r.amount) || 0, dueDate: r.due_date ?? null, phaseId: r.phase_id ?? null, sort: r.sort ?? 0 }));
-    payments = (payRes.data || []).map((r: any) => ({ id: r.id, amount: Number(r.amount) || 0, paidAt: r.paid_at, method: r.method ?? null, scheduleId: r.schedule_id ?? null }));
+    payments = (payRes.data || []).map((r: any) => ({ id: r.id, amount: Number(r.amount) || 0, paidAt: r.paid_at, method: r.method ?? null, scheduleId: r.schedule_id ?? null, note: r.note ?? null }));
   }
 
   const agrRes = await supabase

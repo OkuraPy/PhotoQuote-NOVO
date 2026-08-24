@@ -4,6 +4,45 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-08-24 18:05] — feat: ONDA G / onda 2 — referência no pagamento e no recibo, logo + paginação no PDF, baixar fotos no portal
+- **O que mudou**: os 3 itens médios da lista do Gladson (`docs/FEEDBACK_GLADSON_2026-07-31.md`).
+  - **G-6 referência do pagamento** ("quando o cara paga em cheque a gente coloca o número do
+    cheque, e o nome do banco… seria bom sair no recibo"): campo opcional "Reference (check #,
+    bank)" no Record payment, gravado no pagamento, mostrado na lista de recebidos e impresso no
+    recibo (PDF e texto). Reemitir o recibo de um pagamento antigo leva a referência gravada.
+  - **G-8 logo + paginação do PDF**: o logo que o dono sobe no perfil existia no banco e não era
+    impresso em NENHUM documento — agora vai no cabeçalho do orçamento, da fatura e do recibo.
+    Paginação: `break-inside: avoid` nas linhas de item, nos totais e nos blocos de foto, e
+    `break-after: avoid` nos títulos de seção (um item era cortado no meio pela quebra de página).
+    E as fotos **saíram de cima e foram pro fim do documento**: seis fotos de 220px logo abaixo do
+    cabeçalho comiam a primeira página inteira e empurravam a tabela de itens pra quebra — o
+    cliente abria o orçamento e via fotos, não o preço.
+  - **G-7 baixar as fotos no portal**: botão "Download all photos (N)" no topo da tela do cliente
+    e "Download these photos" dentro de cada fase. Zip montado NO NAVEGADOR (jszip carregado sob
+    demanda), com contador "Preparing 7 of 30…"; os arquivos saem numerados e nomeados pela fase.
+- **Arquivos**: app — `src/v2/lib/api.ts`, `src/v2/lib/send.ts`, `src/v2/screens/Job.tsx`,
+  `src/v2/data.ts`, `supabase/migrations/20260824010000_payment_note_reference.sql`; portal —
+  `src/components/DownloadPhotos.tsx` (novo), `src/components/PhaseCard.tsx`,
+  `src/app/p/[token]/page.tsx`, `package.json` (jszip).
+- **Decisão técnica (banco)**: `invoice_payments` JÁ tinha uma coluna `note` criada com a tabela e
+  nunca usada (0 de 23 linhas em produção; nem o v1 escrevia nela). Em vez de criar uma segunda
+  coluna de texto livre do lado de uma vazia, a migration dá sentido à que existe: comentário +
+  CHECK de 120 caracteres. (Cheguei a aplicar em produção uma primeira versão que criava
+  `reference`; a corretiva no mesmo minuto dropou a coluna e ficou só o `note`. O arquivo no repo
+  reflete o estado final — prod tem os dois registros no schema_migrations.)
+- **Decisão técnica (zip)**: montar no navegador e não numa rota serverless. As fotos estão em
+  bucket público com `access-control-allow-origin: *` (conferido por curl), então o navegador
+  busca direto; pela Vercel, os bytes passariam por uma function com teto de 4,5MB de resposta.
+  Compressão STORE — JPEG já vem comprimido, deflate só gastaria CPU.
+- **Fora de escopo, de propósito**: o CONTRATO continua sem logo. O sanitizador do portal proíbe
+  `<img>` de propósito desde a Onda C (garantia de "o que o cliente assina é o que ele vê") e
+  afrouxar isso por um logo seria trocar segurança por enfeite. Se o dono quiser, dá pra pôr o
+  logo no cabeçalho DA PÁGINA (fora do HTML assinado) — muda a RPC, fica pra depois.
+- **Gates**: app tsc limpo, jest 108/108, `expo export ios` OK (3,24 MB Hermes); portal tsc limpo,
+  `next build` OK, eslint sem erros novos (os 6 warnings são pré-existentes).
+
+---
+
 ### [2026-08-24 16:10] — feat: ONDA G / onda 1 — abrir portal e contrato pelo app, progresso do upload de fotos, pagamento parcial visível
 - **O que mudou**: primeira das 3 ondas do feedback de uso real do Gladson (8 áudios de 30-31/07,
   repassados pelo dono em 24/08 e catalogados em `docs/FEEDBACK_GLADSON_2026-07-31.md`). Os 4 itens
