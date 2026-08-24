@@ -40,6 +40,21 @@ Registro por commit (Regra #0). Mais recente no topo.
   logo no cabeçalho DA PÁGINA (fora do HTML assinado) — muda a RPC, fica pra depois.
 - **Gates**: app tsc limpo, jest 108/108, `expo export ios` OK (3,24 MB Hermes); portal tsc limpo,
   `next build` OK, eslint sem erros novos (os 6 warnings são pré-existentes).
+- **Revisão ponto a ponto (dono: "revisa tudo, isso vai pra produção")** — 1 bug REAL meu, achado e
+  corrigido antes de qualquer teste no device: o arquivo temporário do download era
+  `pqimg_<Date.now()>_<índice>`, e isso parou de ser único no instante em que o LOGO passou a
+  baixar EM PARALELO com as fotos — os dois começam no mesmo milissegundo e o índice 0 do logo
+  colide com a foto 0, dois downloads escrevendo o mesmo arquivo de cache. Virou um contador
+  monotônico (`tmpSeq`), que não colide consigo mesmo; o parâmetro `i`, agora morto, saiu.
+  Conferido também: (a) `note` tem os MESMOS grants de coluna que `amount`/`method` para
+  `authenticated` (INSERT/SELECT/UPDATE) — o pega-ratão de coluna nova sem GRANT não se aplica;
+  (b) o `Sheet` já vive dentro de um `KeyboardAvoidingView`, então o campo de texto novo não fica
+  atrás do teclado; (c) a referência passa pelo `escapeHtml` do recibo; (d) o botão de download da
+  fase NÃO fica aninhado dentro do `<button>` do cabeçalho da fase (HTML inválido/clique morto).
+- **Provado em produção** (transação com ROLLBACK, zero dado real tocado): pagamento com
+  `note = 'Check #1234 · Chase Bank'` grava e volta inteiro; com 121 caracteres o banco recusa
+  (23514) — que é exatamente o motivo do `.slice(0, 120)` no `recordInvoicePayment`, senão o dono
+  levaria um erro cru na cara. Contagem depois do teste: 23 pagamentos, 0 sobras.
 
 ---
 

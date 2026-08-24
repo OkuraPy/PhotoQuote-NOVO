@@ -46,10 +46,15 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
     );
   });
 }
+// Cache-file counter, monotonic and process-wide. The name used to be `pqimg_<Date.now()>_<index>`,
+// which stopped being unique the moment the LOGO started downloading alongside the photos (G-8):
+// both start inside the same millisecond and the logo's index 0 collides with photo 0 — two
+// concurrent downloads writing the same file. A counter cannot collide with itself.
+let tmpSeq = 0;
 // maxWidth = null skips the resize entirely: the company logo (G-8) is small AND often a PNG with
 // a transparent background, and the manipulator's JPEG re-encode would paint that transparency
 // black right in the document header.
-async function toDataUri(url: string, i: number, maxWidth: number | null = 900): Promise<string> {
+async function toDataUri(url: string, maxWidth: number | null = 900): Promise<string> {
   // the whole body is guarded: ANY throw here would reject the Promise.all and cost the user the
   // entire PDF, which is worse than the missing photo we're fixing
   try {
@@ -59,7 +64,7 @@ async function toDataUri(url: string, i: number, maxWidth: number | null = 900):
     let tmp: { uri: string; base64: () => Promise<string>; delete: () => void } | null = null;
     try {
       // unique destination name: two jobs can hold photos with the same file name
-      tmp = await withTimeout(File.downloadFileAsync(url, new File(Paths.cache, `pqimg_${Date.now()}_${i}.jpg`)), PHOTO_TIMEOUT);
+      tmp = await withTimeout(File.downloadFileAsync(url, new File(Paths.cache, `pqimg_${Date.now()}_${tmpSeq++}.jpg`)), PHOTO_TIMEOUT);
       // resize the LOCAL file (never the remote url — on iOS the manipulator only reads local
       // paths). The page prints each photo at ~500px, so shipping the 1-2MB original would only
       // bloat the HTML the print WebView has to swallow.
@@ -91,14 +96,14 @@ async function toDataUri(url: string, i: number, maxWidth: number | null = 900):
 }
 // a null/garbage entry in doc_photo_urls must not blow up the document
 const inlinePhotos = (urls: string[]) =>
-  Promise.all(urls.filter((u) => typeof u === 'string' && !!u).slice(0, DOC_PHOTO_CAP).map((u, i) => toDataUri(u, i)));
+  Promise.all(urls.filter((u) => typeof u === 'string' && !!u).slice(0, DOC_PHOTO_CAP).map((u) => toDataUri(u)));
 
 // G-8: the logo only goes on the page if it came back as REAL bytes. toDataUri falls back to the
 // remote url when the download fails, and a remote <img> in expo-print prints as a broken-image
 // box — on the company header, that is worse than no logo at all.
 async function inlineLogo(url?: string | null): Promise<string | null> {
   if (!url || typeof url !== 'string') return null;
-  const inlined = await toDataUri(url, 0, null);
+  const inlined = await toDataUri(url, null);
   return inlined.startsWith('data:') ? inlined : null;
 }
 
