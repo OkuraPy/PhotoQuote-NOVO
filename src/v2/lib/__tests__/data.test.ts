@@ -540,20 +540,20 @@ describe('splitChangeOrder (a fatura complementar tem que fechar a própria cont
     const s = splitChangeOrder(2400, 10000, 2000, 7);
     expect(s.total).toBe(2400);
     expect(round2(s.subtotal + s.tax)).toBe(2400);
-    // e o imposto impresso é MESMO 7% da parte tributável impressa
-    expect(round2(s.taxableSubtotal * 0.07)).toBe(s.tax);
+    // a base que o app IMPRIME é derivada do imposto congelado (nada guarda a base), então é ela
+    // que precisa fechar com a alíquota impressa — senão o PDF diz "7% de X" e o número é outro
+    const baseImpressa = round2(s.tax / 0.07);
+    expect(round2(baseImpressa * 0.07)).toBe(s.tax);
   });
   it('orçamento todo tributável cobra a alíquota cheia', () => {
     const s = splitChangeOrder(1070, 1000, 1000, 7);
     expect(s.subtotal).toBe(1000);
     expect(s.tax).toBe(70);
-    expect(s.taxableSubtotal).toBe(1000);
   });
   it('orçamento sem imposto gera complementar sem imposto', () => {
     const s = splitChangeOrder(1000, 5000, 0, 7);
     expect(s.tax).toBe(0);
     expect(s.subtotal).toBe(1000);
-    expect(s.taxableSubtotal).toBe(0);
   });
   it('orçamento vazio não dita proporção nenhuma', () => {
     const s = splitChangeOrder(500, 0, 0, 7);

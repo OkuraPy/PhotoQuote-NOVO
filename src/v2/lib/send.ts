@@ -121,7 +121,9 @@ export type SendData = {
   photos?: string[]; // curated job photos printed on the quote PDF (G2, max 6 — public URLs)
   items: { cat: string; desc: string; qty: number; unit: string; price: number; taxable: boolean }[];
   // G-1: `discount` is the client-facing reduction in dollars (0 = no discount line is printed)
-  totals: { subtotal: number; tax: number; total: number; taxRate: number; discount?: number };
+  // `taxableSubtotal` só é impresso quando NÃO é o subtotal inteiro — é o que explica um imposto
+  // que, sozinho, parece não bater com a alíquota (itens isentos, ou uma fatura complementar)
+  totals: { subtotal: number; tax: number; total: number; taxRate: number; discount?: number; taxableSubtotal?: number };
   // invoice payment plan + ledger (labels/dates already English — planRows/DB method keys)
   payment?: {
     rows: { label: string; amount: number; due: string | null }[];
@@ -281,7 +283,7 @@ function buildHtml(d: SendData): string {
     <div class="tot">
       <div class="row"><span>Subtotal</span><b>${fmt(d.totals.subtotal)}</b></div>
       ${d.totals.discount && d.totals.discount > 0 ? `<div class="row"><span>Discount</span><b class="ok">-${fmt(d.totals.discount)}</b></div>` : ''}
-      <div class="row"><span>Tax (${escapeHtml(d.totals.taxRate)}%)</span><b>${fmt(d.totals.tax)}</b></div>
+      <div class="row"><span>Tax (${escapeHtml(d.totals.taxRate)}%${d.totals.taxableSubtotal != null && d.totals.taxableSubtotal < d.totals.subtotal - 0.005 ? ` on ${fmt(d.totals.taxableSubtotal)}` : ''})</span><b>${fmt(d.totals.tax)}</b></div>
       <div class="grand"><span>Total</span><span>${fmt(d.totals.total)}</span></div>
       ${
         d.payment

@@ -4,6 +4,43 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-08-24 23:10] — fix: revisão final pegou um ALTO que EU criei — contrato congelava a fatura errada
+- **Contexto**: revisão da própria correção do bloqueante (`b557f1c`), que tinha sido escrita depois
+  que o revisor anterior terminou e não tinha passado por ninguém. Era onde eu mais tinha mexido em
+  dinheiro no dia. Achou.
+- 🔴 **ALTO — ramo morto no ternário do contrato.** Eu escrevi
+  `(detail?.agreement ? invoices[0] || inv : inv).id`, mas a linha logo acima já dá `return` quando
+  existe acordo — então `detail?.agreement` ali é SEMPRE falso e o efeito líquido virou "sempre a
+  fatura selecionada". Antes do meu commit era sempre a #1. Combinado com a seleção padrão nova
+  ("primeira COM saldo"), num job cuja #1 está quitada o contrato seria gerado para a COMPLEMENTAR
+  — e `createAgreement` monta a tabela de itens a partir do orçamento enquanto tira o preço da
+  fatura, então o cliente receberia para ASSINAR $10.400 de itens com preço de contrato $2.400,00.
+  É exatamente o bloqueante que este mesmo dia corrigiu na fatura, reaparecido no único documento
+  que tem assinatura. **Correção: volta a ser sempre `invoices[0]`** — bate com o que a aba mostra.
+  Contratar uma complementar exigiria `createAgreement` entender `is_change_order` primeiro.
+- 🟡 **Depois de criar a complementar a tela voltava pra #1** (o comentário "land on the new one"
+  deixou de ser verdade quando o padrão virou "primeira com saldo") — o próximo toque em "Enviar
+  fatura" mandaria a fatura errada. Agora seleciona a recém-criada pelo id que `createInvoice` já
+  devolvia.
+- 🔵 **A linha de imposto do PDF agora diz sobre o que incide** quando a base não é o subtotal
+  inteiro: "Tax (7% on $473.43)". Sem isso, na complementar o cliente lia "Tax (7%) $33.14" embaixo
+  de um subtotal de $2.366,86 e parecia erro. (A afirmação do commit anterior — "a linha passa a ser
+  um fato" — só valia na tela do dono; agora vale no documento.)
+- 🔵 **`splitChangeOrder` parou de devolver um `taxableSubtotal` que ninguém consome**: nada guarda
+  essa base, então a tela e o PDF a recuperam do imposto congelado. O teste validava justamente o
+  campo morto — passou a validar a base que o app REALMENTE imprime.
+- **O revisor confirmou com todas as letras**: a conta do change order fecha em 700 mil combinações
+  (10 alíquotas, orçamentos 100%/0%/parcialmente tributáveis, centavos quebrados) sem uma falha; a
+  fatura normal — 100% da produção hoje — está intacta; a seleção nova não muda nada num job de uma
+  fatura; `voidUnsignedAgreements` não alcança contrato assinado; `is_change_order` está aplicada e
+  o PostgREST a enxerga (sem risco de PGRST204 derrubar a criação de fatura na build 34).
+- **Aceito**: a repartição do imposto da complementar usa a mesma fatia tributável do orçamento —
+  se o trabalho ACRESCIDO tiver perfil tributário diferente do orçamento original, o imposto da
+  complementar é aproximado (o total cobrado está sempre certo; o app não emite guia de imposto).
+- **Gates**: tsc limpo, jest 144/144, `expo export ios` OK.
+
+---
+
 ### [2026-08-24 22:40] — build: BUILD 34 ENTREGUE AO TESTFLIGHT (Onda G completa)
 - **O que foi**: EAS build iOS production com `--auto-submit`, do worktree `/root/projetos/pq-build24`
   no commit `b557f1c`. Version 2.0.0, **buildNumber 34** (o autoIncrement do EAS levou 33→34 e

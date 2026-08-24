@@ -352,7 +352,10 @@ export function splitChangeOrder(amount: number, quoteSubtotal: number, quoteTax
   const rate = Math.max(0, Number(taxRate) || 0) / 100;
   const subtotal = round2(amt / (1 + share * rate));
   const tax = round2(amt - subtotal);
-  return { subtotal, taxableSubtotal: round2(subtotal * share), tax, total: amt };
+  // NOTE: the taxable slice is not returned on purpose. Nothing stores it, so the screen and the
+  // PDF recover it from the frozen tax (`tax / rate`) — returning a second, slightly different
+  // number here would only invite someone to test the one that never ships.
+  return { subtotal, tax, total: amt };
 }
 
 // Resize the installments editor's draft rows to `n` WITHOUT re-splitting rows the user already

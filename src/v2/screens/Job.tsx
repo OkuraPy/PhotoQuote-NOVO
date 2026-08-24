@@ -733,8 +733,11 @@ export function JobScreen({ go, back, params }: NavProp) {
         // the extra invoice bills an AMOUNT broken down at the quote's real tax rate, so its own
         // document adds up line by line (subtotal + tax on the taxable slice = amount)
         const split = splitChangeOrder(extraToInvoice, quoteTotals.subtotal, quoteTotals.taxableSubtotal, quoteTotals.taxRate);
-        ({ downgraded } = await createInvoice(ownerId, est.id, projectId, plan, { subtotal: split.subtotal, tax: split.tax, total: split.total }));
-        setInvSel(null); // land on the new one (it becomes the newest)
+        const created = await createInvoice(ownerId, est.id, projectId, plan, { subtotal: split.subtotal, tax: split.tax, total: split.total });
+        downgraded = created.downgraded;
+        // select the invoice that was just created: the default ("first one still owing") would
+        // land back on #1, and the very next tap — Send invoice / PDF — would send the wrong one
+        setInvSel(created.id);
       } else if (est?.id && projectId) ({ downgraded } = await createInvoice(ownerId, est.id, projectId, plan));
       else return;
       await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
@@ -877,10 +880,17 @@ export function JobScreen({ go, back, params }: NavProp) {
     // message (createAgreement would otherwise throw its English string into a pt/es alert; L2)
     if (!realClient) { Alert.alert(t('job.alert.clientNeeded'), t('job.alert.clientNeededBody')); return; }
     if (!ownerId || !projectId) return;
-    // D6: an EXISTING agreement stays with invoice #1 — a change order does not reopen a signed
-    // contract. But a contract generated for the first time on a job that already has two invoices
-    // must cover the one on screen (the owner picked it with the chip), not silently the oldest.
-    const [uid, pid, invId] = [ownerId, projectId, (detail?.agreement ? invoices[0] || inv : inv).id];
+    // D6: the contract ALWAYS freezes invoice #1 — the original agreement.
+    //
+    // My previous attempt here read `detail?.agreement ? invoices[0] : inv`, which is a dead branch:
+    // line 874 already returned when an agreement exists, so it collapsed to "always the selected
+    // invoice". With the default selection landing on the first invoice that still owes money, a
+    // job whose #1 was paid would generate a contract for the CHANGE ORDER — and `createAgreement`
+    // builds the item table from the estimate's line_items while taking the price from the invoice,
+    // so the client would be asked to sign $10,400 of work at a contract price of $2,400. That is
+    // the exact bug this wave fixed on the invoice, in the one document that gets signed.
+    // Contracting a change order needs createAgreement to understand is_change_order first.
+    const [uid, pid, invId] = [ownerId, projectId, (invoices[0] || inv).id];
     // company guard before GENERATING: createAgreement freezes the company name into the contract HTML
     requireCompany(async () => {
       setGenningContract(true);
