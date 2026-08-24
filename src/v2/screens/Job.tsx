@@ -1856,8 +1856,10 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName, jobPhot
   const [busy, setBusy] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [opening, setOpening] = useState(false); // G-3: minting the token before opening the portal
-  // G-2: which phase is uploading and how far it got — the upload used to be a silent 20-30s
-  const [upload, setUpload] = useState<{ phaseId: string; done: number; total: number } | null>(null);
+  // G-2: how far each phase's upload got — the upload used to be a silent 20-30s. Keyed BY PHASE
+  // (not one global slot): the owner shoots one phase, starts the next while the first is still
+  // going, and a dead "Add photos" button with no explanation is the very complaint being fixed.
+  const [uploads, setUploads] = useState<Record<string, { done: number; total: number }>>({});
   const [cmPhaseId, setCmPhaseId] = useState<string | null>(null);
   const [cmText, setCmText] = useState('');
   const [cmBusy, setCmBusy] = useState(false);
@@ -1958,14 +1960,14 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName, jobPhot
   // add photos to a phase — the owner asked to be able to shoot on the spot OR pick from the gallery
   const uploadAssets = async (p: ProgressPhase, assets: { uri: string }[]) => {
     if (!userId || !assets.length) return;
-    setUpload({ phaseId: p.id, done: 0, total: assets.length });
+    setUploads((u) => ({ ...u, [p.id]: { done: 0, total: assets.length } }));
     try {
       const { added, failed } = await addPhasePhotos(
         userId,
         projectId,
         p.id,
         assets.map((a) => ({ uri: a.uri })),
-        (done, total) => setUpload({ phaseId: p.id, done, total })
+        (done, total) => setUploads((u) => (u[p.id] ? { ...u, [p.id]: { done, total } } : u))
       );
       refresh();
       // same rule as the quote album: a photo that didn't make it is said, never swallowed
@@ -1974,11 +1976,11 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName, jobPhot
     } catch (e: any) {
       Alert.alert(t('job.alert.couldNotAddPhotos'), e?.message || t('job.alert.tryAgain'));
     } finally {
-      setUpload(null);
+      setUploads(({ [p.id]: _done, ...rest }) => rest);
     }
   };
   const addPhotos = (p: ProgressPhase) => {
-    if (!userId || upload) return; // one phase uploading at a time — the counter is single-slot
+    if (!userId || uploads[p.id]) return; // this phase is already uploading
     askPhotoSource(t, (mode) => {
       void (async () => {
         const assets = await choosePhotos(t, mode);
@@ -2115,7 +2117,7 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName, jobPhot
         <View style={{ gap: 12 }}>
           {phases.map((p, i) => {
             const [c, bg, labKey] = PHASE_STAT[p.status];
-            const upPhase = upload && upload.phaseId === p.id ? upload : null;
+            const upPhase = uploads[p.id] || null;
             return (
               <Card key={p.id} pad>
                 <Between>
@@ -2161,7 +2163,7 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName, jobPhot
                   icon={upPhase ? undefined : 'camera'}
                   // G-2: the button IS the progress read-out while photos are in flight
                   title={upPhase ? t('job.uploadingCount', { done: upPhase.done, total: upPhase.total }) : p.photos.length ? t('job.addMorePhotos') : t('job.addProgressPhotos')}
-                  disabled={!!upload}
+                  disabled={!!upPhase}
                   onPress={() => addPhotos(p)}
                   style={{ marginTop: 12 }}
                 />

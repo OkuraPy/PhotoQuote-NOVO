@@ -37,7 +37,18 @@ Registro por commit (Regra #0). Mais recente no topo.
   compartilhado com a Home, o portal e o Timeline; parcial é um eixo de dinheiro, então virou um
   flag ortogonal, do mesmo jeito que `closed` (lost/archived) já é.
 - **Bug corrigido**: pagamento parcial invisível fora da aba Fatura (queixa direta do Gladson).
-- **Gates**: tsc limpo, jest 108/108.
+- **Gates**: tsc limpo, jest 108/108, bundle de produção do Metro exportado sem erro (3,23 MB Hermes).
+- **Revisão ponto a ponto (pedido do dono, "isso é produção")**: 1 achado meu corrigido antes do
+  fim — o contador de upload era um slot ÚNICO e travava o "Add photos" de TODAS as fases enquanto
+  uma subia (botão morto sem explicação = a mesma classe de queixa que a onda conserta). Agora o
+  estado é `Record<phaseId, {done,total}>`: cada fase mostra o seu progresso e as outras continuam
+  clicáveis. Verificado também: field member não vê o chip parcial (`showStage`/RLS), overpay não
+  vira parcial (`invoiceBalance` clampa em 0), fatura legada 'Paid' sem ledger não vira parcial
+  (`amountPaid` = total), contrato anulado não oferece o botão de abrir (o fetch ignora void), e o
+  `recordInvoicePayment` já invalida `jobDetail`+`jobs` (o parcial aparece na hora).
+- **Ressalva conhecida**: "Ver como cliente" chama `ensureShareToken`, que CRIA o token e carimba
+  `activated_at` (a data de início que o portal mostra) se ainda não existir. Era o mesmo efeito de
+  tocar em "Link do cliente", só que agora dá pra disparar sem compartilhar. Aceito.
 
 ### [2026-07-28 07:20] — fix: REVISÃO ADVERSARIAL da Onda F (4 revisores) — 17 achados corrigidos antes do build 33
 - **O que mudou**: o dono pediu "revisa tudo que vc fez" antes de mandar pra Apple. 4 revisores
