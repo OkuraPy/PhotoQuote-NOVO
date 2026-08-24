@@ -1621,9 +1621,14 @@ export async function deletePhasePhoto(photoId: string, fileUrl?: string | null)
 
 export const progressLink = (token: string) => `${PORTAL_URL}/p/${token}`;
 
-// Returns the project's active client-progress token, creating one (and stamping activated_at,
-// which the portal uses as the start date) on first use.
-export async function ensureShareToken(userId: string, projectId: string): Promise<string> {
+// Returns the project's active client-progress token, minting one on first use.
+//
+// `activate` is what starts the CLIENT's clock: projects.activated_at is the "Start" date the
+// portal prints, so it is stamped when the link actually goes to the client (share) — not when
+// the owner merely previews his own job (G-3). The stamp is idempotent (only lands on a NULL),
+// and it now runs on the share path even when the token already existed: a job previewed first
+// and shared later still gets a real start date instead of staying blank forever.
+export async function ensureShareToken(userId: string, projectId: string, activate = true): Promise<string> {
   const { data: existing } = await supabase
     .from('project_share_tokens')
     .select('token')
@@ -1632,11 +1637,15 @@ export async function ensureShareToken(userId: string, projectId: string): Promi
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (existing?.token) return existing.token;
-  const token = Crypto.randomUUID().replace(/-/g, ''); // 32 hex chars
-  const { error } = await supabase.from('project_share_tokens').insert({ project_id: projectId, user_id: userId, token, is_active: true });
-  if (error) throw error;
-  await supabase.from('projects').update({ activated_at: new Date().toISOString() }).eq('id', projectId).is('activated_at', null);
+  let token = existing?.token as string | undefined;
+  if (!token) {
+    token = Crypto.randomUUID().replace(/-/g, ''); // 32 hex chars
+    const { error } = await supabase.from('project_share_tokens').insert({ project_id: projectId, user_id: userId, token, is_active: true });
+    if (error) throw error;
+  }
+  if (activate) {
+    await supabase.from('projects').update({ activated_at: new Date().toISOString() }).eq('id', projectId).is('activated_at', null);
+  }
   return token;
 }
 

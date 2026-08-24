@@ -46,9 +46,13 @@ Registro por commit (Regra #0). Mais recente no topo.
   vira parcial (`invoiceBalance` clampa em 0), fatura legada 'Paid' sem ledger não vira parcial
   (`amountPaid` = total), contrato anulado não oferece o botão de abrir (o fetch ignora void), e o
   `recordInvoicePayment` já invalida `jobDetail`+`jobs` (o parcial aparece na hora).
-- **Ressalva conhecida**: "Ver como cliente" chama `ensureShareToken`, que CRIA o token e carimba
-  `activated_at` (a data de início que o portal mostra) se ainda não existir. Era o mesmo efeito de
-  tocar em "Link do cliente", só que agora dá pra disparar sem compartilhar. Aceito.
+- **Ressalva RESOLVIDA (o dono perguntou "isso é problema? tem jeito melhor?")**: tinha. Espiar o
+  próprio job carimbava `projects.activated_at`, que é a data de "Start" que o PORTAL mostra pro
+  cliente. `ensureShareToken` ganhou o parâmetro `activate` (default true): o preview passa
+  `false` (só cunha o token) e o compartilhar segue carimbando. De brinde, o carimbo saiu de
+  dentro do "criei o token agora" e passou a rodar TAMBÉM quando o token já existe — hoje há 1 job
+  em produção (de 17 com token) com `activated_at` NULL mostrando "—" de data de início pro
+  cliente; no próximo compartilhamento ele se conserta sozinho.
 
 ### [2026-07-28 07:20] — fix: REVISÃO ADVERSARIAL da Onda F (4 revisores) — 17 achados corrigidos antes do build 33
 - **O que mudou**: o dono pediu "revisa tudo que vc fez" antes de mandar pra Apple. 4 revisores

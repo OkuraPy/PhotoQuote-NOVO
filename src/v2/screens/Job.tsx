@@ -2041,12 +2041,14 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName, jobPhot
     }
   };
   // G-3: same token, but opened here instead of shared — "to see the client's screen I have to
-  // send the link to myself on WhatsApp". Minting the token is the same owner-only move as sharing.
+  // send the link to myself on WhatsApp". Minting the token is the same owner-only move as sharing,
+  // but `activate: false` keeps the client's "Start" date out of it: looking at your own job is
+  // not the moment the job started for the client — sharing the link is.
   const openClientView = async () => {
     if (!userId || opening) return;
     setOpening(true);
     try {
-      const token = await ensureShareToken(userId, projectId);
+      const token = await ensureShareToken(userId, projectId, false);
       await openClientPage(t, progressLink(token));
     } catch (e: any) {
       Alert.alert(t('job.alert.couldNotCreateLink'), e?.message || t('job.alert.tryAgain'));
