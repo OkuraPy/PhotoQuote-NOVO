@@ -4,6 +4,47 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-08-24 22:00] — fix: revisão do G-9 (a única parte ainda não revisada) — 1 BLOQUEANTE
+- **Contexto**: antes da build, um revisor atacou só as múltiplas faturas — os dois revisores
+  anteriores tinham começado antes dela existir. Achou um bloqueante que teria ido pro cliente.
+- 🔴 **BLOQUEANTE — a fatura complementar imprimia os itens do orçamento INTEIRO contra um total
+  parcial.** O documento montava `items` (a lista do orçamento) com os `totals` da fatura
+  selecionada. O PDF sairia listando $10.000 de serviço embaixo de "Total $2.400,00", e a linha do
+  imposto mentia duas vezes (alíquota do orçamento com valor proporcional). **Correção**: a fatura
+  complementar agora é MARCADA no banco (`invoices.is_change_order`, migration 20260824030000) e o
+  documento dela imprime UMA linha — "Additional work per change order" — com a conta fechando:
+  subtotal $2.366,86 + imposto $33,14 (7% sobre os $473,37 tributáveis impressos) = $2.400,00,
+  conferido no banco. `splitByTaxShare` virou `splitChangeOrder`, que deriva o subtotal da alíquota
+  REAL (`subtotal = valor / (1 + fatia_tributável × alíquota)`) em vez de fatiar por proporção —
+  assim a linha "Tax (7% on $473.37)" é um fato, não uma proporção disfarçada de alíquota.
+- 🟠 **ALTO — "Pago X de Y" no cabeçalho misturava fontes**: `pago` e `saldo` eram o agregado de
+  todas as faturas, mas o `Y` era o total da fatura SELECIONADA — com uma complementar aberta o
+  cabeçalho dizia "Paid $8,000.00 of $2,400.00". Passou a usar o total agregado.
+- 🟡 **A aba Contract mostrava o plano da fatura selecionada** debaixo do selo verde "Assinado" —
+  ou seja, dizia que o cliente assinou um change order de $2.400 que ele nunca viu. Agora mostra os
+  números da fatura #1, que é a que o contrato congelou.
+- 🟡 **Contrato gerado DEPOIS de já existir uma complementar** cobria só a fatura #1. Agora: acordo
+  já existente segue preso à #1 (regra D6), mas um contrato gerado pela primeira vez congela a
+  fatura que está na tela — a que o dono escolheu no chip.
+- 🟡 **Editar o orçamento deixou de anular contrato não assinado quando havia 2+ faturas** — o
+  `return` antecipado do sync pulava o `voidUnsignedAgreements`, e o link de assinatura antigo
+  continuava válido com escopo velho. O void agora roda ANTES, e sobre todas as faturas do job.
+- 🔵 **Baixos**: job arquivado com orçamento maior ficava mudo (perdia o aviso E o card); a contagem
+  que desliga o auto-sync passou a ser por PROJETO (era por orçamento — um job legado com dois
+  orçamentos manteria o sync ligado); "Record payment" abria zerado quando a fatura mais nova já
+  estava quitada (a seleção padrão agora cai na primeira fatura COM saldo); e o status agregado
+  passou a sair do `invoiceRollup` em vez de um recálculo inline paralelo.
+- **Aceito e dito ao dono**: criar um change order num job 100% pago tira o job de "Recebido" e joga
+  o valor cheio em "Faturado" no painel — é a semântica por-etapa que já existia, e só aparece
+  nesse caso específico.
+- **Revisor confirmou SÃO**: caso de UMA fatura (100% da produção) sem nenhuma regressão, provado
+  contra a fatura real INV-2026-0026 do Gladson; aritmética sem NaN/negativo; desconto não é
+  aplicado duas vezes; `field` não vê nada novo; excluir job com 2 faturas zera as 6 contagens;
+  i18n completo; duplo toque bloqueado; seleção órfã degrada sem quebrar.
+- **Gates**: tsc limpo, jest 144/144, `expo export ios` OK.
+
+---
+
 ### [2026-08-24 21:15] — fix: achados dos 2 revisores em paralelo (pedido do dono) — 1 ALTO de dinheiro corrigido
 - **Contexto**: o dono pediu "deixa um agente em paralelo revisando cada coisinha". Dois revisores
   independentes (dinheiro/banco e app/produto) varreram a Onda G commitada. Veredito dos dois:

@@ -1,4 +1,4 @@
-import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobSiteLine, needsPhaseSync, NO_DISCOUNT, parseMoney, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitByTaxShare, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
+import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobSiteLine, needsPhaseSync, NO_DISCOUNT, parseMoney, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitChangeOrder, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
 import type { ClosedKind, LineItem, SyncPhase } from '../../data';
 import type { Stage } from '../../theme';
 
@@ -534,25 +534,35 @@ describe('uninvoiced (what a complementary invoice starts at)', () => {
   });
 });
 
-describe('splitByTaxShare (the extra invoice carries the quote proportions)', () => {
-  it('keeps the same tax share as the quote', () => {
-    // quote: 10,000 total with 700 of tax → 7% of the total is tax
-    const s = splitByTaxShare(2400, 10000, 700);
-    expect(s.tax).toBe(168);
-    expect(s.subtotal).toBe(2232);
-    expect(s.subtotal + s.tax).toBe(2400);
+describe('splitChangeOrder (a fatura complementar tem que fechar a própria conta)', () => {
+  it('as partes reconstroem o valor e a linha de imposto é verdadeira', () => {
+    // orçamento: subtotal 10.000 (2.000 tributável), imposto 7% → o cliente deve $2.400 a mais
+    const s = splitChangeOrder(2400, 10000, 2000, 7);
+    expect(s.total).toBe(2400);
+    expect(round2(s.subtotal + s.tax)).toBe(2400);
+    // e o imposto impresso é MESMO 7% da parte tributável impressa
+    expect(round2(s.taxableSubtotal * 0.07)).toBe(s.tax);
   });
-  it('a tax-free quote makes a tax-free extra invoice', () => {
-    const s = splitByTaxShare(1000, 5000, 0);
+  it('orçamento todo tributável cobra a alíquota cheia', () => {
+    const s = splitChangeOrder(1070, 1000, 1000, 7);
+    expect(s.subtotal).toBe(1000);
+    expect(s.tax).toBe(70);
+    expect(s.taxableSubtotal).toBe(1000);
+  });
+  it('orçamento sem imposto gera complementar sem imposto', () => {
+    const s = splitChangeOrder(1000, 5000, 0, 7);
     expect(s.tax).toBe(0);
     expect(s.subtotal).toBe(1000);
+    expect(s.taxableSubtotal).toBe(0);
   });
-  it('the parts always add back to the amount, cents included', () => {
-    const s = splitByTaxShare(333.33, 1000, 77.77);
-    expect(round2(s.subtotal + s.tax)).toBe(333.33);
+  it('orçamento vazio não dita proporção nenhuma', () => {
+    const s = splitChangeOrder(500, 0, 0, 7);
+    expect(s.subtotal).toBe(500);
+    expect(s.tax).toBe(0);
   });
-  it('an empty quote cannot dictate a share', () => {
-    expect(splitByTaxShare(500, 0, 0)).toEqual({ subtotal: 500, tax: 0, total: 500 });
+  it('valor zero ou negativo não vira fatura', () => {
+    expect(splitChangeOrder(0, 1000, 1000, 7).total).toBe(0);
+    expect(splitChangeOrder(-5, 1000, 1000, 7).total).toBe(0);
   });
 });
 

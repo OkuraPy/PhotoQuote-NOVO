@@ -339,14 +339,20 @@ export function invoiceRollup(list: InvoiceLike[]) {
 export const uninvoiced = (quoteTotal: number, invoicedTotal: number) =>
   round2(Math.max(0, (Number(quoteTotal) || 0) - (Number(invoicedTotal) || 0)));
 
-// Split a complementary invoice's amount into subtotal + tax keeping the SAME tax proportion the
-// quote carries, so the extra invoice reads like the original instead of a tax-free lump. The two
-// parts always add back up to the amount exactly (the tax absorbs the rounding).
-export function splitByTaxShare(amount: number, quoteTotal: number, quoteTax: number) {
+// Break a change-order amount (what the client owes MORE, tax included) into the same shape a
+// normal invoice has: a pre-tax subtotal, the taxable slice of it, and the tax at the quote's real
+// rate. Derived so the document is arithmetically true line by line —
+//     subtotal + subtotal·share·rate = amount   →   subtotal = amount / (1 + share·rate)
+// where `share` is how much of the quote was taxable. Printing "Tax (7% on $473.37) = $33.14" is
+// then a fact, not a proportion dressed up as a rate. The tax absorbs the rounding cent so the
+// parts always add back to the amount exactly.
+export function splitChangeOrder(amount: number, quoteSubtotal: number, quoteTaxableSubtotal: number, taxRate: number) {
   const amt = round2(Math.max(0, Number(amount) || 0));
-  const share = quoteTotal > 0 ? Math.min(Math.max(0, (Number(quoteTax) || 0) / quoteTotal), 1) : 0;
-  const tax = round2(amt * share);
-  return { subtotal: round2(amt - tax), tax, total: amt };
+  const share = quoteSubtotal > 0 ? Math.min(Math.max(0, (Number(quoteTaxableSubtotal) || 0) / quoteSubtotal), 1) : 0;
+  const rate = Math.max(0, Number(taxRate) || 0) / 100;
+  const subtotal = round2(amt / (1 + share * rate));
+  const tax = round2(amt - subtotal);
+  return { subtotal, taxableSubtotal: round2(subtotal * share), tax, total: amt };
 }
 
 // Resize the installments editor's draft rows to `n` WITHOUT re-splitting rows the user already

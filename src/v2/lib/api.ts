@@ -408,23 +408,28 @@ async function voidUnsignedAgreements(invoiceId: string): Promise<void> {
 
 async function syncInvoiceWithEstimate(estimateId: string): Promise<void> {
   try {
+    const { data: invRows } = await supabase
+      .from('invoices')
+      .select('id, status, total, deposit_percent, project_id, created_at')
+      .eq('estimate_id', estimateId)
+      .order('created_at', { ascending: false });
+    const inv = invRows?.[0];
+    if (!inv) return;
+    // the quote changed → EVERY unsigned contract on this job is now stale. This runs before any
+    // early return on purpose: skipping it once the job had two invoices left an old signing link
+    // live, and the client could sign a scope that no longer exists.
+    for (const row of invRows || []) await voidUnsignedAgreements(row.id);
+
     // G-9: auto-sync is a ONE-INVOICE convenience. Once the job carries a complementary invoice,
     // "the newest invoice" is the change order — rewriting it with the FULL quote total would
     // double-bill the client. From two invoices on, the owner drives the amounts explicitly.
+    // Counted per PROJECT (not per estimate): a legacy job can hold two estimates, and counting
+    // the narrower way would leave the sync running on a job that already has two invoices.
     const { count: invCount } = await supabase
       .from('invoices')
       .select('id', { count: 'exact', head: true })
-      .eq('estimate_id', estimateId);
+      .eq('project_id', inv.project_id);
     if ((invCount || 0) > 1) return;
-    const { data: inv } = await supabase
-      .from('invoices')
-      .select('id, status, total, deposit_percent')
-      .eq('estimate_id', estimateId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (!inv) return;
-    await voidUnsignedAgreements(inv.id); // the quote changed → any unsigned contract is now stale
     if (String(inv.status || '').toLowerCase() === 'paid') return;
     const { count } = await supabase.from('invoice_payments').select('id', { count: 'exact', head: true }).eq('invoice_id', inv.id);
     if (count) return;
@@ -555,6 +560,8 @@ export async function createInvoice(
       // quote total it was derived from, so repeating it here would discount the same work twice.
       discount_percent: override ? 0 : Number(est?.discount_percent ?? 0),
       discount_amount: override ? 0 : Number(est?.discount_amount ?? 0),
+      // marks the document as a change order: it prints ONE agreed line, never the quote's items
+      is_change_order: !!override,
       total: override ? override.total : Number(est?.total ?? est?.grand_total ?? 0),
       ...invoicePlanColumns(plan),
     })
@@ -1193,6 +1200,7 @@ export type JobInvoice = {
   taxRate: number;
   tax: number;
   discount: number; // G-1: dollars, frozen with the invoice
+  isChangeOrder: boolean; // G-9: complementary invoice — prints one agreed line, not the items
   total: number;
   created: string;
   paymentMode: PaymentMode;
@@ -1270,7 +1278,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
   // after the client already paid). Oldest first — #1 is the one the contract froze.
   const invRes = await supabase
     .from('invoices')
-    .select('id, invoice_number, status, subtotal, tax_rate, tax_amount, discount_amount, total, created_at, deposit_percent, payment_mode, due_date, deposit_amount')
+    .select('id, invoice_number, status, subtotal, tax_rate, tax_amount, discount_amount, total, created_at, deposit_percent, payment_mode, due_date, deposit_amount, is_change_order')
     .eq('project_id', projectId)
     .order('created_at', { ascending: true });
   if (invRes.error) throw invRes.error;
@@ -1306,6 +1314,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
       taxRate: Number(row.tax_rate ?? 0),
       tax: Number(row.tax_amount ?? 0),
       discount: Number(row.discount_amount ?? 0), // G-1: frozen with the invoice
+      isChangeOrder: !!row.is_change_order, // G-9: bills an agreed amount, not the quote's items
       total: Number(row.total ?? 0),
       created: row.created_at,
       paymentMode: asPaymentMode(row.payment_mode),

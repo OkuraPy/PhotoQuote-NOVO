@@ -4,7 +4,7 @@ import { ActivityIndicator, Alert, Image, Linking, Pressable, Share, ScrollView,
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
-import { addDaysISO, applyMarkup, balanceAfterPayment, calcTotals, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, invoiceRollup, NO_DISCOUNT, resolveDiscount, splitByTaxShare, uninvoiced, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
+import { addDaysISO, applyMarkup, balanceAfterPayment, calcTotals, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, invoiceRollup, NO_DISCOUNT, resolveDiscount, splitChangeOrder, uninvoiced, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { addPhaseComment, addPhasePhotos, addProjectPhotos, agreementLink, assignMember, BEFORE_PHASE_NAME, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deletePhasePhoto, deleteProject, deleteProjectPhoto, deriveStage, ensureBookendPhases, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, FINAL_PHASE_NAME, JobDetail, progressLink, ProgressPhase, PhaseStatus, projectDeleteFacts, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -434,14 +434,17 @@ export function JobScreen({ go, back, params }: NavProp) {
   // plan, PDF, receipts); it defaults to the newest, which is exactly what a one-invoice job had.
   const invoices = detail?.invoices || [];
   const [invSel, setInvSel] = useState<string | null>(null);
-  const inv = (invSel ? invoices.find((i) => i.id === invSel) : undefined) || detail?.invoice || undefined;
+  // default selection = the first invoice that still owes money (that is the one the owner is
+  // about to act on); everything paid → the newest, which is what a one-invoice job always showed
+  const firstOwing = invoices.find((i) => invoiceBalance(i.total, i.amountPaid) > 0.005);
+  const inv = (invSel ? invoices.find((i) => i.id === invSel) : undefined) || firstOwing || detail?.invoice || undefined;
   // every number the HEADER shows is the roll-up of all of them — a $10,400 job must never read
   // as $2,400 just because that is the newest invoice
   const roll = invoiceRollup(invoices);
   // stage derived from the DB (estimate/invoice status) once detail loads; falls back to the list value
   // stage from the WHOLE set: a complementary invoice pulls a "Paid" job back to "Invoiced",
-  // which is the truth — there is money still to come in
-  const invAggStatus = detail?.invoices.length ? (detail.invoices.every((i) => String(i.status).toLowerCase() === 'paid') ? 'Paid' : 'Unpaid') : undefined;
+  // which is the truth — there is money still to come in. Single source: the roll-up.
+  const invAggStatus = roll.count ? (roll.status === 'Paid' ? 'Paid' : 'Unpaid') : undefined;
   const baseStage: Stage = detail ? deriveStage(est?.status, invAggStatus) : job ? job.stage : 'Quoted';
   const stage = store.stageOverride[id] || baseStage;
   // closed (lost/archived) is orthogonal to the stage — detail (fresh) wins over the list params
@@ -464,7 +467,16 @@ export function JobScreen({ go, back, params }: NavProp) {
       { subtotal: est.subtotal, taxableSubtotal: computed.taxableSubtotal, tax: est.tax, total: est.total, taxRate, discount: est.discount.amount }
     : { ...computed, taxRate };
   const invoiceTotals: Totals = inv
-    ? { subtotal: inv.subtotal, taxableSubtotal: computed.taxableSubtotal, tax: inv.tax, total: inv.total, taxRate: inv.taxRate, discount: inv.discount }
+    ? {
+        subtotal: inv.subtotal,
+        // a change order's taxable slice is not the quote's — recover the one that produced its
+        // frozen tax, so the printed "Tax (7% on $X)" is arithmetically true on that document too
+        taxableSubtotal: inv.isChangeOrder ? (inv.taxRate > 0 ? round2(inv.tax / (inv.taxRate / 100)) : 0) : computed.taxableSubtotal,
+        tax: inv.tax,
+        total: inv.total,
+        taxRate: inv.taxRate,
+        discount: inv.discount,
+      }
     : quoteTotals;
   // header total mirrors fetchJobs (invoice total wins over the estimate's) so the list and this
   // header never diverge; the stale params value only bridges the gap while detail is loading.
@@ -478,6 +490,12 @@ export function JobScreen({ go, back, params }: NavProp) {
   const jobSite = jobSiteLine(detail?.jobSite);
   const addr = detail?.jobSite.address || realClient?.addr || (job ? job.addr : client?.addr || store.aLoc?.city) || t('job.noAddress');
   const next = NEXT[stage];
+  // G-9: a change order bills an AGREED AMOUNT, so its document shows one line for that amount —
+  // printing the quote's items under a partial total handed the client a $2,400 invoice listing
+  // $10,000 of work. English by the client-facing rule, like every other string on a document.
+  const changeOrderItems = (i: JobDetail['invoice']): LineItem[] =>
+    i ? [{ id: -1, cat: 'Change order', desc: 'Additional work per change order', qty: 1, unit: 'job', price: i.subtotal, taxable: i.tax > 0.005 }] : [];
+  const docItems = inv?.isChangeOrder ? changeOrderItems(inv) : items;
   // G-5: a payment landed but the invoice is not closed. The pipeline Stage has no room for it
   // (a half-paid invoice is still "Invoiced"), so the header said nothing and the owner read the
   // job as "he hasn't paid anything" — the PARTIAL badge lived only inside the Invoice tab.
@@ -493,6 +511,13 @@ export function JobScreen({ go, back, params }: NavProp) {
   const [paySheet, setPaySheet] = useState(false);
   const [savingPay, setSavingPay] = useState(false);
   const invoicePlan = inv ? planFromInvoice(inv) : null;
+  // D6: the agreement is frozen against invoice #1. Showing the SELECTED invoice's plan under a
+  // green "Signed" chip told the owner the client had signed a $2,400 change order he never saw.
+  const contractInv = invoices[0] || inv;
+  const contractPlan = contractInv ? planFromInvoice(contractInv) : null;
+  const contractTotals: Totals = contractInv
+    ? { subtotal: contractInv.subtotal, taxableSubtotal: 0, tax: contractInv.tax, total: contractInv.total, taxRate: contractInv.taxRate, discount: contractInv.discount }
+    : quoteTotals;
   const balance = inv ? invoiceBalance(inv.total, inv.amountPaid) : 0;
 
   /* ----- document photos (G2): which job photos print on the quote PDF ----- */
@@ -705,9 +730,10 @@ export function JobScreen({ go, back, params }: NavProp) {
       let downgraded = false;
       if (editing && inv) ({ downgraded } = await updateInvoicePlan(ownerId, inv.id, plan));
       else if (planSheet === 'extra' && est?.id && projectId) {
-        // the extra invoice bills an AMOUNT, carrying the same tax proportion the quote carries
-        const split = splitByTaxShare(extraToInvoice, quoteTotals.total, quoteTotals.tax);
-        ({ downgraded } = await createInvoice(ownerId, est.id, projectId, plan, split));
+        // the extra invoice bills an AMOUNT broken down at the quote's real tax rate, so its own
+        // document adds up line by line (subtotal + tax on the taxable slice = amount)
+        const split = splitChangeOrder(extraToInvoice, quoteTotals.subtotal, quoteTotals.taxableSubtotal, quoteTotals.taxRate);
+        ({ downgraded } = await createInvoice(ownerId, est.id, projectId, plan, { subtotal: split.subtotal, tax: split.tax, total: split.total }));
         setInvSel(null); // land on the new one (it becomes the newest)
       } else if (est?.id && projectId) ({ downgraded } = await createInvoice(ownerId, est.id, projectId, plan));
       else return;
@@ -851,9 +877,10 @@ export function JobScreen({ go, back, params }: NavProp) {
     // message (createAgreement would otherwise throw its English string into a pt/es alert; L2)
     if (!realClient) { Alert.alert(t('job.alert.clientNeeded'), t('job.alert.clientNeededBody')); return; }
     if (!ownerId || !projectId) return;
-    // D6: the contract is the ORIGINAL agreement — it stays with invoice #1 even after a
-    // complementary invoice shows up; a change order does not reopen a signed contract.
-    const [uid, pid, invId] = [ownerId, projectId, (invoices[0] || inv).id];
+    // D6: an EXISTING agreement stays with invoice #1 — a change order does not reopen a signed
+    // contract. But a contract generated for the first time on a job that already has two invoices
+    // must cover the one on screen (the owner picked it with the chip), not silently the oldest.
+    const [uid, pid, invId] = [ownerId, projectId, (detail?.agreement ? invoices[0] || inv : inv).id];
     // company guard before GENERATING: createAgreement freezes the company name into the contract HTML
     requireCompany(async () => {
       setGenningContract(true);
@@ -948,7 +975,7 @@ export function JobScreen({ go, back, params }: NavProp) {
             <Row style={{ gap: 8, marginTop: 6 }}>
               <Icon name="wallet" size={13} color={colors.info} />
               <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.info }}>
-                {t('job.paidOfTotal', { paid: fmt(paidSoFar), total: fmt(inv!.total) })} · {t('job.balanceLeft', { amount: fmt(jobBalance) })}
+                {t('job.paidOfTotal', { paid: fmt(paidSoFar), total: fmt(roll.total) })} · {t('job.balanceLeft', { amount: fmt(jobBalance) })}
               </Text>
             </Row>
           ) : null}
@@ -1038,8 +1065,8 @@ export function JobScreen({ go, back, params }: NavProp) {
             onSend={est && projectId && !closed ? () => requireCompany(() => up({ sheet: true })) : undefined}
           />
         )}
-        {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} jobSite={jobSite} company={company} invoice={inv} invoices={invoices} onSelectInvoice={setInvSel} roll={roll} extraToInvoice={extraToInvoice} onAddInvoice={canAddInvoice ? openExtraInvoice : undefined} quoteTotal={est?.total} genning={savingPlan} onGen={openGenerateInvoice} onRecordPayment={() => setPaySheet(true)} onEditPlan={() => setPlanSheet('edit')} onReceipt={onReceiptRow} receiptBusyId={receiptBusy} setSheet={(b: boolean) => (b ? requireCompany(() => up({ sheet: true })) : up({ sheet: false }))} />}
-        {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={invoiceTotals} plan={invoicePlan} company={company} genning={genningContract} onGenerate={generateContract} onView={detail?.agreement ? viewContract : undefined} />}
+        {tab === 'invoice' && <InvoiceTab stage={stage} items={docItems} totals={invoiceTotals} client={realClient} jobSite={jobSite} company={company} invoice={inv} invoices={invoices} onSelectInvoice={setInvSel} roll={roll} extraToInvoice={extraToInvoice} onAddInvoice={canAddInvoice ? openExtraInvoice : undefined} quoteTotal={est?.total} genning={savingPlan} onGen={openGenerateInvoice} onRecordPayment={() => setPaySheet(true)} onEditPlan={() => setPlanSheet('edit')} onReceipt={onReceiptRow} receiptBusyId={receiptBusy} setSheet={(b: boolean) => (b ? requireCompany(() => up({ sheet: true })) : up({ sheet: false }))} />}
+        {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={contractTotals} plan={contractPlan} company={company} genning={genningContract} onGenerate={generateContract} onView={detail?.agreement ? viewContract : undefined} />}
         {tab === 'progress' && (
           <ProgressTab
             projectId={projectId}
@@ -1077,7 +1104,7 @@ export function JobScreen({ go, back, params }: NavProp) {
             jobSite: jobSite || undefined, // English job-site line on quote & invoice (G5)
             customerNote: (kind !== 'contract' && est?.customerNote) || undefined, // "Notes" section (G1)
             photos: kind === 'quote' && docPhotos.length ? docPhotos : undefined, // curated photos (G2)
-            items,
+            items: kind === 'invoice' ? docItems : items,
             totals: tt,
             // invoice PDF/text: the payment plan + what's already paid (English by design)
             payment:
@@ -1404,7 +1431,8 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, i
   // with a complementary invoice the selected one is only a slice and would always look out of sync.
   // When the difference is billable the "bill the difference" card below says it better anyway.
   const invoicedTotal = roll ? roll.total : invoice?.total ?? 0;
-  const outOfSync = quoteTotal != null && !!invoice && Math.abs(quoteTotal - invoicedTotal) > 0.005 && !(extraToInvoice > 0.005);
+  const showsAddCard = !!onAddInvoice && extraToInvoice > 0.005;
+  const outOfSync = quoteTotal != null && !!invoice && Math.abs(quoteTotal - invoicedTotal) > 0.005 && !showsAddCard;
   return (
     <View style={{ marginTop: 16 }}>
       {/* G-9: with a single invoice this whole block is absent and the tab is exactly what it has
@@ -1536,7 +1564,7 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, i
       </Card>
       {/* G-9: the quote grew past what is already billed — bill the difference apart instead of
           rewriting an invoice the client already paid against */}
-      {onAddInvoice && extraToInvoice > 0.005 ? (
+      {showsAddCard ? (
         <Card pad style={{ marginTop: 16, backgroundColor: colors.primaryTint, borderColor: colors.primaryTint2 }}>
           <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{t('job.addInvoiceTitle')}</Text>
           <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.ink2, marginTop: 6, lineHeight: 18 }}>
