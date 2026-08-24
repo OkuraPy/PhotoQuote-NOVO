@@ -4,7 +4,7 @@ import { ActivityIndicator, Alert, Image, Linking, Pressable, Share, ScrollView,
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
-import { addDaysISO, applyMarkup, balanceAfterPayment, calcTotals, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
+import { addDaysISO, applyMarkup, balanceAfterPayment, calcTotals, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, NO_DISCOUNT, resolveDiscount, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { addPhaseComment, addPhasePhotos, addProjectPhotos, agreementLink, assignMember, BEFORE_PHASE_NAME, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deletePhasePhoto, deleteProject, deleteProjectPhoto, deriveStage, ensureBookendPhases, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, FINAL_PHASE_NAME, JobDetail, progressLink, ProgressPhase, PhaseStatus, projectDeleteFacts, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -69,6 +69,7 @@ registerStrings({
   'job.taxable': { en: 'Taxable', es: 'Gravable', pt: 'Tributável' },
   'job.noTax': { en: 'No tax', es: 'Sin impuesto', pt: 'Sem imposto' },
   'job.subtotal': { en: 'Subtotal', es: 'Subtotal', pt: 'Subtotal' },
+  'job.discount': { en: 'Discount', es: 'Descuento', pt: 'Desconto' },
   'job.markupIncluded': { en: 'Markup ({pct}%) included', es: 'Margen ({pct}%) incluido', pt: 'Margem ({pct}%) incluída' },
   'job.tax': { en: 'Tax ({rate}% on {amount})', es: 'Impuesto ({rate}% sobre {amount})', pt: 'Imposto ({rate}% sobre {amount})' },
   'job.total': { en: 'Total', es: 'Total', pt: 'Total' },
@@ -325,7 +326,7 @@ const CLIENT_SHARE = {
 
 type NavProp = { go: (n: string, p?: any, mode?: string) => void; back: () => void; params?: any };
 const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
-type Totals = { subtotal: number; taxableSubtotal: number; tax: number; total: number; taxRate: number };
+type Totals = { subtotal: number; taxableSubtotal: number; tax: number; total: number; taxRate: number; discount: number };
 type Tr = (k: string, v?: Record<string, string | number>) => string;
 
 /* ----- opening a client-facing page from inside the app (G-3 / G-4) ----- */
@@ -432,13 +433,15 @@ export function JobScreen({ go, back, params }: NavProp) {
   const items = detail?.items?.length ? detail.items : job ? [] : store.items;
   const taxRate = est?.taxRate ?? store.taxRate ?? 8.25;
   // margin always 0: new scheme embeds it in prices; legacy display trusts the SAVED totals below
-  const computed = calcTotals(items, taxRate, 0);
+  // G-1: the saved discount rides along so the live recompute matches what the DB trigger stored
+  const grossComputed = calcTotals(items, taxRate, 0);
+  const computed = calcTotals(items, taxRate, 0, resolveDiscount(grossComputed.subtotal, est?.discount ?? NO_DISCOUNT));
   // stored DB totals are the source of truth (trigger); fall back to computed for mock/no-estimate
   const quoteTotals: Totals = est
-    ? { subtotal: est.subtotal, taxableSubtotal: computed.taxableSubtotal, tax: est.tax, total: est.total, taxRate }
+    ? { subtotal: est.subtotal, taxableSubtotal: computed.taxableSubtotal, tax: est.tax, total: est.total, taxRate, discount: resolveDiscount(est.subtotal, est.discount) }
     : { ...computed, taxRate };
   const invoiceTotals: Totals = inv
-    ? { subtotal: inv.subtotal, taxableSubtotal: computed.taxableSubtotal, tax: inv.tax, total: inv.total, taxRate: inv.taxRate }
+    ? { subtotal: inv.subtotal, taxableSubtotal: computed.taxableSubtotal, tax: inv.tax, total: inv.total, taxRate: inv.taxRate, discount: inv.discount }
     : quoteTotals;
   // header total mirrors fetchJobs (invoice total wins over the estimate's) so the list and this
   // header never diverge; the stale params value only bridges the gap while detail is loading.
@@ -988,7 +991,7 @@ export function JobScreen({ go, back, params }: NavProp) {
                     const legacy = est.legacyMarginRate > 0;
                     // legacy items carry no basePrice, so applyMarkup folds from the current price
                     const items = legacy ? applyMarkup(detail!.items, est.legacyMarginRate) : detail!.items;
-                    up({ items, taxRate: quoteTotals.taxRate, marginRate: legacy ? est.legacyMarginRate : est.markupPercent, editing: null, custNote: est.customerNote || '', custNoteSrc: est.customerNoteSrc || '' });
+                    up({ items, taxRate: quoteTotals.taxRate, marginRate: legacy ? est.legacyMarginRate : est.markupPercent, discount: est.discount, editing: null, custNote: est.customerNote || '', custNoteSrc: est.customerNoteSrc || '' });
                     go('estimate', { editJob: { projectId, estimateId: est.id } });
                   }
                 : undefined
@@ -1275,6 +1278,9 @@ function QuoteTab({ items, totals, markupPercent = 0, customerNote, go, photos, 
       </View>
       <Card style={{ padding: 16, marginTop: 16 }}>
         <TotRow label={t('job.subtotal')} value={fmt(totals.subtotal)} />
+        {/* G-1: the client sees the discount (owner's D1) — and a total that doesn't match the
+            sum of the items would raise a question the contractor has to answer by phone */}
+        {totals.discount > 0 ? <TotRow label={t('job.discount')} value={`−${fmt(totals.discount)}`} color={colors.info} /> : null}
         {markupPercent > 0 ? (
           // internal-only info: the markup is already inside the prices — it adds nothing here
           <Text style={{ fontFamily: fonts.semibold, fontSize: 11.5, color: colors.faint, paddingVertical: 2 }}>{t('job.markupIncluded', { pct: markupPercent })}</Text>
@@ -1423,6 +1429,7 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, q
         {/* totals + payment plan + ledger */}
         <View style={{ padding: 20, backgroundColor: colors.card2, borderTopWidth: 1, borderTopColor: colors.border }}>
           <TotRow label={t('job.subtotal')} value={fmt(totals.subtotal)} />
+          {totals.discount > 0 ? <TotRow label={t('job.discount')} value={`−${fmt(totals.discount)}`} color={colors.info} /> : null}
           <TotRow label={t('job.tax', { rate: totals.taxRate, amount: fmt(totals.taxableSubtotal) })} value={fmt(totals.tax)} />
           <Between style={{ paddingTop: 11, marginTop: 7, borderTopWidth: 1.5, borderTopColor: colors.borderStrong }}>
             <Text style={{ fontFamily: fonts.extrabold, fontSize: 13, color: colors.ink }}>{t('job.totalDue')}</Text>

@@ -69,14 +69,64 @@ export function jobSiteLine(site?: { address?: string | null; city?: string | nu
     .join(', ');
 }
 
-// §9 official formula — mirrors the planned calc-totals Edge Function
-export function calcTotals(items: LineItem[], taxRate: number, marginRate = 0) {
+/* ---------------- G-1: the client-facing discount ---------------- */
+// Two ways in, ONE number stored: `percent` is the intention (a "-30% for this contractor" has to
+// follow the subtotal when an item changes) and `amount` is the resolved dollars — which is what
+// the documents, the invoice and the DB read. percent = 0 means "typed in dollars".
+export type Discount = { percent: number; amount: number };
+export const NO_DISCOUNT: Discount = { percent: 0, amount: 0 };
+
+// Resolve a Discount against a subtotal. MUST mirror update_estimate_totals() in the DB, clamp
+// included: a discount can zero a quote, never turn it into a credit.
+export function resolveDiscount(subtotal: number, d?: Discount | null): number {
+  if (!d) return 0;
+  const raw = d.percent > 0 ? round2((subtotal * d.percent) / 100) : round2(d.amount || 0);
+  return Math.min(Math.max(0, raw), round2(subtotal));
+}
+
+// §9 official formula — mirrors the planned calc-totals Edge Function.
+// `discount` is the RESOLVED dollar amount (see resolveDiscount) and comes off BEFORE tax, shrinking
+// the taxable base in proportion to how much of the subtotal was taxable (owner's call D2).
+export function calcTotals(items: LineItem[], taxRate: number, marginRate = 0, discount = 0) {
   const subtotal = items.reduce((s, i) => s + i.qty * i.price, 0);
   const taxableSubtotal = items.filter((i) => i.taxable).reduce((s, i) => s + i.qty * i.price, 0);
-  const tax = taxableSubtotal * (taxRate / 100);
-  const margin = (subtotal + tax) * (marginRate / 100);
-  const total = subtotal + tax + margin;
-  return { subtotal, taxableSubtotal, tax, margin, total };
+  // No discount = the original path, untouched and unrounded. It is what every existing estimate
+  // was computed with, and what makes the "embedded markup == legacy margin" equivalence exact.
+  if (!(discount > 0) || !(subtotal > 0)) {
+    const tax = taxableSubtotal * (taxRate / 100);
+    const margin = (subtotal + tax) * (marginRate / 100);
+    return { subtotal, taxableSubtotal, discount: 0, tax, margin, total: subtotal + tax + margin };
+  }
+  // Discounted path rounds at every step, exactly where the DB's numeric(12,2) rounds — the
+  // preview on screen has to be the cent the trigger will store, or "round it to $1,000" lands
+  // on $1,000.01 the moment it is saved.
+  const disc = Math.min(round2(discount), round2(subtotal));
+  const taxableAfter = round2(taxableSubtotal * (1 - disc / subtotal));
+  const tax = round2(taxableAfter * (taxRate / 100));
+  const margin = round2((subtotal - disc + tax) * (marginRate / 100));
+  return { subtotal, taxableSubtotal, discount: disc, tax, margin, total: round2(subtotal - disc + tax + margin) };
+}
+
+// "deu 1.099, quer deixar 1.000 redondo" — the owner types the FINAL total and the app derives the
+// discount that produces it. Closed form (no search loop): with the discount coming off pre-tax and
+// the taxable base shrinking proportionally,
+//     total = S − D + (T·r)·(1 − D/S)     →     D = (S + k − target) / (1 + k/S),  k = T·r
+// where S = subtotal, T = taxable subtotal, r = tax rate. A single correction pass absorbs the cent
+// that rounding can leave behind. Assumes marginRate 0 (the embedded-markup scheme every editor
+// writes today); a legacy margin estimate is folded to embedded markup before it can be edited.
+export function discountFromTarget(subtotal: number, taxableSubtotal: number, taxRate: number, target: number): number {
+  if (!(subtotal > 0)) return 0;
+  const k = taxableSubtotal * (taxRate / 100);
+  const clamp = (d: number) => Math.min(Math.max(0, round2(d)), round2(subtotal));
+  let d = clamp((subtotal + k - target) / (1 + k / subtotal));
+  const totalWith = (x: number) => subtotal - x + round2(round2(taxableSubtotal * (1 - x / subtotal)) * (taxRate / 100));
+  const off = round2(totalWith(d) - target);
+  if (off !== 0) {
+    const fixed = clamp(d + off);
+    // only keep the correction if it actually lands closer to what the owner typed
+    if (Math.abs(totalWith(fixed) - target) < Math.abs(totalWith(d) - target)) d = fixed;
+  }
+  return d;
 }
 
 export const STAGES: Stage[] = ['Draft', 'Quoted', 'Sent', 'Approved', 'Invoiced', 'Paid'];

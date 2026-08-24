@@ -69,6 +69,9 @@ export type V2Store = {
   aiSig: string; // photo-set signature of the last AI run — changing the photos re-runs the AI
   taxRate: number;
   marginRate: number;
+  // G-1: client-facing discount. `percent` is the intention (follows the subtotal when items
+  // change), `amount` the resolved dollars — percent 0 means the owner typed dollars.
+  discount: import('./data').Discount;
   editing: import('./data').LineItem | null;
   aQ: string;
   aSel: any;
@@ -103,6 +106,7 @@ export const FLOW_RESET = {
   aiSig: '',
   taxRate: 8.25,
   marginRate: 0,
+  discount: { percent: 0, amount: 0 },
   editing: null,
   aQ: '',
   aSel: null,

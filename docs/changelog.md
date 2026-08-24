@@ -4,6 +4,43 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-08-24 19:40] — feat: ONDA G / onda 3, parte 1 — desconto no orçamento (G-1)
+- **O que mudou**: o orçamento passa a ter desconto para BAIXO, do jeito que o Gladson pediu: um
+  stepper de **%** (o caso "contractor -30%") e um campo de **total final** onde ele digita o número
+  redondo ("deu 1.099, quer deixar 1.000"). O desconto é do CLIENTE — sai como linha "Discount" no
+  PDF do orçamento, no da fatura, no texto de e-mail/WhatsApp e no contrato.
+- **Decisões do dono (24/08)**: D1 o cliente vê o desconto · D2 imposto sobre o valor já descontado
+  · D3 as duas entradas.
+- **O gatilho do banco era o ponto perigoso** e virou a primeira coisa a ser resolvida:
+  `update_estimate_totals()` recalcula e SOBRESCREVE o total a cada escrita em `line_items`, então
+  um desconto que só existisse no app seria apagado no próximo toque num item (mesmo formato do bug
+  do imposto zerado de maio). Agora o desconto entra na conta do gatilho: sai do subtotal ANTES do
+  imposto e encolhe a base tributável na proporção do que era tributável.
+- **Provado em produção ANTES de aplicar** (transação com ROLLBACK): o gatilho novo disparado nos
+  **92 orçamentos reais** com desconto zero não mudou NENHUM total, imposto, subtotal ou margem —
+  nem um centavo. Com desconto, os casos batem com o cálculo de referência feito à parte
+  (30% → 2.075,93 / imposto 110,80 / total 4.954,65 · $1.000 → imposto 135,41 / total 6.055,19 ·
+  100% ou valor absurdo → desconto = subtotal, total 0, nunca negativo).
+- **A conta do "total redondo"** é fechada, sem laço de tentativa: `D = (S + k − alvo) / (1 + k/S)`
+  com `k = tributável × taxa`, mais uma passada de correção que absorve o centavo do arredondamento.
+  14 testes novos no jest (122 no total), incluindo os mesmos números que o banco devolveu.
+- **Contrato**: o template imprimia "Subtotal X | Tax Y" ao lado do total — com desconto, os três
+  números não fechariam num documento LEGAL. Placeholder `{{discount_line}}` novo (carregando o
+  próprio separador, então sem desconto a linha fica idêntica); `fillTemplate` troca placeholder
+  desconhecido por vazio, então template novo com build antigo é inócuo.
+- **Arquivos**: `supabase/migrations/20260824020000_discount.sql` (colunas + gatilho + template),
+  `src/v2/data.ts` (`Discount`, `resolveDiscount`, `calcTotals` com desconto, `discountFromTarget`),
+  `src/v2/lib/api.ts` (grava/copia/sincroniza o desconto; variável do contrato), `src/v2/lib/send.ts`
+  (linha no PDF e no texto), `src/v2/screens/Flow.tsx` (bloco na tela + `TotalTarget`),
+  `src/v2/screens/Job.tsx` (linha nas abas Quote/Invoice + hidratação ao editar), `src/v2/ui.tsx`.
+- **Decisão técnica**: `calcTotals` mantém o caminho SEM desconto exatamente como era (sem
+  arredondar), e só o caminho COM desconto arredonda em cada passo — espelhando onde o
+  `numeric(12,2)` do banco arredonda. Sem isso, "arredondar pra $1.000" salvaria $1.000,01; e
+  mexer no caminho antigo mudaria o número de todo orçamento que já existe.
+- **Gates**: tsc limpo, jest 122/122, `expo export ios` OK (3,24 MB).
+
+---
+
 ### [2026-08-24 18:05] — feat: ONDA G / onda 2 — referência no pagamento e no recibo, logo + paginação no PDF, baixar fotos no portal
 - **O que mudou**: os 3 itens médios da lista do Gladson (`docs/FEEDBACK_GLADSON_2026-07-31.md`).
   - **G-6 referência do pagamento** ("quando o cara paga em cheque a gente coloca o número do

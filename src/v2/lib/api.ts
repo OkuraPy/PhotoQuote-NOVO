@@ -5,7 +5,7 @@ import * as Crypto from 'expo-crypto';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from './supabase';
 import { readErrorBody } from './ai';
-import { Client, ClosedKind, closedFromStatus, deriveBase, deriveStage, DOC_PHOTO_CAP, Job, LineItem, MemberRole, paidTotal, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, Photo, planFromInvoice, planRows, rescaleSchedule, round2, ScheduleRow, seedPhasePlan, statusFromPayments, syncPhasePlan, toDateOnly } from '../data';
+import { Client, ClosedKind, closedFromStatus, deriveBase, deriveStage, Discount, DOC_PHOTO_CAP, Job, LineItem, MemberRole, paidTotal, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, Photo, planFromInvoice, planRows, rescaleSchedule, round2, ScheduleRow, seedPhasePlan, statusFromPayments, syncPhasePlan, toDateOnly } from '../data';
 export { deriveStage }; // re-exported for screens (lives in ../data so it's unit-testable)
 
 /* ---------------- Location: real ZIP (Zippopotam, keyless) + GPS (expo-location) ---------------- */
@@ -252,6 +252,7 @@ export async function createJob(input: {
   photos?: Photo[];
   zip?: string;
   state?: string;
+  discount?: Discount; // G-1: client-facing discount, applied before tax by the DB trigger
 }): Promise<{ projectId: string; estimateId: string; photosFailed: number }> {
   const serviceType = (input.services && input.services[0]) || null;
   const title = input.name.trim() || 'New estimate';
@@ -285,6 +286,10 @@ export async function createJob(input: {
       margin_rate: 0,
       margin_percent: 0,
       markup_percent: input.marginRate,
+      // G-1: rates BEFORE the line items — the totals trigger fires on the item writes and reads
+      // the discount straight from this row
+      discount_percent: input.discount?.percent ?? 0,
+      discount_amount: input.discount?.percent ? 0 : input.discount?.amount ?? 0,
       confidence: input.confidence ?? 0,
       ai_confidence_score: input.confidence ?? null,
       title,
@@ -342,7 +347,9 @@ export async function updateEstimateItems(
   taxRate: number,
   marginRate: number,
   // G1: client-facing note saved along with the items; omitted = the columns are left untouched
-  note?: { customerNote: string | null; customerNoteSrc: string | null }
+  note?: { customerNote: string | null; customerNoteSrc: string | null },
+  // G-1: the discount rides with the rates so the trigger sees it on the item writes
+  discount?: Discount
 ): Promise<void> {
   // embedded markup: prices are final → margin zeroed for the trigger, % kept as metadata
   const { error: rErr } = await supabase
@@ -353,6 +360,7 @@ export async function updateEstimateItems(
       margin_rate: 0,
       margin_percent: 0,
       markup_percent: marginRate,
+      ...(discount ? { discount_percent: discount.percent, discount_amount: discount.percent ? 0 : discount.amount } : {}),
       ...(note ? { customer_note: note.customerNote, customer_note_src: note.customerNoteSrc } : {}),
     })
     .eq('id', estimateId);
@@ -416,7 +424,7 @@ async function syncInvoiceWithEstimate(estimateId: string): Promise<void> {
     // the totals trigger already ran on the line_items writes — read the fresh numbers back
     const { data: est } = await supabase
       .from('estimates')
-      .select('subtotal, tax_rate, tax_percent, tax_amount, total, grand_total')
+      .select('subtotal, tax_rate, tax_percent, tax_amount, total, grand_total, discount_percent, discount_amount')
       .eq('id', estimateId)
       .maybeSingle();
     if (!est) return;
@@ -425,6 +433,9 @@ async function syncInvoiceWithEstimate(estimateId: string): Promise<void> {
       subtotal: Number(est.subtotal ?? 0),
       tax_rate: Number(est.tax_rate ?? est.tax_percent ?? 0),
       tax_amount: Number(est.tax_amount ?? 0),
+      // G-1: without this the invoice would keep the OLD discount line next to a new total
+      discount_percent: Number(est.discount_percent ?? 0),
+      discount_amount: Number(est.discount_amount ?? 0),
       total: newTotal,
     };
     // a %-deposit follows the new total; an absolute-$ deposit (percent null) stays as agreed
@@ -499,7 +510,7 @@ async function insertScheduleRows(userId: string, invoiceId: string, plan: Payme
 export async function createInvoice(userId: string, estimateId: string, projectId: string, plan: PaymentPlan): Promise<{ id: string; number: string; downgraded: boolean }> {
   const { data: est, error: eErr } = await supabase
     .from('estimates')
-    .select('subtotal, tax_rate, tax_percent, tax_amount, margin_rate, margin_amount, total, grand_total')
+    .select('subtotal, tax_rate, tax_percent, tax_amount, margin_rate, margin_amount, total, grand_total, discount_percent, discount_amount')
     .eq('id', estimateId)
     .maybeSingle();
   if (eErr) throw eErr;
@@ -522,6 +533,10 @@ export async function createInvoice(userId: string, estimateId: string, projectI
       tax_amount: Number(est?.tax_amount ?? 0),
       margin_rate: Number(est?.margin_rate ?? 0),
       margin_amount: Number(est?.margin_amount ?? 0),
+      // G-1: the invoice is a frozen snapshot of the quote — it carries the discount that produced
+      // this total, so the invoice PDF can print the same "Discount" line the quote printed
+      discount_percent: Number(est?.discount_percent ?? 0),
+      discount_amount: Number(est?.discount_amount ?? 0),
       total: Number(est?.total ?? est?.grand_total ?? 0),
       ...invoicePlanColumns(plan),
     })
@@ -902,7 +917,7 @@ function renderTermsBlocks(blocks: unknown): string {
 export async function createAgreement(userId: string, projectId: string, invoiceId: string): Promise<{ id: string; token: string }> {
   const [{ data: proj }, { data: inv }, company] = await Promise.all([
     supabase.from('projects').select('client_id, name, address, city, property_state, service_type, zip').eq('id', projectId).maybeSingle(),
-    supabase.from('invoices').select('invoice_number, estimate_id, subtotal, tax_rate, tax_amount, total, deposit_percent, payment_mode, due_date, deposit_amount').eq('id', invoiceId).maybeSingle(),
+    supabase.from('invoices').select('invoice_number, estimate_id, subtotal, tax_rate, tax_amount, discount_amount, total, deposit_percent, payment_mode, due_date, deposit_amount').eq('id', invoiceId).maybeSingle(),
     // fetchCompanyProfile, not a raw users SELECT: the owner's row is RLS-invisible to an
     // OFFICE member — the raw read returned null and the contract printed "Your Company"
     // (final-review A1); the profile helper falls back to get_owner_branding for members.
@@ -961,6 +976,10 @@ export async function createAgreement(userId: string, projectId: string, invoice
     line_items_table: lineItemsTableHtml(items || []),
     total_amount: money2(total),
     subtotal: money2(Number(inv.subtotal) || 0),
+    // G-1: without this the contract would print "Subtotal X | Tax Y" next to a Total that is
+    // neither — a signed legal document whose own numbers don't add up. fillTemplate blanks the
+    // placeholder on any template that predates it, so old templates keep working untouched.
+    discount_line: Number(inv.discount_amount) > 0 ? ` &nbsp;|&nbsp; Discount: -$${money2(Number(inv.discount_amount))}` : '',
     tax_rate: String(Number(inv.tax_rate) || 0),
     tax_amount: money2(Number(inv.tax_amount) || 0),
     payment_schedule_table: paymentScheduleTableHtml(rows),
@@ -1138,7 +1157,9 @@ export type JobDetail = {
   // (margin summed on top by the trigger) — kept so Edit can fold it into the prices.
   // notes = INTERNAL AI note (contractor language, never printed); customerNote = client-facing
   // note that prints on documents (G1); customerNoteSrc = the pre-translation original.
-  estimate: { id: string; total: number; subtotal: number; taxRate: number; tax: number; markupPercent: number; legacyMarginRate: number; status: string; notes: string | null; customerNote: string | null; customerNoteSrc: string | null } | null;
+  // discount (G-1) is the CLIENT-facing reduction: `percent` is how it was typed (0 = in dollars)
+  // and `amount` the resolved dollars the DB trigger stored.
+  estimate: { id: string; total: number; subtotal: number; taxRate: number; tax: number; discount: Discount; markupPercent: number; legacyMarginRate: number; status: string; notes: string | null; customerNote: string | null; customerNoteSrc: string | null } | null;
   items: LineItem[];
   // F12: paymentMode/dueDate/deposit* + schedule re-hydrate the plan; payments is the ledger and
   // amountPaid its Σ (a legacy 'Paid' invoice without ledger rows counts as fully paid).
@@ -1149,6 +1170,7 @@ export type JobDetail = {
     subtotal: number;
     taxRate: number;
     tax: number;
+    discount: number; // G-1: dollars, frozen with the invoice
     total: number;
     created: string;
     paymentMode: PaymentMode;
@@ -1175,7 +1197,7 @@ const asPaymentMode = (m: unknown): PaymentMode => (m === 'deposit' || m === 'in
 export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
   const estRes = await supabase
     .from('estimates')
-    .select('id, total, grand_total, subtotal, tax_rate, tax_amount, margin_rate, markup_percent, status, notes, estimate_notes, customer_note, customer_note_src')
+    .select('id, total, grand_total, subtotal, tax_rate, tax_amount, margin_rate, markup_percent, discount_percent, discount_amount, status, notes, estimate_notes, customer_note, customer_note_src')
     .eq('project_id', projectId)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -1210,7 +1232,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
 
   const invRes = await supabase
     .from('invoices')
-    .select('id, invoice_number, status, subtotal, tax_rate, tax_amount, total, created_at, deposit_percent, payment_mode, due_date, deposit_amount')
+    .select('id, invoice_number, status, subtotal, tax_rate, tax_amount, discount_amount, total, created_at, deposit_percent, payment_mode, due_date, deposit_amount')
     .eq('project_id', projectId)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -1258,7 +1280,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
 
   return {
     estimate: est
-      ? { id: est.id, total: Number(est.total ?? est.grand_total ?? 0), subtotal: Number(est.subtotal ?? 0), taxRate: Number(est.tax_rate ?? 0), tax: Number(est.tax_amount ?? 0), markupPercent: markupPct, legacyMarginRate: Number(est.margin_rate ?? 0), status: est.status, notes: est.notes ?? est.estimate_notes ?? null, customerNote: est.customer_note ?? null, customerNoteSrc: est.customer_note_src ?? null }
+      ? { id: est.id, total: Number(est.total ?? est.grand_total ?? 0), subtotal: Number(est.subtotal ?? 0), taxRate: Number(est.tax_rate ?? 0), tax: Number(est.tax_amount ?? 0), discount: { percent: Number(est.discount_percent ?? 0), amount: Number(est.discount_amount ?? 0) }, markupPercent: markupPct, legacyMarginRate: Number(est.margin_rate ?? 0), status: est.status, notes: est.notes ?? est.estimate_notes ?? null, customerNote: est.customer_note ?? null, customerNoteSrc: est.customer_note_src ?? null }
       : null,
     items,
     invoice: inv
@@ -1269,6 +1291,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
           subtotal: Number(inv.subtotal ?? 0),
           taxRate: Number(inv.tax_rate ?? 0),
           tax: Number(inv.tax_amount ?? 0),
+          discount: Number(inv.discount_amount ?? 0), // G-1: frozen with the invoice
           total: Number(inv.total ?? 0),
           created: inv.created_at,
           paymentMode: asPaymentMode(inv.payment_mode),

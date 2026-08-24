@@ -9,7 +9,7 @@ import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } fr
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { applyMarkup, buildStarterEstimate, calcTotals, deriveBase, fmt, LineItem, SERVICE_TYPES, split } from '../data';
+import { applyMarkup, buildStarterEstimate, calcTotals, deriveBase, discountFromTarget, fmt, LineItem, NO_DISCOUNT, resolveDiscount, SERVICE_TYPES, split } from '../data';
 import { MAX_AI_PHOTOS, requestEstimate, transcribeAudio, translateNote } from '../lib/ai';
 import { createClient, createJob, fetchClients, fetchCompanyProfile, getMyLocation, lookupZip, Region, updateEstimateItems } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -68,6 +68,11 @@ registerStrings({
   'flow.noTax': { en: 'No tax', es: 'Sin impuesto', pt: 'Sem imposto' },
   'flow.taxRate': { en: 'Tax rate', es: 'Tasa de impuesto', pt: 'Taxa de imposto' },
   'flow.internalMarkup': { en: 'Internal markup', es: 'Margen interno', pt: 'Margem interna' },
+  // G-1
+  'flow.discount': { en: 'Discount', es: 'Descuento', pt: 'Desconto' },
+  'flow.shownToClient': { en: 'Shown on the client documents', es: 'Aparece en los documentos del cliente', pt: 'Aparece nos documentos do cliente' },
+  'flow.finalTotal': { en: 'Final total', es: 'Total final', pt: 'Total final' },
+  'flow.discountApplied': { en: 'Discount of {amount} applied before tax', es: 'Descuento de {amount} aplicado antes del impuesto', pt: 'Desconto de {amount} aplicado antes do imposto' },
   'flow.hiddenFromClient': { en: 'Hidden from client', es: 'Oculto para el cliente', pt: 'Oculto do cliente' },
   'flow.markupIncluded': { en: 'Markup included in item prices', es: 'Margen incluido en los precios de los elementos', pt: 'Margem incluída nos preços dos itens' },
   'flow.continue': { en: 'Continue', es: 'Continuar', pt: 'Continuar' },
@@ -521,6 +526,32 @@ function Wave({ color }: { color: string }) {
   );
 }
 
+/* ---------------- G-1: type the round total, get the discount ---------------- */
+// Applied on blur, never on every keystroke: typing "1000" passes through 1, 10 and 100, and each
+// of those as a live target would clamp the discount to the whole subtotal and fight the typing.
+function TotalTarget({ total, onApply }: { total: number; onApply: (target: number) => void }) {
+  const [txt, setTxt] = useState('');
+  useEffect(() => {
+    setTxt(total > 0 ? total.toFixed(2) : '');
+  }, [total]);
+  const apply = () => {
+    const v = parseFloat(txt.replace(/[^0-9.,]/g, '').replace(',', '.'));
+    if (isFinite(v) && v >= 0) onApply(v);
+    else setTxt(total > 0 ? total.toFixed(2) : '');
+  };
+  return (
+    <Input
+      value={txt}
+      onChangeText={setTxt}
+      onBlur={apply}
+      onSubmitEditing={apply}
+      keyboardType="decimal-pad"
+      returnKeyType="done"
+      style={{ width: 130, textAlign: 'right' }}
+    />
+  );
+}
+
 /* ---------------- ESTIMATE (AI + editing) ---------------- */
 type EstPhase = 'analyzing' | 'done' | 'rejected' | 'error';
 
@@ -596,7 +627,11 @@ export function EstimateScreen({ go, back, params }: NavProp) {
   const analyzing = phase === 'analyzing';
   const conf = Math.round(store.confidence || 0);
   const showEstimate = phase === 'done' || analyzing;
-  const t = calcTotals(items, taxRate, 0); // markup is already embedded in the unit prices
+  // markup is already embedded in the unit prices; the discount (G-1) comes off before tax.
+  // The gross pass resolves a "-30%" against the CURRENT subtotal, same rule as the DB trigger.
+  const discount = store.discount || NO_DISCOUNT;
+  const gross = calcTotals(items, taxRate, 0);
+  const t = calcTotals(items, taxRate, 0, resolveDiscount(gross.subtotal, discount));
   const [d, c] = split(t.total);
   // edit mode: persist the edited items back into the SAME estimate (trigger recomputes totals)
   const queryClient = useQueryClient();
@@ -609,7 +644,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
       await updateEstimateItems(editJob.estimateId, store.items, taxRate, marginRate, {
         customerNote: note || null,
         customerNoteSrc: (note && (store.custNoteSrc || '').trim()) || null, // no note → no original either
-      });
+      }, discount);
       await queryClient.invalidateQueries({ queryKey: ['jobDetail', editJob.projectId] });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
       back();
@@ -780,6 +815,44 @@ export function EstimateScreen({ go, back, params }: NavProp) {
                 onPlus={() => up((st) => { const next = st.marginRate + 5; return { marginRate: next, items: applyMarkup(st.items, next) }; })}
               />
             </Between>
+            <Divider />
+            {/* G-1: the way DOWN. Unlike the markup (embedded in the prices, invisible), the
+                discount is the client's — it prints as its own line on the document (owner's D1). */}
+            <Between>
+              <Row style={{ gap: 9 }}>
+                <Icon name="trend" size={16} color={colors.info} />
+                <View>
+                  <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{tr('flow.discount')}</Text>
+                  <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted }}>{tr('flow.shownToClient')}</Text>
+                </View>
+              </Row>
+              <Stepper
+                value={`${discount.percent}%`}
+                onMinus={() => up((st) => ({ discount: { percent: Math.max(0, (st.discount?.percent ?? 0) - 5), amount: 0 } }))}
+                onPlus={() => up((st) => ({ discount: { percent: Math.min(100, (st.discount?.percent ?? 0) + 5), amount: 0 } }))}
+              />
+            </Between>
+            {/* "deu 1.099, quer deixar 1.000 redondo": type the round number, the app works out
+                the discount that gets there (applied on blur, so 1 → 10 → 100 never fights back) */}
+            <Between style={{ marginTop: 14 }}>
+              <Row style={{ gap: 9, flex: 1 }}>
+                <Icon name="dollar" size={16} color={colors.muted} />
+                <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{tr('flow.finalTotal')}</Text>
+              </Row>
+              <TotalTarget
+                total={t.total}
+                onApply={(target) => up((st) => {
+                  const c = calcTotals(st.items, st.taxRate, 0);
+                  if (!(c.subtotal > 0) || target >= c.total - 0.005) return { discount: { percent: 0, amount: 0 } };
+                  return { discount: { percent: 0, amount: discountFromTarget(c.subtotal, c.taxableSubtotal, st.taxRate, target) } };
+                })}
+              />
+            </Between>
+            {t.discount > 0 ? (
+              <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.info, marginTop: 10 }}>
+                {tr('flow.discountApplied', { amount: fmt(t.discount) })}
+              </Text>
+            ) : null}
           </Card>
         ) : null}
         {!analyzing && marginRate > 0 ? (
@@ -1008,6 +1081,7 @@ export function AttachScreen({ go, back }: NavProp) {
         photos: store.photos,
         zip: store.aZip || undefined,
         state: store.regionState || undefined,
+        discount: store.discount, // G-1
       });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
       await queryClient.invalidateQueries({ queryKey: ['clients'] });

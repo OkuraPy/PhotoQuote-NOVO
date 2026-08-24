@@ -1,4 +1,4 @@
-import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, homeMetrics, jobSiteLine, needsPhaseSync, phaseNameFromItem, seedPhasePlan, syncPhasePlan, toggleDocPhoto } from '../../data';
+import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, jobSiteLine, needsPhaseSync, NO_DISCOUNT, phaseNameFromItem, resolveDiscount, seedPhasePlan, syncPhasePlan, toggleDocPhoto } from '../../data';
 import type { ClosedKind, LineItem, SyncPhase } from '../../data';
 import type { Stage } from '../../theme';
 
@@ -400,5 +400,91 @@ describe('homeMetrics (dashboard numbers with lost/archived out of the pipeline)
 
   it('closed: null / undefined both mean open (fetchJobs maps unknown statuses to null)', () => {
     expect(homeMetrics([j('Quoted', 100, null)])).toEqual(homeMetrics([j('Quoted', 100)]));
+  });
+});
+
+/* ---------------- G-1: discount (money — the DB trigger is the other half of this) ---------------- */
+describe('resolveDiscount', () => {
+  it('percent wins over a stale dollar amount and follows the subtotal', () => {
+    expect(resolveDiscount(1000, { percent: 30, amount: 999 })).toBe(300);
+    expect(resolveDiscount(2000, { percent: 30, amount: 999 })).toBe(600); // item changed → moves
+  });
+  it('percent 0 means the owner typed dollars', () => {
+    expect(resolveDiscount(1000, { percent: 0, amount: 99 })).toBe(99);
+  });
+  it('never exceeds the subtotal and is never negative', () => {
+    expect(resolveDiscount(500, { percent: 0, amount: 900 })).toBe(500);
+    expect(resolveDiscount(500, { percent: 100, amount: 0 })).toBe(500);
+    expect(resolveDiscount(500, { percent: 0, amount: -10 })).toBe(0);
+    expect(resolveDiscount(0, { percent: 30, amount: 0 })).toBe(0);
+  });
+  it('no discount at all is zero', () => {
+    expect(resolveDiscount(1000, null)).toBe(0);
+    expect(resolveDiscount(1000, NO_DISCOUNT)).toBe(0);
+  });
+});
+
+describe('calcTotals with a discount', () => {
+  // the numbers below are the ones PROVED against the production trigger (rollback test 24/08):
+  // subtotal 6919.78 · taxable base 2261.20 · tax 7%
+  const mixed: LineItem[] = [
+    item({ qty: 1, price: 2261.2, taxable: true }),
+    item({ qty: 1, price: 4658.58, taxable: false }),
+  ];
+  it('matches the DB trigger for a 30% discount', () => {
+    const t = calcTotals(mixed, 7, 0, resolveDiscount(6919.78, { percent: 30, amount: 0 }));
+    expect(t.discount).toBe(2075.93);
+    expect(t.tax).toBe(110.8);
+    expect(t.total).toBe(4954.65);
+  });
+  it('matches the DB trigger for a $1000 discount', () => {
+    const t = calcTotals(mixed, 7, 0, resolveDiscount(6919.78, { percent: 0, amount: 1000 }));
+    expect(t.tax).toBe(135.41);
+    expect(t.total).toBe(6055.19);
+  });
+  it('a full discount zeroes the quote instead of going negative', () => {
+    const t = calcTotals(mixed, 7, 0, resolveDiscount(6919.78, { percent: 100, amount: 0 }));
+    expect(t.discount).toBe(6919.78);
+    expect(t.tax).toBe(0);
+    expect(t.total).toBe(0);
+  });
+  it('taxes only the discounted share of the taxable base', () => {
+    // everything taxable, 10% off → tax drops by exactly 10%
+    const all: LineItem[] = [item({ qty: 1, price: 1000, taxable: true })];
+    const t = calcTotals(all, 10, 0, 100);
+    expect(t.tax).toBe(90);
+    expect(t.total).toBe(990);
+  });
+  it('zero discount leaves the legacy numbers untouched', () => {
+    const withZero = calcTotals(mixed, 7, 0, 0);
+    const legacy = calcTotals(mixed, 7, 0);
+    expect(withZero.total).toBe(legacy.total);
+    expect(withZero.discount).toBe(0);
+  });
+});
+
+describe('discountFromTarget ("deu 1.099, quer deixar 1.000 redondo")', () => {
+  const mixed: LineItem[] = [
+    item({ qty: 1, price: 2261.2, taxable: true }),
+    item({ qty: 1, price: 4658.58, taxable: false }),
+  ];
+  it('lands exactly on the round number the owner typed', () => {
+    const d = discountFromTarget(6919.78, 2261.2, 7, 6500);
+    expect(calcTotals(mixed, 7, 0, d).total).toBe(6500);
+  });
+  it('works with no tax at all', () => {
+    const plain: LineItem[] = [item({ qty: 1, price: 1099, taxable: false })];
+    const d = discountFromTarget(1099, 0, 0, 1000);
+    expect(d).toBe(99);
+    expect(calcTotals(plain, 0, 0, d).total).toBe(1000);
+  });
+  it('a target above the total asks for no discount', () => {
+    expect(discountFromTarget(1000, 0, 0, 5000)).toBe(0);
+  });
+  it('a target of zero clamps at the subtotal', () => {
+    expect(discountFromTarget(1000, 0, 0, 0)).toBe(1000);
+  });
+  it('an empty quote cannot be targeted', () => {
+    expect(discountFromTarget(0, 0, 7, 100)).toBe(0);
   });
 });

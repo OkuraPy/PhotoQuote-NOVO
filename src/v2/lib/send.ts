@@ -120,7 +120,8 @@ export type SendData = {
   customerNote?: string; // client-facing note (G1, English) — printed as a "Notes" section
   photos?: string[]; // curated job photos printed on the quote PDF (G2, max 6 — public URLs)
   items: { cat: string; desc: string; qty: number; unit: string; price: number; taxable: boolean }[];
-  totals: { subtotal: number; tax: number; total: number; taxRate: number };
+  // G-1: `discount` is the client-facing reduction in dollars (0 = no discount line is printed)
+  totals: { subtotal: number; tax: number; total: number; taxRate: number; discount?: number };
   // invoice payment plan + ledger (labels/dates already English — planRows/DB method keys)
   payment?: {
     rows: { label: string; amount: number; due: string | null }[];
@@ -279,6 +280,7 @@ function buildHtml(d: SendData): string {
     }
     <div class="tot">
       <div class="row"><span>Subtotal</span><b>${fmt(d.totals.subtotal)}</b></div>
+      ${d.totals.discount && d.totals.discount > 0 ? `<div class="row"><span>Discount</span><b class="ok">-${fmt(d.totals.discount)}</b></div>` : ''}
       <div class="row"><span>Tax (${escapeHtml(d.totals.taxRate)}%)</span><b>${fmt(d.totals.tax)}</b></div>
       <div class="grand"><span>Total</span><span>${fmt(d.totals.total)}</span></div>
       ${
@@ -331,7 +333,7 @@ function buildText(d: SendData): string {
       }${d.payment.paid > 0 ? `Paid ${fmt(d.payment.paid)} · ` : ''}Balance due ${fmt(d.payment.balance)}`
     : '';
   const note = d.customerNote ? `\n\nNotes: ${d.customerNote}` : '';
-  return `${d.docLabel}${d.number ? ' ' + d.number : ''} — ${d.company.name}\n${d.client?.name ? `For: ${d.client.name}\n` : ''}${d.jobSite ? `Job site: ${d.jobSite}\n` : ''}\n${lines}\n\nSubtotal ${fmt(d.totals.subtotal)} · Tax ${fmt(d.totals.tax)} · Total ${fmt(d.totals.total)}${pay}${note}`;
+  return `${d.docLabel}${d.number ? ' ' + d.number : ''} — ${d.company.name}\n${d.client?.name ? `For: ${d.client.name}\n` : ''}${d.jobSite ? `Job site: ${d.jobSite}\n` : ''}\n${lines}\n\nSubtotal ${fmt(d.totals.subtotal)}${d.totals.discount && d.totals.discount > 0 ? ` · Discount -${fmt(d.totals.discount)}` : ''} · Tax ${fmt(d.totals.tax)} · Total ${fmt(d.totals.total)}${pay}${note}`;
 }
 
 export async function sendDoc(option: string, d: SendData) {
