@@ -4,6 +4,29 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-08-24 22:40] — build: BUILD 34 ENTREGUE AO TESTFLIGHT (Onda G completa)
+- **O que foi**: EAS build iOS production com `--auto-submit`, do worktree `/root/projetos/pq-build24`
+  no commit `b557f1c`. Version 2.0.0, **buildNumber 34** (o autoIncrement do EAS levou 33→34 e
+  reescreveu o app.json — daí o número estar commitado aqui).
+- **IDs**: build `338116c3-e78d-4b9b-a700-0d894d3be12c` · submission `8895d453-5a6b-4ddd-ad47-59f4a957ca62`
+  · "Submitted your app to Apple App Store Connect" sem erro.
+- **Conteúdo**: a Onda G inteira (os 9 pontos do feedback do Gladson de 30-31/07) — G-1 desconto,
+  G-2 progresso do upload, G-3 ver o portal pelo app, G-4 abrir o contrato, G-5 parcial visível,
+  G-6 referência no recibo, G-8 logo + paginação do PDF, G-9 múltiplas faturas. O G-7 (download de
+  fotos no portal) já estava no ar desde 7138501.
+- **Pré-build conferido**: bundle do worktree com **hash idêntico** ao da árvore de teste (mesmo
+  código), **zero mudança de dependência** desde a build 33 e `npm ls` com um único
+  `expo-asset@12.0.13` (a checagem que a saga da tela branca ensinou); 10 sondas de integridade em
+  produção zeradas, incluindo as duas novas do desconto (toda fatura e todo orçamento com
+  `subtotal − desconto + imposto + margem = total`).
+- **Migrations em produção hoje**: payment_reference (+ corretiva usando o `note` que já existia),
+  discount_columns, estimate_totals_with_discount, contract_template_discount_line,
+  invoice_is_change_order.
+- **GOTCHA (de novo)**: o `eas-cli` exige `EXPO_TOKEN=$(cat /root/.expo_token)` — sem isso o build
+  falha com "An Expo user account is required to proceed".
+
+---
+
 ### [2026-08-24 22:00] — fix: revisão do G-9 (a única parte ainda não revisada) — 1 BLOQUEANTE
 - **Contexto**: antes da build, um revisor atacou só as múltiplas faturas — os dois revisores
   anteriores tinham começado antes dela existir. Achou um bloqueante que teria ido pro cliente.
