@@ -305,14 +305,16 @@ export function Field({ label, opt, children }: { label?: string; opt?: boolean;
   );
 }
 
-export const Input = React.forwardRef<TextInput, TextInputProps & { style?: StyleProp<TextStyle> }>(function Input({ style, ...props }, ref) {
+export const Input = React.forwardRef<TextInput, TextInputProps & { style?: StyleProp<TextStyle> }>(function Input({ style, onFocus, onBlur, ...props }, ref) {
   const [focus, setFocus] = useState(false);
   return (
     <TextInput
       ref={ref}
       placeholderTextColor={colors.faint}
-      onFocus={() => setFocus(true)}
-      onBlur={() => setFocus(false)}
+      // compose, never overwrite: the handlers used to sit BEFORE {...props}, so a caller passing
+      // its own onBlur silently killed the focus tracking and the field kept the focused border
+      onFocus={(e) => { setFocus(true); onFocus?.(e); }}
+      onBlur={(e) => { setFocus(false); onBlur?.(e); }}
       style={[
         {
           height: 50,

@@ -1,4 +1,4 @@
-import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobSiteLine, needsPhaseSync, NO_DISCOUNT, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitByTaxShare, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
+import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobSiteLine, needsPhaseSync, NO_DISCOUNT, parseMoney, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitByTaxShare, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
 import type { ClosedKind, LineItem, SyncPhase } from '../../data';
 import type { Stage } from '../../theme';
 
@@ -553,5 +553,44 @@ describe('splitByTaxShare (the extra invoice carries the quote proportions)', ()
   });
   it('an empty quote cannot dictate a share', () => {
     expect(splitByTaxShare(500, 0, 0)).toEqual({ subtotal: 500, tax: 0, total: 500 });
+  });
+});
+
+describe('parseMoney (o campo de total final aceita vírgula E ponto)', () => {
+  it('reads the en convention', () => {
+    expect(parseMoney('1,000.50')).toBe(1000.5);
+    expect(parseMoney('1000.50')).toBe(1000.5);
+  });
+  it('reads the pt/es convention — the bug that turned $1.098 into $1.00', () => {
+    expect(parseMoney('1.000,50')).toBe(1000.5);
+    expect(parseMoney('1.000')).toBe(1000);
+    expect(parseMoney('1.000.000')).toBe(1000000);
+  });
+  it('a lone separator with three digits after it is thousands, not cents', () => {
+    expect(parseMoney('1,000')).toBe(1000);
+  });
+  it('keeps one and two decimals', () => {
+    expect(parseMoney('1000,5')).toBe(1000.5);
+    expect(parseMoney('999,99')).toBe(999.99);
+  });
+  it('strips currency noise', () => {
+    expect(parseMoney('$ 1,099.00')).toBe(1099);
+  });
+  it('is null when there is no number', () => {
+    expect(parseMoney('')).toBeNull();
+    expect(parseMoney('abc')).toBeNull();
+    expect(parseMoney('$')).toBeNull();
+  });
+});
+
+describe('resolveDiscount arredonda como o Postgres, não como o float', () => {
+  it('o empate de meio centavo sobe, igual ao numeric(12,2) do banco', () => {
+    // caso real achado na revisão: subtotal 8746.71 a 50% dava 4373.35 na tela e 4373.36 no banco,
+    // e as quatro linhas do PDF do cliente deixavam de fechar
+    expect(resolveDiscount(8746.71, { percent: 50, amount: 0 })).toBe(4373.36);
+  });
+  it('segue batendo nos percentuais redondos', () => {
+    expect(resolveDiscount(1000, { percent: 30, amount: 0 })).toBe(300);
+    expect(resolveDiscount(6919.78, { percent: 30, amount: 0 })).toBe(2075.93);
   });
 });

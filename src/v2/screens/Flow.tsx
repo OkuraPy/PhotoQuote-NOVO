@@ -9,7 +9,7 @@ import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } fr
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { applyMarkup, buildStarterEstimate, calcTotals, deriveBase, discountFromTarget, fmt, LineItem, NO_DISCOUNT, resolveDiscount, SERVICE_TYPES, split } from '../data';
+import { applyMarkup, buildStarterEstimate, calcTotals, deriveBase, discountFromTarget, fmt, LineItem, NO_DISCOUNT, parseMoney, resolveDiscount, SERVICE_TYPES, split } from '../data';
 import { MAX_AI_PHOTOS, requestEstimate, transcribeAudio, translateNote } from '../lib/ai';
 import { createClient, createJob, fetchClients, fetchCompanyProfile, getMyLocation, lookupZip, Region, updateEstimateItems } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -72,6 +72,7 @@ registerStrings({
   'flow.discount': { en: 'Discount', es: 'Descuento', pt: 'Desconto' },
   'flow.shownToClient': { en: 'Shown on the client documents', es: 'Aparece en los documentos del cliente', pt: 'Aparece nos documentos do cliente' },
   'flow.finalTotal': { en: 'Final total', es: 'Total final', pt: 'Total final' },
+  'flow.applyTotal': { en: 'Apply', es: 'Aplicar', pt: 'Aplicar' },
   'flow.discountApplied': { en: 'Discount of {amount} applied before tax', es: 'Descuento de {amount} aplicado antes del impuesto', pt: 'Desconto de {amount} aplicado antes do imposto' },
   'flow.hiddenFromClient': { en: 'Hidden from client', es: 'Oculto para el cliente', pt: 'Oculto do cliente' },
   'flow.markupIncluded': { en: 'Markup included in item prices', es: 'Margen incluido en los precios de los elementos', pt: 'Margem incluída nos preços dos itens' },
@@ -530,25 +531,42 @@ function Wave({ color }: { color: string }) {
 // Applied on blur, never on every keystroke: typing "1000" passes through 1, 10 and 100, and each
 // of those as a live target would clamp the discount to the whole subtotal and fight the typing.
 function TotalTarget({ total, onApply }: { total: number; onApply: (target: number) => void }) {
+  const tr = useT();
   const [txt, setTxt] = useState('');
   useEffect(() => {
     setTxt(total > 0 ? total.toFixed(2) : '');
   }, [total]);
+  // parseMoney, never parseFloat: "1.000,50" typed on a pt/es keyboard reads as 1 with parseFloat,
+  // and this number drives a DISCOUNT — a $1,098 quote would silently become a $1.00 one
+  const parsed = parseMoney(txt);
+  const dirty = parsed != null && parsed >= 0 && Math.abs(parsed - total) > 0.005;
   const apply = () => {
-    const v = parseFloat(txt.replace(/[^0-9.,]/g, '').replace(',', '.'));
-    if (isFinite(v) && v >= 0) onApply(v);
+    // untouched field = nothing to do. Without this, tapping the field just to LOOK at it and then
+    // tapping away re-applied the same number as a fixed-dollar discount, silently turning a "-30%"
+    // (which follows the items when they change) into a frozen amount.
+    if (!dirty) {
+      setTxt(total > 0 ? total.toFixed(2) : '');
+      return;
+    }
+    if (parsed != null && parsed >= 0) onApply(parsed);
     else setTxt(total > 0 ? total.toFixed(2) : '');
   };
   return (
-    <Input
-      value={txt}
-      onChangeText={setTxt}
-      onBlur={apply}
-      onSubmitEditing={apply}
-      keyboardType="decimal-pad"
-      returnKeyType="done"
-      style={{ width: 130, textAlign: 'right' }}
-    />
+    <Row style={{ gap: 8 }}>
+      {/* iOS' decimal-pad has no return key (same reason the Sheet has tap-to-dismiss), so a
+          typed total needs a visible way to be confirmed — otherwise the owner types it, sees
+          nothing happen and has no idea whether it took */}
+      {dirty ? <LinkBtn icon="check" title={tr('flow.applyTotal')} onPress={apply} /> : null}
+      <Input
+        value={txt}
+        onChangeText={setTxt}
+        onBlur={apply}
+        onSubmitEditing={apply}
+        keyboardType="decimal-pad"
+        returnKeyType="done"
+        style={{ width: 120, textAlign: 'right' }}
+      />
+    </Row>
   );
 }
 
@@ -632,6 +650,8 @@ export function EstimateScreen({ go, back, params }: NavProp) {
   const discount = store.discount || NO_DISCOUNT;
   const gross = calcTotals(items, taxRate, 0);
   const t = calcTotals(items, taxRate, 0, resolveDiscount(gross.subtotal, discount));
+  // the discount as a percentage of the subtotal, whichever way it was entered
+  const effDiscountPct = discount.percent > 0 ? discount.percent : gross.subtotal > 0 ? Math.round((t.discount / gross.subtotal) * 1000) / 10 : 0;
   const [d, c] = split(t.total);
   // edit mode: persist the edited items back into the SAME estimate (trigger recomputes totals)
   const queryClient = useQueryClient();
@@ -827,9 +847,11 @@ export function EstimateScreen({ go, back, params }: NavProp) {
                 </View>
               </Row>
               <Stepper
-                value={`${discount.percent}%`}
-                onMinus={() => up((st) => ({ discount: { percent: Math.max(0, (st.discount?.percent ?? 0) - 5), amount: 0 } }))}
-                onPlus={() => up((st) => ({ discount: { percent: Math.min(100, (st.discount?.percent ?? 0) + 5), amount: 0 } }))}
+                // shows the EFFECTIVE percentage even when the discount was typed in dollars:
+                // showing 0% next to a live $99 discount made the "−" look inert while it wiped it
+                value={`${effDiscountPct}%`}
+                onMinus={() => up(() => ({ discount: { percent: Math.max(0, Math.round(effDiscountPct) - 5), amount: 0 } }))}
+                onPlus={() => up(() => ({ discount: { percent: Math.min(100, Math.round(effDiscountPct) + 5), amount: 0 } }))}
               />
             </Between>
             {/* "deu 1.099, quer deixar 1.000 redondo": type the round number, the app works out

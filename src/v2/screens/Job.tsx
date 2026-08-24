@@ -53,6 +53,8 @@ registerStrings({
   'job.uploadingCount': { en: 'Sending {done} of {total}…', es: 'Enviando {done} de {total}…', pt: 'Enviando {done} de {total}…' },
   // G-6: check number / bank on the payment — prints on the client's receipt
   'job.referenceLabel': { en: 'Reference (check #, bank)', es: 'Referencia (n.º de cheque, banco)', pt: 'Referência (nº do cheque, banco)' },
+  // the hint is the CONTRACTOR's UI (only the value he types reaches the client's receipt)
+  'job.referenceHint': { en: 'Check #1234 · Chase', es: 'Cheque n.º 1234 · Chase', pt: 'Cheque nº 1234 · Chase' },
   // G-5: the money that already landed, said out loud on the job header
   'job.paidOfTotal': { en: 'Paid {paid} of {total}', es: 'Pagado {paid} de {total}', pt: 'Pago {paid} de {total}' },
   'job.balanceLeft': { en: '{amount} left', es: 'Faltan {amount}', pt: 'Faltam {amount}' },
@@ -454,7 +456,12 @@ export function JobScreen({ go, back, params }: NavProp) {
   const computed = calcTotals(items, taxRate, 0, resolveDiscount(grossComputed.subtotal, est?.discount ?? NO_DISCOUNT));
   // stored DB totals are the source of truth (trigger); fall back to computed for mock/no-estimate
   const quoteTotals: Totals = est
-    ? { subtotal: est.subtotal, taxableSubtotal: computed.taxableSubtotal, tax: est.tax, total: est.total, taxRate, discount: resolveDiscount(est.subtotal, est.discount) }
+    ? // every line of a saved document comes from the DB — subtotal, tax and total always did, and
+      // the DISCOUNT has to as well. Recomputing it in JS made the four printed lines disagree by a
+      // cent whenever the two round a half-cent tie differently (Math.round is float, numeric(12,2)
+      // is exact): the PDF said "8.746,71 − 4.373,35 + 218,18 = 4.591,53" and the contract, which
+      // reads the DB, printed 4.373,36. resolveDiscount is for the PREVIEW of what is not saved yet.
+      { subtotal: est.subtotal, taxableSubtotal: computed.taxableSubtotal, tax: est.tax, total: est.total, taxRate, discount: est.discount.amount }
     : { ...computed, taxRate };
   const invoiceTotals: Totals = inv
     ? { subtotal: inv.subtotal, taxableSubtotal: computed.taxableSubtotal, tax: inv.tax, total: inv.total, taxRate: inv.taxRate, discount: inv.discount }
@@ -1913,7 +1920,7 @@ function RecordPaymentSheet({ open, onClose, balance, busy, onConfirm }: { open:
           Client-facing on purpose — it prints on the receipt, so the hint is in English like every
           other string that reaches the client. 120 = the DB CHECK. */}
       <Field label={t('job.referenceLabel')} opt>
-        <Input value={note} onChangeText={setNote} placeholder="Check #1234 · Chase" maxLength={120} autoCapitalize="words" />
+        <Input value={note} onChangeText={setNote} placeholder={t('job.referenceHint')} maxLength={120} autoCapitalize="words" />
       </Field>
       <Row style={{ gap: 6 }}>
         <Icon name="calendar" size={14} color={colors.muted} />
@@ -2226,8 +2233,9 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName, jobPhot
                 {p.notes ? <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 8, lineHeight: 19 }}>{p.notes}</Text> : null}
                 {p.photos.length || upPhase ? (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 12 }}>
-                    {/* G-2: one ghost tile per photo still in flight — the strip fills up as they
-                        land, so "is it doing anything?" answers itself */}
+                    {/* G-2: one ghost tile per photo still in flight — the row of placeholders
+                        shrinks as each one lands, and the real thumbnails come in on the refresh
+                        at the end. Either way the strip is never silent while photos are moving. */}
                     {upPhase
                       ? Array.from({ length: Math.max(0, upPhase.total - upPhase.done) }).map((_, k) => (
                           <View key={`up${k}`} style={{ width: 64, height: 64, borderRadius: 10, backgroundColor: colors.chipBg, alignItems: 'center', justifyContent: 'center' }}>

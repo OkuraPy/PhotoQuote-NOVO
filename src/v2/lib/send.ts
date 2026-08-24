@@ -51,9 +51,9 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 // both start inside the same millisecond and the logo's index 0 collides with photo 0 — two
 // concurrent downloads writing the same file. A counter cannot collide with itself.
 let tmpSeq = 0;
-// maxWidth = null skips the resize entirely: the company logo (G-8) is small AND often a PNG with
-// a transparent background, and the manipulator's JPEG re-encode would paint that transparency
-// black right in the document header.
+// maxWidth = null skips the resize entirely: uploadCompanyLogo already stores the logo as a 512px
+// JPEG, so there is nothing left to shrink — running it through the manipulator again would only
+// re-encode (and re-compress) an image that is already ~54KB.
 async function toDataUri(url: string, maxWidth: number | null = 900): Promise<string> {
   // the whole body is guarded: ANY throw here would reject the Promise.all and cost the user the
   // entire PDF, which is worse than the missing photo we're fixing

@@ -25,6 +25,25 @@ export type LineItem = {
 
 export const round2 = (x: number) => Math.round(x * 100) / 100;
 
+// Money typed (or PASTED) by a human, in any of the separator conventions this app ships in.
+// "1.000,50" (pt/es) and "1,000.50" (en) both mean 1000.50 — the LAST separator is the decimal one
+// and everything before it is thousands. A bare parseFloat gets "1.000,50" catastrophically wrong
+// (it returns 1), and this value drives a discount: reading 1 instead of 1000 turns a $1,098 quote
+// into a $1.00 one. Returns null when there is no number in there at all.
+export function parseMoney(text: string): number | null {
+  const raw = String(text ?? '').replace(/[^0-9.,-]/g, '');
+  if (!raw || !/[0-9]/.test(raw)) return null;
+  const sep = Math.max(raw.lastIndexOf('.'), raw.lastIndexOf(','));
+  // a single separator with 3 digits after it is a thousands mark ("1.000"), not a decimal
+  const decimals = sep >= 0 ? raw.length - sep - 1 : 0;
+  const isDecimalSep = sep >= 0 && decimals > 0 && decimals !== 3;
+  const clean = isDecimalSep
+    ? `${raw.slice(0, sep).replace(/[.,]/g, '')}.${raw.slice(sep + 1).replace(/[.,]/g, '')}`
+    : raw.replace(/[.,]/g, '');
+  const n = parseFloat(clean);
+  return isFinite(n) ? n : null;
+}
+
 // Embedded markup: fold `pct`% into each unit price (same idea as the regional multiplier).
 // Always recomputes from basePrice, so re-applying with a different pct never compounds.
 export function applyMarkup(items: LineItem[], pct: number): LineItem[] {
@@ -78,9 +97,15 @@ export const NO_DISCOUNT: Discount = { percent: 0, amount: 0 };
 
 // Resolve a Discount against a subtotal. MUST mirror update_estimate_totals() in the DB, clamp
 // included: a discount can zero a quote, never turn it into a credit.
+//
+// The percentage is worked out in integer CENTS on purpose. Postgres computes it in exact decimal
+// and rounds a half-cent tie UP; `subtotal * pct / 100` in floats lands just under the tie and
+// rounds DOWN — 8746.71 at 50% gave 4373.35 on screen and 4373.36 in the database, so the four
+// printed lines of the quote did not add up. In cents: 874671 × 50 / 100 = 437335.5 → 437336. ✓
 export function resolveDiscount(subtotal: number, d?: Discount | null): number {
   if (!d) return 0;
-  const raw = d.percent > 0 ? round2((subtotal * d.percent) / 100) : round2(d.amount || 0);
+  const subCents = Math.round(round2(subtotal) * 100);
+  const raw = d.percent > 0 ? Math.round((subCents * d.percent) / 100) / 100 : round2(d.amount || 0);
   return Math.min(Math.max(0, raw), round2(subtotal));
 }
 
@@ -100,11 +125,15 @@ export function calcTotals(items: LineItem[], taxRate: number, marginRate = 0, d
   // Discounted path rounds at every step, exactly where the DB's numeric(12,2) rounds — the
   // preview on screen has to be the cent the trigger will store, or "round it to $1,000" lands
   // on $1,000.01 the moment it is saved.
-  const disc = Math.min(round2(discount), round2(subtotal));
-  const taxableAfter = round2(taxableSubtotal * (1 - disc / subtotal));
+  // round the two bases FIRST: the trigger stores them as numeric(12,2) and computes the taxable
+  // share from the rounded numbers, so a float sum of fractional quantities would drift a cent
+  const sub2 = round2(subtotal);
+  const taxable2 = round2(taxableSubtotal);
+  const disc = Math.min(round2(discount), sub2);
+  const taxableAfter = round2(taxable2 * (1 - disc / sub2));
   const tax = round2(taxableAfter * (taxRate / 100));
-  const margin = round2((subtotal - disc + tax) * (marginRate / 100));
-  return { subtotal, taxableSubtotal, discount: disc, tax, margin, total: round2(subtotal - disc + tax + margin) };
+  const margin = round2((sub2 - disc + tax) * (marginRate / 100));
+  return { subtotal, taxableSubtotal, discount: disc, tax, margin, total: round2(sub2 - disc + tax + margin) };
 }
 
 // "deu 1.099, quer deixar 1.000 redondo" — the owner types the FINAL total and the app derives the
@@ -119,7 +148,9 @@ export function discountFromTarget(subtotal: number, taxableSubtotal: number, ta
   const k = taxableSubtotal * (taxRate / 100);
   const clamp = (d: number) => Math.min(Math.max(0, round2(d)), round2(subtotal));
   let d = clamp((subtotal + k - target) / (1 + k / subtotal));
-  const totalWith = (x: number) => subtotal - x + round2(round2(taxableSubtotal * (1 - x / subtotal)) * (taxRate / 100));
+  // rounded like calcTotals rounds it — otherwise "which one lands closer to the typed number" is
+  // decided on a total the screen will never show
+  const totalWith = (x: number) => round2(round2(subtotal) - x + round2(round2(round2(taxableSubtotal) * (1 - x / round2(subtotal))) * (taxRate / 100)));
   const off = round2(totalWith(d) - target);
   if (off !== 0) {
     const fixed = clamp(d + off);

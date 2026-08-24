@@ -4,6 +4,57 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-08-24 21:15] — fix: achados dos 2 revisores em paralelo (pedido do dono) — 1 ALTO de dinheiro corrigido
+- **Contexto**: o dono pediu "deixa um agente em paralelo revisando cada coisinha". Dois revisores
+  independentes (dinheiro/banco e app/produto) varreram a Onda G commitada. Veredito dos dois:
+  **sem bloqueante**. O que era real foi corrigido aqui.
+- **ALTO — o PDF do cliente não fechava a conta (1 centavo, em 8,6% dos descontos em %)**: a tela
+  do job montava os totais misturando fontes — subtotal, imposto e total vinham do BANCO e o
+  desconto era recalculado em JS. `Math.round` (float) desempata meio centavo pra BAIXO e o
+  `numeric(12,2)` do Postgres desempata pra CIMA: com subtotal $8.746,71 a 50%, o PDF imprimia
+  "8.746,71 − 4.373,35 + 218,18 = 4.591,53" (as três linhas somam 4.591,54) e o CONTRATO do mesmo
+  job, que lê o banco, imprimia -4.373,36. Dois documentos do mesmo trabalho com descontos
+  diferentes. **Correção**: documento salvo lê o desconto que o banco gravou (`est.discount.amount`);
+  `resolveDiscount` fica só pro preview do que ainda não foi salvo.
+- **E o preview também passou a bater**: `resolveDiscount` calcula o percentual em CENTAVOS
+  inteiros, que é o que reproduz o desempate-pra-cima do Postgres (874671 × 50 / 100 = 437335,5 →
+  437336). Conferido contra o próprio banco: `8746.71 × 50%` = 4.373,36 nos dois. `calcTotals`
+  passou a arredondar subtotal e base tributável ANTES da conta, como o gatilho faz.
+- **MÉDIO — tocar no campo "Total final" convertia um -30% em valor fixo**: bastava tocar e sair
+  sem digitar nada. Agora o campo só aplica quando o número realmente mudou (o `-30%` continua
+  acompanhando os itens, que é a razão de existir do percentual).
+- **MÉDIO — "1.000,50" virava 1**: o `TotalTarget` usava `parseFloat`, que lê 1 num número escrito
+  na convenção pt/es. Isso alimenta um DESCONTO: colar "1.000,00" num orçamento de $1.098 gerava
+  $1.014 de desconto e deixava o total em **$1,00**. Agora usa `parseMoney` (novo, puro, 6 testes),
+  a mesma regra do `DecimalInput` — o último separador é o decimal.
+- **MÉDIO — sem jeito de confirmar o total no iOS**: o teclado decimal do iOS não tem tecla de
+  retorno. Agora aparece um "Aplicar" ao lado do campo assim que o número muda.
+- **MÉDIO — stepper de desconto mentia**: com desconto em dólares ele mostrava "0%" ao lado da
+  legenda "desconto de $500 aplicado", e o "−" apagava os $500 parecendo inerte. Passa a mostrar o
+  percentual EFETIVO, qualquer que tenha sido a forma de entrada.
+- **MÉDIO (portal) — erro mudo no download por fase**: a variante compacta renderizava só o botão,
+  então `error` nunca era lido: o cliente clicava, o spinner girava e não acontecia nada. Agora diz.
+- **MÉDIO (portal) — falha parcial silenciosa**: bastava 1 foto de 30 chegar pra não haver aviso, e
+  o cliente abriria um zip com 4 arquivos achando que era tudo. Agora diz "3 de 30 não puderam ser
+  baixadas — o resto está no arquivo".
+- **BAIXOS**: `Input` compõe o `onBlur`/`onFocus` do chamador em vez de sobrescrever (o campo ficava
+  com a borda de foco pra sempre); comentário das fotos-fantasma dizia o contrário do que o código
+  faz; placeholder da referência do pagamento agora é traduzido (é UI do empreiteiro, só o valor
+  digitado vai pro cliente); comentário do logo dizia "PNG transparente" quando o upload já grava
+  JPEG 512px.
+- **Verificado e SÃO pelos revisores** (não presumido): trigger em produção idêntico à migration;
+  zero regressão nos 92 orçamentos (disparado nos 680 line_items numa transação revertida);
+  `resolveDiscount` × trigger concordam em precedência e clamp; as migrations descrevem a produção
+  fielmente; o desconto sobrevive aos 4 fluxos (criar, editar, faturar, sincronizar); nenhum
+  vazamento financeiro pro papel `field`; 608 chaves i18n, 0 faltando; nada traduzido chega ao
+  cliente; CORS e memória do zip OK; teclado do campo Reference OK.
+- **Aceito**: o indicador de upload some ao trocar de aba (o upload continua e o refresh conserta);
+  assinar o próprio contrato pelo preview é irreversível (o rótulo avisa); logo escolhido e não
+  salvo não vai pro PDF (pré-existente no Perfil).
+- **Gates**: tsc limpo, jest **143/143** (8 testes novos), `expo export ios` OK; portal tsc + build.
+
+---
+
 ### [2026-08-24 20:30] — feat: ONDA G / onda 3, parte 2 — múltiplas faturas por job (G-9)
 - **O que mudou**: o job passa a poder ter mais de uma fatura. Quando o orçamento cresce depois que
   o cliente já pagou, a fatura original **fica intacta** (é o que ele pagou) e a diferença vira uma
