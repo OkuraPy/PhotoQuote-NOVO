@@ -35,6 +35,8 @@ registerStrings({
   'stage.Approved': { en: 'Approved', es: 'Aprobado', pt: 'Aprovado' },
   'stage.Invoiced': { en: 'Invoiced', es: 'Facturado', pt: 'Faturado' },
   'stage.Paid': { en: 'Paid', es: 'Pagado', pt: 'Pago' },
+  // not a pipeline stage: the "money already came in, but not all of it" state of an Invoiced job
+  'stage.Partial': { en: 'Partially paid', es: 'Pago parcial', pt: 'Pago parcial' },
   // bottom tab bar
   'ui.tab.home': { en: 'Home', es: 'Inicio', pt: 'Início' },
   'ui.tab.jobs': { en: 'Jobs', es: 'Trabajos', pt: 'Trabalhos' },
@@ -258,9 +260,13 @@ export const CatChip = ({ label }: { label: string }) => (
   </View>
 );
 
-export function StageChip({ stage, lg }: { stage: Stage; lg?: boolean }) {
+// `partial` (G-5) only means something on an Invoiced job: a payment landed but the invoice is not
+// closed. The chip then says "Partially paid" in the info tone instead of the flat "Invoiced" —
+// the pipeline Stage itself is untouched (the DB derives it, and Paid/Invoiced stay the 6 stages).
+export function StageChip({ stage, lg, partial }: { stage: Stage; lg?: boolean; partial?: boolean }) {
   const t = useT();
-  const s = stageColors[stage];
+  const half = !!partial && stage === 'Invoiced';
+  const s = half ? { c: colors.info, t: colors.infoTint } : stageColors[stage];
   return (
     <View
       style={{
@@ -274,7 +280,7 @@ export function StageChip({ stage, lg }: { stage: Stage; lg?: boolean }) {
       }}
     >
       <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: s.c }} />
-      <Text style={{ fontFamily: fonts.extrabold, fontSize: lg ? 12.5 : 11.5, color: s.c }}>{t('stage.' + stage)}</Text>
+      <Text style={{ fontFamily: fonts.extrabold, fontSize: lg ? 12.5 : 11.5, color: s.c }}>{t(half ? 'stage.Partial' : 'stage.' + stage)}</Text>
     </View>
   );
 }

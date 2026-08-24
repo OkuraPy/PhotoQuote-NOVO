@@ -1,6 +1,6 @@
 // PhotoQuote v2 — Job screen: timeline + Quote / Invoice / Contract / Progress tabs
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, Share, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Linking, Pressable, Share, ScrollView, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
@@ -42,6 +42,18 @@ registerStrings({
   'job.alert.couldNotCreateContract': { en: 'Could not create the contract', es: 'No se pudo crear el contrato', pt: 'Não foi possível criar o contrato' },
   'job.alert.couldNotUpdate': { en: 'Could not update', es: 'No se pudo actualizar', pt: 'Não foi possível atualizar' },
   'job.alert.tryAgain': { en: 'Try again.', es: 'Inténtalo de nuevo.', pt: 'Tente novamente.' },
+  'job.alert.couldNotOpenLink': { en: 'Could not open the link', es: 'No se pudo abrir el enlace', pt: 'Não foi possível abrir o link' },
+  // G-3 / G-4: see the client's own pages without texting yourself the link
+  'job.clientView': { en: 'Client view', es: 'Vista del cliente', pt: 'Ver como cliente' },
+  // unsigned: that URL is the SIGNING page (the portal only serves the read-only view once it is
+  // signed) — the label says so, so nobody signs their own client's contract by accident
+  'job.viewContract': { en: 'Preview the signing page', es: 'Ver la página de firma', pt: 'Ver a página de assinatura' },
+  'job.viewSignedContract': { en: 'Open the signed contract', es: 'Abrir el contrato firmado', pt: 'Abrir o contrato assinado' },
+  // G-2: uploading photos used to be a silent 20-30s
+  'job.uploadingCount': { en: 'Sending {done} of {total}…', es: 'Enviando {done} de {total}…', pt: 'Enviando {done} de {total}…' },
+  // G-5: the money that already landed, said out loud on the job header
+  'job.paidOfTotal': { en: 'Paid {paid} of {total}', es: 'Pagado {paid} de {total}', pt: 'Pago {paid} de {total}' },
+  'job.balanceLeft': { en: '{amount} left', es: 'Faltan {amount}', pt: 'Faltam {amount}' },
   // NOTE: share messages and PDF doc labels are NOT registered here on purpose — they reach the
   // CLIENT, and client-facing output is always English (owner's rule). See CLIENT_SHARE below.
   'job.yourCompany': { en: 'Your company', es: 'Tu empresa', pt: 'Sua empresa' },
@@ -314,6 +326,19 @@ const scroll = { paddingHorizontal: 20, paddingBottom: 120 };
 type Totals = { subtotal: number; taxableSubtotal: number; tax: number; total: number; taxRate: number };
 type Tr = (k: string, v?: Record<string, string | number>) => string;
 
+/* ----- opening a client-facing page from inside the app (G-3 / G-4) ----- */
+// Until now the ONLY way to reach the progress portal or the contract was to share the link and
+// tap it somewhere else — the owner was texting himself on WhatsApp to see his own job. RN's
+// Linking hands the URL to the phone's browser: no new native module (expo-web-browser would be
+// an in-app sheet, but a new dependency in a build that already lost a week to a phantom one).
+async function openClientPage(t: Tr, url: string) {
+  try {
+    await Linking.openURL(url);
+  } catch {
+    Alert.alert(t('job.alert.couldNotOpenLink'), t('job.alert.tryAgain'));
+  }
+}
+
 /* ----- shooting or picking photos: the same two-way choice for job photos and phase photos ----- */
 function askPhotoSource(t: Tr, onPick: (mode: 'camera' | 'gallery') => void) {
   Alert.alert(t('job.addPhotoTitle'), undefined, [
@@ -425,6 +450,12 @@ export function JobScreen({ go, back, params }: NavProp) {
   const jobSite = jobSiteLine(detail?.jobSite);
   const addr = detail?.jobSite.address || realClient?.addr || (job ? job.addr : client?.addr || store.aLoc?.city) || t('job.noAddress');
   const next = NEXT[stage];
+  // G-5: a payment landed but the invoice is not closed. The pipeline Stage has no room for it
+  // (a half-paid invoice is still "Invoiced"), so the header said nothing and the owner read the
+  // job as "he hasn't paid anything" — the PARTIAL badge lived only inside the Invoice tab.
+  const paidSoFar = inv?.amountPaid ?? 0;
+  const jobBalance = inv ? invoiceBalance(inv.total, paidSoFar) : 0;
+  const partiallyPaid = !!inv && paidSoFar > 0.005 && jobBalance > 0.005;
   const queryClient = useQueryClient();
 
   /* ----- F12 payment plan + received payments ----- */
@@ -536,6 +567,7 @@ export function JobScreen({ go, back, params }: NavProp) {
 
   /* ----- job photos: add more after the capture / drop one (field report 26/07) ----- */
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoProg, setPhotoProg] = useState<{ done: number; total: number } | null>(null); // G-2
   // the PDF now embeds its photos before printing — long enough that a second tap would race
   const [sendBusy, setSendBusy] = useState(false);
   const addJobPhotos = () => {
@@ -545,8 +577,9 @@ export function JobScreen({ go, back, params }: NavProp) {
         const assets = await choosePhotos(t, mode);
         if (!assets.length) return;
         setPhotoBusy(true);
+        setPhotoProg({ done: 0, total: assets.length });
         try {
-          const { added, failed } = await addProjectPhotos(ownerId, projectId, assets);
+          const { added, failed } = await addProjectPhotos(ownerId, projectId, assets, (done, total) => setPhotoProg({ done, total }));
           await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
           await queryClient.invalidateQueries({ queryKey: ['jobs'] }); // the card thumbnail/count
           // never silent: a photo that didn't make it is said out loud (that's how 8 became 3)
@@ -556,6 +589,7 @@ export function JobScreen({ go, back, params }: NavProp) {
           Alert.alert(t('job.alert.couldNotAddPhotos'), e?.message || t('job.alert.tryAgain'));
         } finally {
           setPhotoBusy(false);
+          setPhotoProg(null);
         }
       })();
     });
@@ -763,6 +797,11 @@ export function JobScreen({ go, back, params }: NavProp) {
       /* user dismissed the share sheet */
     }
   };
+  // G-4: the owner was sending the signing link to his own WhatsApp just to READ the contract
+  const viewContract = () => {
+    const tk = detail?.agreement?.token;
+    if (tk) void openClientPage(t, agreementLink(tk));
+  };
   const generateContract = async () => {
     if (detail?.agreement) return shareContract(detail.agreement.token); // existing doc — resharing is safe
     if (!inv) { Alert.alert(t('job.alert.invoiceNeeded'), t('job.alert.generateInvoiceFirst')); return; }
@@ -853,12 +892,21 @@ export function JobScreen({ go, back, params }: NavProp) {
             </View>
             {/* stage chip hidden for ANY field member — invoices are RLS-hidden from them, so the
                 derived stage would lie (Invoiced/Paid reads as Approved) even with the money flag */}
-            {closed ? <ClosedChip kind={closed} lg /> : !fieldMode ? <StageChip stage={stage} lg /> : null}
+            {closed ? <ClosedChip kind={closed} lg /> : !fieldMode ? <StageChip stage={stage} lg partial={partiallyPaid} /> : null}
           </Between>
           {showMoney ? (
             <Text style={{ fontFamily: fonts.num, fontSize: 32, color: colors.ink, marginTop: 14, letterSpacing: -0.6 }}>
               {vd}<Text style={{ color: colors.muted }}>{vc}</Text>
             </Text>
+          ) : null}
+          {showMoney && partiallyPaid ? (
+            // the two numbers that matter the moment a partial payment lands
+            <Row style={{ gap: 8, marginTop: 6 }}>
+              <Icon name="wallet" size={13} color={colors.info} />
+              <Text style={{ fontFamily: fonts.bold, fontSize: 12.5, color: colors.info }}>
+                {t('job.paidOfTotal', { paid: fmt(paidSoFar), total: fmt(inv!.total) })} · {t('job.balanceLeft', { amount: fmt(jobBalance) })}
+              </Text>
+            </Row>
           ) : null}
           {fieldMode ? null : (
             <>
@@ -883,7 +931,11 @@ export function JobScreen({ go, back, params }: NavProp) {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontFamily: fonts.extrabold, fontSize: 11, letterSpacing: 0.6, color: colors.primary }}>{t('job.nextStep')}</Text>
-                <Text style={{ fontFamily: fonts.bold, fontSize: 14, color: colors.ink, marginTop: 2 }}>{t('job.next.' + next.act)}</Text>
+                <Text style={{ fontFamily: fonts.bold, fontSize: 14, color: colors.ink, marginTop: 2 }}>
+                  {t('job.next.' + next.act)}
+                  {/* "Record payment" alone reads as "nothing came in yet" once a deposit landed */}
+                  {showMoney && partiallyPaid ? <Text style={{ color: colors.muted }}> · {t('job.balanceLeft', { amount: fmt(jobBalance) })}</Text> : null}
+                </Text>
               </View>
               <Btn title={t('job.next.' + next.act)} sm onPress={doNext} />
             </View>
@@ -923,6 +975,7 @@ export function JobScreen({ go, back, params }: NavProp) {
             // a closed job is the archive: it can't gain photos, so it must not lose them either
             onRemovePhoto={projectId && !closed ? removeJobPhoto : undefined}
             photoBusy={photoBusy}
+            photoProgress={photoProg}
             onEdit={
               est && projectId
                 ? () => {
@@ -942,7 +995,7 @@ export function JobScreen({ go, back, params }: NavProp) {
           />
         )}
         {tab === 'invoice' && <InvoiceTab stage={stage} items={items} totals={invoiceTotals} client={realClient} jobSite={jobSite} company={company} invoice={inv} quoteTotal={est?.total} genning={savingPlan} onGen={openGenerateInvoice} onRecordPayment={() => setPaySheet(true)} onEditPlan={() => setPlanSheet('edit')} onReceipt={onReceiptRow} receiptBusyId={receiptBusy} setSheet={(b: boolean) => (b ? requireCompany(() => up({ sheet: true })) : up({ sheet: false }))} />}
-        {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={invoiceTotals} plan={invoicePlan} company={company} genning={genningContract} onGenerate={generateContract} />}
+        {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={invoiceTotals} plan={invoicePlan} company={company} genning={genningContract} onGenerate={generateContract} onView={detail?.agreement ? viewContract : undefined} />}
         {tab === 'progress' && (
           <ProgressTab
             projectId={projectId}
@@ -1142,7 +1195,7 @@ function TotRow({ label, value, bold, color }: { label: string; value: string; b
   );
 }
 
-function QuoteTab({ items, totals, markupPercent = 0, customerNote, go, photos, docPhotos = [], onToggleDocPhoto, onAddPhotos, onRemovePhoto, photoBusy, onEdit, onSend }: { items: LineItem[]; totals: Totals; markupPercent?: number; customerNote?: string | null; go: NavProp['go']; photos: string[]; docPhotos?: string[]; onToggleDocPhoto?: (url: string) => void; onAddPhotos?: () => void; onRemovePhoto?: (url: string) => void; photoBusy?: boolean; onEdit?: () => void; onSend?: () => void }) {
+function QuoteTab({ items, totals, markupPercent = 0, customerNote, go, photos, docPhotos = [], onToggleDocPhoto, onAddPhotos, onRemovePhoto, photoBusy, photoProgress, onEdit, onSend }: { items: LineItem[]; totals: Totals; markupPercent?: number; customerNote?: string | null; go: NavProp['go']; photos: string[]; docPhotos?: string[]; onToggleDocPhoto?: (url: string) => void; onAddPhotos?: () => void; onRemovePhoto?: (url: string) => void; photoBusy?: boolean; photoProgress?: { done: number; total: number } | null; onEdit?: () => void; onSend?: () => void }) {
   const t = useT();
   return (
     <View style={{ marginTop: 16 }}>
@@ -1156,7 +1209,13 @@ function QuoteTab({ items, totals, markupPercent = 0, customerNote, go, photos, 
               // FIRST in the strip, not last: the add tile has to be visible without scrolling
               <Pressable onPress={photoBusy ? undefined : onAddPhotos} style={{ width: 96, height: 96, borderRadius: 14, borderWidth: 1.5, borderStyle: 'dashed', borderColor: colors.borderStrong, alignItems: 'center', justifyContent: 'center', gap: 5 }}>
                 {photoBusy ? (
-                  <ActivityIndicator color={colors.primary} />
+                  // G-2: the spinner alone never said how long — now it counts the photos out
+                  <>
+                    <ActivityIndicator color={colors.primary} />
+                    {photoProgress ? (
+                      <Text style={{ fontFamily: fonts.bold, fontSize: 11.5, color: colors.primary }}>{photoProgress.done}/{photoProgress.total}</Text>
+                    ) : null}
+                  </>
                 ) : (
                   <>
                     <Icon name="camera" size={20} color={colors.primary} />
@@ -1412,7 +1471,7 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, q
 }
 const DpLab = ({ text }: { text: string }) => <Text style={{ fontFamily: fonts.extrabold, fontSize: 10, letterSpacing: 1, color: colors.faint }}>{text.toUpperCase()}</Text>;
 
-function ContractTab({ agreement, hasInvoice, totals, plan, company, genning, onGenerate }: { agreement: JobDetail['agreement']; hasInvoice: boolean; totals: Totals; plan: PaymentPlan | null; company?: any; genning: boolean; onGenerate: () => void }) {
+function ContractTab({ agreement, hasInvoice, totals, plan, company, genning, onGenerate, onView }: { agreement: JobDetail['agreement']; hasInvoice: boolean; totals: Totals; plan: PaymentPlan | null; company?: any; genning: boolean; onGenerate: () => void; onView?: () => void }) {
   const t = useT();
   const coName = company?.company_name || t('job.yourCompany');
   const signed = agreement?.status === 'signed';
@@ -1492,6 +1551,11 @@ function ContractTab({ agreement, hasInvoice, totals, plan, company, genning, on
       ) : (
         <Btn variant="ghost" title={t('job.shareSignedLink')} icon="share" onPress={onGenerate} style={{ marginTop: 16 }} />
       )}
+      {/* G-4: read the real document (the same page the client sees) without texting yourself the
+          link. Only once it exists — there is nothing to open before the contract is generated. */}
+      {onView ? (
+        <Btn variant="soft" title={signed ? t('job.viewSignedContract') : t('job.viewContract')} icon="eye" onPress={onView} style={{ marginTop: 10 }} />
+      ) : null}
     </View>
   );
 }
@@ -1791,6 +1855,9 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName, jobPhot
   const [newName, setNewName] = useState('');
   const [busy, setBusy] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [opening, setOpening] = useState(false); // G-3: minting the token before opening the portal
+  // G-2: which phase is uploading and how far it got — the upload used to be a silent 20-30s
+  const [upload, setUpload] = useState<{ phaseId: string; done: number; total: number } | null>(null);
   const [cmPhaseId, setCmPhaseId] = useState<string | null>(null);
   const [cmText, setCmText] = useState('');
   const [cmBusy, setCmBusy] = useState(false);
@@ -1891,18 +1958,27 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName, jobPhot
   // add photos to a phase — the owner asked to be able to shoot on the spot OR pick from the gallery
   const uploadAssets = async (p: ProgressPhase, assets: { uri: string }[]) => {
     if (!userId || !assets.length) return;
+    setUpload({ phaseId: p.id, done: 0, total: assets.length });
     try {
-      const { added, failed } = await addPhasePhotos(userId, projectId, p.id, assets.map((a) => ({ uri: a.uri })));
+      const { added, failed } = await addPhasePhotos(
+        userId,
+        projectId,
+        p.id,
+        assets.map((a) => ({ uri: a.uri })),
+        (done, total) => setUpload({ phaseId: p.id, done, total })
+      );
       refresh();
       // same rule as the quote album: a photo that didn't make it is said, never swallowed
       if (failed) Alert.alert(t('job.alert.uploadFailed'), t('job.photosFailed', { n: failed }));
       else if (!added) Alert.alert(t('job.alert.uploadFailed'), t('job.alert.noPhotosAdded'));
     } catch (e: any) {
       Alert.alert(t('job.alert.couldNotAddPhotos'), e?.message || t('job.alert.tryAgain'));
+    } finally {
+      setUpload(null);
     }
   };
   const addPhotos = (p: ProgressPhase) => {
-    if (!userId) return;
+    if (!userId || upload) return; // one phase uploading at a time — the counter is single-slot
     askPhotoSource(t, (mode) => {
       void (async () => {
         const assets = await choosePhotos(t, mode);
@@ -1962,21 +2038,46 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName, jobPhot
       setSharing(false);
     }
   };
+  // G-3: same token, but opened here instead of shared — "to see the client's screen I have to
+  // send the link to myself on WhatsApp". Minting the token is the same owner-only move as sharing.
+  const openClientView = async () => {
+    if (!userId || opening) return;
+    setOpening(true);
+    try {
+      const token = await ensureShareToken(userId, projectId);
+      await openClientPage(t, progressLink(token));
+    } catch (e: any) {
+      Alert.alert(t('job.alert.couldNotCreateLink'), e?.message || t('job.alert.tryAgain'));
+    } finally {
+      setOpening(false);
+    }
+  };
 
   const done = phases.filter((p) => p.status === 'completed').length;
 
   return (
     <View style={{ marginTop: 16 }}>
       <Between style={{ marginBottom: 14 }}>
-        <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{phases.length ? t('job.phasesCount', { done, total: phases.length }) : t('job.workPhases')}</Text>
+        {/* shrinks first: two actions + a localized "11 of 12 phases" is tight on a small iPhone,
+            and the actions overflowing off-screen is exactly the class of bug this wave fixes */}
+        <Text numberOfLines={1} style={{ flexShrink: 1, marginRight: 10, fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{phases.length ? t('job.phasesCount', { done, total: phases.length }) : t('job.workPhases')}</Text>
         {fieldMode ? null : (
-          // sharing the client link is the owner's move (it can mint a share token)
-          <Pressable onPress={shareWithClient} disabled={sharing} hitSlop={8}>
-            <Row style={{ gap: 5 }}>
-              <Icon name="link" size={14} color={colors.primary} />
-              <Text style={{ fontFamily: fonts.bold, fontSize: 13.5, color: colors.primary }}>{sharing ? t('job.working') : t('job.clientLink')}</Text>
-            </Row>
-          </Pressable>
+          // sharing the client link is the owner's move (it can mint a share token) — and so is
+          // opening it: G-3 puts the client's own screen one tap away instead of a self-WhatsApp
+          <Row style={{ gap: 16, flexShrink: 0 }}>
+            <Pressable onPress={() => { void openClientView(); }} disabled={opening} hitSlop={8}>
+              <Row style={{ gap: 5 }}>
+                <Icon name="eye" size={14} color={colors.primary} />
+                <Text style={{ fontFamily: fonts.bold, fontSize: 13.5, color: colors.primary }}>{opening ? t('job.working') : t('job.clientView')}</Text>
+              </Row>
+            </Pressable>
+            <Pressable onPress={shareWithClient} disabled={sharing} hitSlop={8}>
+              <Row style={{ gap: 5 }}>
+                <Icon name="link" size={14} color={colors.primary} />
+                <Text style={{ fontFamily: fonts.bold, fontSize: 13.5, color: colors.primary }}>{sharing ? t('job.working') : t('job.clientLink')}</Text>
+              </Row>
+            </Pressable>
+          </Row>
         )}
       </Between>
 
@@ -2014,6 +2115,7 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName, jobPhot
         <View style={{ gap: 12 }}>
           {phases.map((p, i) => {
             const [c, bg, labKey] = PHASE_STAT[p.status];
+            const upPhase = upload && upload.phaseId === p.id ? upload : null;
             return (
               <Card key={p.id} pad>
                 <Between>
@@ -2029,8 +2131,17 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName, jobPhot
                   {fieldMode ? null : <Pressable onPress={() => removePhase(p)} hitSlop={8}><Icon name="trash" size={16} color={colors.faint} /></Pressable>}
                 </Between>
                 {p.notes ? <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: 8, lineHeight: 19 }}>{p.notes}</Text> : null}
-                {p.photos.length ? (
+                {p.photos.length || upPhase ? (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 12 }}>
+                    {/* G-2: one ghost tile per photo still in flight — the strip fills up as they
+                        land, so "is it doing anything?" answers itself */}
+                    {upPhase
+                      ? Array.from({ length: Math.max(0, upPhase.total - upPhase.done) }).map((_, k) => (
+                          <View key={`up${k}`} style={{ width: 64, height: 64, borderRadius: 10, backgroundColor: colors.chipBg, alignItems: 'center', justifyContent: 'center' }}>
+                            {k === 0 ? <ActivityIndicator size="small" color={colors.primary} /> : <Icon name="image" size={16} color={colors.faint} />}
+                          </View>
+                        ))
+                      : null}
                     {p.photos.map((ph) => (
                       // field only adds photos; owner/office can long-press to delete one
                       <Pressable key={ph.id} onLongPress={fieldMode ? undefined : () => removePhoto(ph.id, ph.url)} delayLongPress={300}>
@@ -2044,7 +2155,16 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName, jobPhot
                     ))}
                   </ScrollView>
                 ) : null}
-                <Btn variant="ghost" sm icon="camera" title={p.photos.length ? t('job.addMorePhotos') : t('job.addProgressPhotos')} onPress={() => addPhotos(p)} style={{ marginTop: 12 }} />
+                <Btn
+                  variant="ghost"
+                  sm
+                  icon={upPhase ? undefined : 'camera'}
+                  // G-2: the button IS the progress read-out while photos are in flight
+                  title={upPhase ? t('job.uploadingCount', { done: upPhase.done, total: upPhase.total }) : p.photos.length ? t('job.addMorePhotos') : t('job.addProgressPhotos')}
+                  disabled={!!upload}
+                  onPress={() => addPhotos(p)}
+                  style={{ marginTop: 12 }}
+                />
                 <Pressable onPress={() => setCmPhaseId(p.id)} style={{ marginTop: 10 }} hitSlop={6}>
                   <Row style={{ gap: 6 }}>
                     <Icon name="msg" size={14} color={colors.muted} />

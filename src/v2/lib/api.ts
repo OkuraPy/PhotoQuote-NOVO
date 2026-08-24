@@ -83,10 +83,14 @@ async function uploadOneProjectPhoto(userId: string, projectId: string, photo: P
 // "I put in 8 photos, only 3 show up"). Every photo that still fails after the retry is COUNTED
 // and reported to the caller: losing a photo in silence is what made this unfixable for a year.
 const PHOTO_BATCH = 3;
-async function uploadProjectPhotos(userId: string, projectId: string, photos: Photo[]): Promise<{ urls: string[]; failed: number }> {
+// G-2: the caller gets told how many photos are already up so the UI can count them out loud
+// ("Uploading 3 of 8") — uploading 8 photos over 4G is 20-30s of silence otherwise.
+export type UploadProgress = (done: number, total: number) => void;
+async function uploadProjectPhotos(userId: string, projectId: string, photos: Photo[], onProgress?: UploadProgress): Promise<{ urls: string[]; failed: number }> {
   const urls: string[] = [];
   let failed = 0;
   const stamp = Date.now().toString(36);
+  onProgress?.(0, photos.length);
   for (let i = 0; i < photos.length; i += PHOTO_BATCH) {
     const batch = photos.slice(i, i + PHOTO_BATCH);
     const out = await Promise.all(
@@ -98,6 +102,9 @@ async function uploadProjectPhotos(userId: string, projectId: string, photos: Ph
       })
     );
     out.forEach((u) => (u ? urls.push(u) : failed++));
+    // progress counts every photo the batch RESOLVED (uploaded or lost) — the bar must reach the
+    // end even when a photo fails, or the UI would hang at "7 of 8" on the failure alert
+    onProgress?.(Math.min(i + batch.length, photos.length), photos.length);
   }
   return { urls, failed };
 }
@@ -105,10 +112,10 @@ async function uploadProjectPhotos(userId: string, projectId: string, photos: Ph
 // Add photos to an EXISTING job (the capture flow is not the only moment a photo shows up —
 // field report 26/07: "it doesn't let me add more photos"). New photos also join the document
 // selection while there is room under the cap: adding a photo means wanting it on the quote.
-export async function addProjectPhotos(userId: string, projectId: string, photos: Photo[]): Promise<{ added: number; failed: number }> {
+export async function addProjectPhotos(userId: string, projectId: string, photos: Photo[], onProgress?: UploadProgress): Promise<{ added: number; failed: number }> {
   // upload FIRST, read the arrays after: uploading 8 photos over 4G takes seconds, and reading the
   // arrays up front meant a photo removed meanwhile came back from the dead on this write
-  const { urls, failed } = await uploadProjectPhotos(userId, projectId, photos);
+  const { urls, failed } = await uploadProjectPhotos(userId, projectId, photos, onProgress);
   const { data: proj, error } = await supabase.from('projects').select('photo_urls, doc_photo_urls').eq('id', projectId).maybeSingle();
   if (error) throw error;
   const all: string[] = Array.isArray(proj?.photo_urls) ? (proj!.photo_urls as string[]) : [];
@@ -1017,6 +1024,8 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
       addr: p.address || p.city || '—',
       title: p.name || 'Untitled',
       stage: deriveStage(e?.status, iv?.status),
+      // invoices.status is written by recordInvoicePayment (statusFromPayments) — no extra query
+      partial: String(iv?.status || '').toLowerCase() === 'partially paid',
       value,
       photos: Array.isArray(p.photo_urls) ? p.photo_urls.length : 0,
       thumb: Array.isArray(p.photo_urls) && p.photo_urls[0] ? String(p.photo_urls[0]) : null,
@@ -1559,7 +1568,7 @@ export async function deletePhase(id: string): Promise<void> {
 // Same contract as the job photos: one retry per photo and a COUNT of what still failed, so the
 // screen can say it out loud (a progress photo dying in silence is the same bug the owner
 // reported on the quote album — 8 picked, 3 arrived).
-export async function addPhasePhotos(userId: string, projectId: string, phaseId: string, photos: Photo[]): Promise<{ added: number; failed: number }> {
+export async function addPhasePhotos(userId: string, projectId: string, phaseId: string, photos: Photo[], onProgress?: UploadProgress): Promise<{ added: number; failed: number }> {
   const { count } = await supabase.from('phase_photos').select('id', { count: 'exact', head: true }).eq('phase_id', phaseId);
   let order = count || 0;
   let added = 0;
@@ -1580,12 +1589,15 @@ export async function addPhasePhotos(userId: string, projectId: string, phaseId:
       return null;
     }
   };
+  onProgress?.(0, photos.length);
   for (const photo of photos) {
     const url = (await upload(photo)) || (await upload(photo)); // one retry before giving up
-    if (!url) { failed++; continue; }
+    if (!url) { failed++; onProgress?.(added + failed, photos.length); continue; }
     const { error: insErr } = await supabase.from('phase_photos').insert({ phase_id: phaseId, project_id: projectId, user_id: userId, file_url: url, display_order: order++ });
     if (insErr) failed++;
     else added++;
+    // one photo at a time here (resize + upload + insert): the count moves after each one
+    onProgress?.(added + failed, photos.length);
   }
   return { added, failed };
 }

@@ -4,6 +4,41 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-08-24 16:10] — feat: ONDA G / onda 1 — abrir portal e contrato pelo app, progresso do upload de fotos, pagamento parcial visível
+- **O que mudou**: primeira das 3 ondas do feedback de uso real do Gladson (8 áudios de 30-31/07,
+  repassados pelo dono em 24/08 e catalogados em `docs/FEEDBACK_GLADSON_2026-07-31.md`). Os 4 itens
+  que não tocam em banco nem no portal:
+  - **G-3 ver a tela do cliente**: "pra ver como está a tela do cliente eu tenho que mandar pra mim
+    mesmo". A aba Progresso ganhou **"Ver como cliente"** (ícone de olho) ao lado do "Link do
+    cliente" — mesma cunhagem de token do share, só que abre o `progressLink` no navegador.
+  - **G-4 abrir o contrato**: mesma queixa ("mando o link pro meu WhatsApp e clico em cima"). A aba
+    Contrato ganhou um botão que abre o `agreementLink`. Assinado → "Abrir o contrato assinado" (o
+    portal serve a visão somente-leitura com PDF); não assinado → **"Ver a página de assinatura"**,
+    nome escolhido de propósito: essa URL é o formulário de assinatura, e o rótulo evita que o
+    próprio dono assine o contrato do cliente sem perceber.
+  - **G-2 progresso do upload**: "não parece que a foto está sendo carregada". `addPhasePhotos` e
+    `addProjectPhotos` (via `uploadProjectPhotos`) aceitam um callback `onProgress(done,total)`.
+    Na fase: quadradinhos-fantasma com spinner (um por foto ainda em voo) + o botão vira "Enviando
+    2 de 5…" e trava os outros. No álbum do orçamento: contador `2/5` embaixo do spinner. O contador
+    anda também quando uma foto FALHA — senão travaria em "7 de 8" bem na hora do alerta de erro.
+  - **G-5 pagamento parcial**: a raiz não era o banco (`invoices.status` grava 'Partially Paid'
+    corretamente — confirmado em prod: INV-0026/0010/0009/0008) nem a aba Fatura (o badge PARTIAL
+    sempre esteve certo lá). O que faltava: **o cabeçalho do job e a lista** só mostravam
+    "Faturado", como se nada tivesse entrado. Agora o `StageChip` aceita `partial` → "Pago parcial"
+    em tom info (na Home, na lista de jobs e no topo do job), o cabeçalho ganhou "Pago $4.000 de
+    $8.000 · Faltam $4.000" e o NEXT STEP mostra o saldo.
+- **Arquivos**: `src/v2/screens/Job.tsx` (o grosso), `src/v2/lib/api.ts` (onProgress + `partial` no
+  fetchJobs), `src/v2/ui.tsx` (StageChip parcial + string), `src/v2/data.ts` (`Job.partial`),
+  `src/v2/screens/Tabs.tsx` (passa o partial), `docs/FEEDBACK_GLADSON_2026-07-31.md` (os 9 pontos).
+- **Decisão técnica**: abrir link usa o `Linking` do react-native, NÃO `expo-web-browser`. A visão
+  in-app seria mais bonita, mas é um módulo nativo novo — e este projeto já perdeu 10 builds (18→28)
+  para uma dependência expo fantasma. Zero dep nova, zero risco de build.
+- **Decisão técnica 2**: `partial` NÃO virou um sétimo `Stage`. O Stage é derivado do banco e
+  compartilhado com a Home, o portal e o Timeline; parcial é um eixo de dinheiro, então virou um
+  flag ortogonal, do mesmo jeito que `closed` (lost/archived) já é.
+- **Bug corrigido**: pagamento parcial invisível fora da aba Fatura (queixa direta do Gladson).
+- **Gates**: tsc limpo, jest 108/108.
+
 ### [2026-07-28 07:20] — fix: REVISÃO ADVERSARIAL da Onda F (4 revisores) — 17 achados corrigidos antes do build 33
 - **O que mudou**: o dono pediu "revisa tudo que vc fez" antes de mandar pra Apple. 4 revisores
   independentes (lógica do app, banco/RLS/perda de dado, pipeline do PDF, e produto contra os 7

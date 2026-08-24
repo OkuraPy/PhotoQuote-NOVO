@@ -436,6 +436,9 @@ export type Job = {
   date: string;
   thumb?: string | null; // first project photo, for the card thumbnail
   closed?: ClosedKind | null; // lost/archived (projects.status) — orthogonal to `stage`
+  // G-5: money already landed but the invoice is not closed. deriveStage cannot carry this (a
+  // half-paid invoice is still "Invoiced"), and from the list that read as "nothing was paid".
+  partial?: boolean;
 };
 
 export const JOBS: Job[] = [

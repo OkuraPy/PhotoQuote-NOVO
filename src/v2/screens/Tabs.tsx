@@ -311,7 +311,7 @@ export function JobCard({ j, i, onPress }: { j: Job; i: number; onPress: () => v
             ) : (
               <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{j.date}</Text>
             )}
-            {j.closed ? <ClosedChip kind={j.closed} /> : showStage ? <StageChip stage={j.stage} /> : null}
+            {j.closed ? <ClosedChip kind={j.closed} /> : showStage ? <StageChip stage={j.stage} partial={j.partial} /> : null}
           </Between>
         </View>
       </Card>
