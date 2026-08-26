@@ -4,6 +4,39 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-08-26 01:10] — fix: revisão do bloco de desconto — 1 ALTO de interface (orçamento de graça)
+- **Contexto**: dois revisores em cima do `87cf078` antes de virar build. Este é o de "faz sentido e
+  vai funcionar". A matemática passou com louvor; a interface do percentual não.
+- 🔴 **ALTO — o campo de % perdeu a unidade e vinha com um "0" pra apagar.** Ao virar campo
+  digitável, o percentual deixou de mostrar "12%" e passou a mostrar só "12" — e o campo de valor,
+  só "189.73". Eram os únicos números sem unidade do cartão (imposto e markup mostram "%"). Cenário
+  provado pelo revisor: num orçamento real de $1.637,20 o dono digita `200` querendo **$200 de
+  desconto** no campo errado → clampado em **100%** → total **$0,00** → e esse zero vai pro PDF, pra
+  fatura e pro contrato assinável. Piorava porque o campo vinha pré-preenchido com "0" e digitar
+  "12" com o cursor à esquerda dava "120". **Correção**: "%" e "$" visíveis ao lado dos campos,
+  `selectTextOnFocus` (digitar substitui em vez de concatenar) e `maxLength` (5 no %, 12 no valor).
+- 🟡 **Os botões ± descartavam o que o campo tinha acabado de aceitar**: eles liam o percentual do
+  render, então digitar "$300" e tocar em "+" no mesmo gesto matava os $300 (blur e press no mesmo
+  tick, a última escrita vence). Agora leem o mesmo ref síncrono que o save usa.
+- 🟡 **± não andava 1 ponto**: com $200 fixos sobre $2.081,10 (=9,6%), o "+" ia pra 11%. Agora anda
+  exatamente 1 ponto (9,6 → 10,6).
+- 🟡 **Nada dizia qual das três entradas está guardada** — e isso decide o comportamento: um % ACOMPANHA
+  os itens quando eles mudam, um valor fica FIXO. A dica agora diz qual ("acompanha os itens" /
+  "valor fixo").
+- 🔵 **`parseMoney` num campo de percentual estava errado**: a regra "3 dígitos depois do separador =
+  milhar" é certa pra dinheiro e não pra percentual (`12.567` virava 12567, `0.005` virava 5). Entrou
+  `parsePercent` (4 testes) — decimal simples, vírgula ou ponto, meio ponto preservado.
+- 🔵 **Overflow**: um valor absurdo no campo de desconto estourava o `numeric(12,2)` do gatilho e o
+  save voltava com erro cru do Postgres (22003). O valor agora é limitado ao subtotal no app.
+- **Confirmado SÃO pelo revisor** (não presumido): o app e o gatilho batem centavo a centavo em 12
+  casos rodados dos dois lados (incluindo o histórico 8.746,71 @ 50% → 4.373,36); os três campos
+  reconciliam em **28.800 combinações** sem uma falha; o que a tela mostra é o que o banco grava nos
+  três caminhos; o PDF lê o desconto do BANCO (a correção de ontem está intacta); o desconto não
+  vaza entre orçamentos; i18n completo e nada traduzido chega ao cliente.
+- **Gates**: tsc limpo, jest 148/148, `expo export ios` OK.
+
+---
+
 ### [2026-08-26 00:40] — fix: 3 pedidos do Gladson no desconto — inclusive "salvei e não salvou"
 - **Origem**: primeiro uso real do desconto (build 34/35). Print + 2 áudios de 25/08.
 - 🔴 **BUG DE PERDA DE DADO — digitar o total e salvar não salvava.** Pelo stepper (5%, 10%) salvava;

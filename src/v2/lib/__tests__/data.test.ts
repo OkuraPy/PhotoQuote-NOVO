@@ -1,4 +1,4 @@
-import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobSiteLine, needsPhaseSync, NO_DISCOUNT, parseMoney, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitChangeOrder, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
+import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobSiteLine, needsPhaseSync, NO_DISCOUNT, parseMoney, parsePercent, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitChangeOrder, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
 import type { ClosedKind, LineItem, SyncPhase } from '../../data';
 import type { Stage } from '../../theme';
 
@@ -602,5 +602,24 @@ describe('resolveDiscount arredonda como o Postgres, não como o float', () => {
   it('segue batendo nos percentuais redondos', () => {
     expect(resolveDiscount(1000, { percent: 30, amount: 0 })).toBe(300);
     expect(resolveDiscount(6919.78, { percent: 30, amount: 0 })).toBe(2075.93);
+  });
+});
+
+describe('parsePercent (percentual não é dinheiro)', () => {
+  it('não confunde separador de milhar com decimal — o erro que parseMoney cometeria', () => {
+    expect(parsePercent('12.567')).toBe(12.6); // parseMoney daria 12567
+    expect(parsePercent('0.005')).toBe(0); // parseMoney daria 5
+  });
+  it('aceita vírgula e ponto', () => {
+    expect(parsePercent('12,5')).toBe(12.5);
+    expect(parsePercent('12.5')).toBe(12.5);
+  });
+  it('guarda meio ponto e descarta o resto', () => {
+    expect(parsePercent('12')).toBe(12);
+    expect(parsePercent('12.55')).toBe(12.6);
+  });
+  it('é null quando não há número', () => {
+    expect(parsePercent('')).toBeNull();
+    expect(parsePercent('%')).toBeNull();
   });
 });

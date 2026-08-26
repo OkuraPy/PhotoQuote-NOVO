@@ -44,6 +44,17 @@ export function parseMoney(text: string): number | null {
   return isFinite(n) ? n : null;
 }
 
+// A PERCENTAGE typed by a human. Deliberately NOT parseMoney: the "three digits after the
+// separator means thousands" rule is right for money and wrong here — parseMoney('12.567') is
+// 12567 and parseMoney('0.005') is 5. A percentage is a plain decimal, comma or dot, one decimal
+// place kept (12.5% is a real deal; 12.55% is a typo waiting to redraw itself on screen).
+export function parsePercent(text: string): number | null {
+  const raw = String(text ?? '').replace(/[^0-9.,]/g, '').replace(',', '.');
+  if (!raw || !/[0-9]/.test(raw)) return null;
+  const n = parseFloat(raw);
+  return isFinite(n) ? Math.round(n * 10) / 10 : null;
+}
+
 // Embedded markup: fold `pct`% into each unit price (same idea as the regional multiplier).
 // Always recomputes from basePrice, so re-applying with a different pct never compounds.
 export function applyMarkup(items: LineItem[], pct: number): LineItem[] {

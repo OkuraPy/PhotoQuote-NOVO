@@ -9,7 +9,7 @@ import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } fr
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { applyMarkup, buildStarterEstimate, calcTotals, deriveBase, discountFromTarget, fmt, LineItem, NO_DISCOUNT, parseMoney, resolveDiscount, SERVICE_TYPES, split } from '../data';
+import { applyMarkup, buildStarterEstimate, calcTotals, deriveBase, discountFromTarget, fmt, LineItem, NO_DISCOUNT, parseMoney, parsePercent, resolveDiscount, round2, SERVICE_TYPES, split } from '../data';
 import { MAX_AI_PHOTOS, requestEstimate, transcribeAudio, translateNote } from '../lib/ai';
 import { createClient, createJob, fetchClients, fetchCompanyProfile, getMyLocation, lookupZip, Region, updateEstimateItems } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -73,6 +73,8 @@ registerStrings({
   'flow.shownToClient': { en: 'Shown on the client documents', es: 'Aparece en los documentos del cliente', pt: 'Aparece nos documentos do cliente' },
   'flow.finalTotal': { en: 'Final total', es: 'Total final', pt: 'Total final' },
   'flow.discountAmount': { en: 'Discount amount', es: 'Monto del descuento', pt: 'Valor do desconto' },
+  'flow.discountFollows': { en: 'follows the items', es: 'sigue los elementos', pt: 'acompanha os itens' },
+  'flow.discountFixed': { en: 'fixed amount', es: 'monto fijo', pt: 'valor fixo' },
   'flow.applyTotal': { en: 'Apply', es: 'Aplicar', pt: 'Aplicar' },
   'flow.discountApplied': { en: 'Discount of {amount} applied before tax', es: 'Descuento de {amount} aplicado antes del impuesto', pt: 'Desconto de {amount} aplicado antes do imposto' },
   'flow.hiddenFromClient': { en: 'Hidden from client', es: 'Oculto para el cliente', pt: 'Oculto do cliente' },
@@ -533,17 +535,19 @@ function Wave({ color }: { color: string }) {
 // each of those as a live value would clamp the discount to the whole subtotal and fight back.
 // `parseMoney`, never parseFloat: "1.000,50" typed on a pt/es keyboard reads as 1 with parseFloat,
 // and these numbers drive a DISCOUNT — reading 1 would turn a $1,098 quote into a $1.00 one.
-function MoneyField({ value, onApply, width = 120, decimals = 2 }: { value: number; onApply: (v: number) => void; width?: number; decimals?: number }) {
+function MoneyField({ value, onApply, width = 120, percent = false }: { value: number; onApply: (v: number) => void; width?: number; percent?: boolean }) {
   const tr = useT();
-  // a percentage (decimals 0) shows as a plain number and keeps a half point when there is one —
-  // toFixed(0) would turn a 12.5% deal into "13"; money always shows its two decimals
-  const show = (v: number) => (decimals === 0 ? String(Math.round(v * 10) / 10) : v > 0 ? v.toFixed(decimals) : '');
+  // a percentage keeps half a point (12.5% is a real deal) and always SHOWS its number, including
+  // zero; money shows two decimals and an empty field when there is nothing
+  const show = (v: number) => (percent ? String(Math.round(v * 10) / 10) : v > 0 ? v.toFixed(2) : '');
   const [txt, setTxt] = useState('');
   useEffect(() => {
     setTxt(show(value));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, decimals]);
-  const parsed = parseMoney(txt);
+  }, [value, percent]);
+  // parsePercent for a percentage, parseMoney for money — they are NOT the same parser: money reads
+  // "1.000,50" as a thousand and a half, and applying that rule to "12.567" would produce 12567%
+  const parsed = percent ? parsePercent(txt) : parseMoney(txt);
   const dirty = parsed != null && parsed >= 0 && Math.abs(parsed - value) > 0.005;
   const reset = () => setTxt(show(value));
   const apply = () => {
@@ -555,11 +559,12 @@ function MoneyField({ value, onApply, width = 120, decimals = 2 }: { value: numb
     else reset();
   };
   return (
-    <Row style={{ gap: 8 }}>
-      {/* iOS' decimal-pad has no return key (same reason the Sheet has tap-to-dismiss), so a typed
-          number needs a visible way to be confirmed — and tapping "Save changes" straight from the
-          field commits through the same path (see applyDiscount), so nothing is lost either way */}
+    <Row style={{ gap: 6 }}>
+      {/* iOS' decimal-pad has no return key, so a typed number needs a visible way to be confirmed.
+          The keyboard covers the "Save changes" bar on iOS (accepted trade-off since Onda F), so
+          "Apply" — or tapping another field / dragging the list — is how the value is committed. */}
       {dirty ? <LinkBtn icon="check" title={tr('flow.applyTotal')} onPress={apply} /> : null}
+      {percent ? null : <Text style={{ fontFamily: fonts.bold, fontSize: 14, color: colors.muted }}>$</Text>}
       <Input
         value={txt}
         onChangeText={setTxt}
@@ -567,8 +572,14 @@ function MoneyField({ value, onApply, width = 120, decimals = 2 }: { value: numb
         onSubmitEditing={apply}
         keyboardType="decimal-pad"
         returnKeyType="done"
+        // typing over the value instead of appending to it: the percent field is pre-filled with a
+        // number, and "12" typed to the left of a "0" used to read as 120 → clamped to a 100%
+        // discount, which quietly zeroes the quote the client receives
+        selectTextOnFocus
+        maxLength={percent ? 5 : 12}
         style={{ width, textAlign: 'right' }}
       />
+      {percent ? <Text style={{ fontFamily: fonts.bold, fontSize: 14, color: colors.muted }}>%</Text> : null}
     </Row>
   );
 }
@@ -666,8 +677,21 @@ export function EstimateScreen({ go, back, params }: NavProp) {
   const discountRef = useRef(discount);
   discountRef.current = discount;
   const applyDiscount = (d: { percent: number; amount: number }) => {
-    discountRef.current = d;
-    up({ discount: d });
+    // a dollar discount is capped at the subtotal here, not only in the trigger: `numeric(12,2)`
+    // overflows above 10 billion and the save would come back as a raw Postgres 22003
+    const safe = d.percent > 0 ? d : { percent: 0, amount: Math.min(Math.max(0, d.amount), Math.max(0, round2(gross.subtotal))) };
+    discountRef.current = safe;
+    up({ discount: safe });
+  };
+  // the ± walk ONE point from whatever is on screen right now — including a discount that was
+  // typed in dollars. They read the REF, not this render: tapping "+" straight from the money
+  // field fires blur and press in the same tick, and reading the render would throw away the
+  // amount the field had just committed.
+  const stepDiscount = (delta: number) => {
+    const cur = discountRef.current;
+    const eff = cur.percent > 0 ? cur.percent : gross.subtotal > 0 ? Math.round((resolveDiscount(gross.subtotal, cur) / gross.subtotal) * 1000) / 10 : 0;
+    const next = Math.round((eff + delta) * 10) / 10;
+    applyDiscount({ percent: Math.min(100, Math.max(0, next)), amount: 0 });
   };
   const applyTargetTotal = (target: number) => {
     const c = calcTotals(items, taxRate, 0);
@@ -874,11 +898,11 @@ export function EstimateScreen({ go, back, params }: NavProp) {
                 </View>
               </Row>
               <Row style={{ gap: 8 }}>
-                <NavBtn icon="back" size={14} onPress={() => applyDiscount({ percent: Math.max(0, Math.round(effDiscountPct) - 1), amount: 0 })} />
+                <NavBtn icon="back" size={14} onPress={() => stepDiscount(-1)} />
                 {/* the percentage itself is typeable: walking from 0 to 30 one tap at a time is
                     not a UI, and 5-point jumps cannot express a 12% deal */}
-                <MoneyField value={effDiscountPct} decimals={0} width={62} onApply={(v) => applyDiscount({ percent: Math.min(100, Math.max(0, v)), amount: 0 })} />
-                <NavBtn icon="fwd" size={14} onPress={() => applyDiscount({ percent: Math.min(100, Math.round(effDiscountPct) + 1), amount: 0 })} />
+                <MoneyField value={effDiscountPct} percent width={54} onApply={(v) => applyDiscount({ percent: Math.min(100, Math.max(0, v)), amount: 0 })} />
+                <NavBtn icon="fwd" size={14} onPress={() => stepDiscount(1)} />
               </Row>
             </Between>
             <Between style={{ marginTop: 14 }}>
@@ -900,6 +924,10 @@ export function EstimateScreen({ go, back, params }: NavProp) {
             {t.discount > 0 ? (
               <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.info, marginTop: 10 }}>
                 {tr('flow.discountApplied', { amount: fmt(t.discount) })}
+                {/* which of the three is STORED is invisible otherwise, and it decides what happens
+                    when items change: a % follows the new subtotal, an amount stays put */}
+                {' · '}
+                {tr(discount.percent > 0 ? 'flow.discountFollows' : 'flow.discountFixed')}
               </Text>
             ) : null}
           </Card>
