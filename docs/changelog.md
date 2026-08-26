@@ -4,6 +4,41 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-08-26 01:50] — fix: o revisor derrubou meu diagnóstico — o "não pegou" era OUTRA coisa
+- **CORREÇÃO DE ROTA, e importante**: eu tinha diagnosticado o "digitei o total e não salvou" como
+  uma corrida entre o blur e o press do botão Salvar. O revisor provou que **isso não acontece no
+  iOS**: a barra "Save changes" fica ATRÁS do teclado (trade-off aceito desde a Onda F), então
+  qualquer caminho até o botão passa antes por um blur — e um teste de ordenação que ele escreveu
+  mostra que o código ANTIGO já salvava certo nessa ordem. Três evidências: o layout, o próprio
+  changelog da Onda F, e a produção (96 orçamentos, **um único** com desconto, e ele é percentual —
+  desconto em dólar **nunca** foi persistido, o que é padrão de caminho que nunca commita, não de
+  corrida intermitente). O `discountRef` que eu tinha adicionado é defensivo e inofensivo, mas não
+  era o conserto que eu anunciei.
+- 🔴 **O BUG DE VERDADE**: dentro de um `ScrollView` com `keyboardShouldPersistTaps="handled"`,
+  tocar num controle IRMÃO **não tira o foco do campo** (provado no fonte do RN instalado:
+  `blurTextInput` só roda quando o próprio ScrollView é o responder). Como só o blur aplicava o
+  valor, digitar "12" e tocar no "+" ao lado aplicava 1% e **apagava o 12 sem rastro** — e o mesmo
+  valia pro stepper do imposto, pro do markup e pra qualquer toque que mudasse o total. O número
+  digitado sumia da tela sem nunca ter chegado ao orçamento. É a queixa do dono, e a superfície
+  TRIPLICOU quando o desconto ganhou três campos digitáveis.
+- **Correção**: enquanto está focado, o campo deixa num "slot" uma função que aplica **o que está
+  digitado agora** (via ref, nunca uma closure velha), e **todo controle que mexe no orçamento
+  chama esse slot antes de agir** — os ±, os dois steppers, o Salvar e o Continuar. Não depende
+  mais de blur nenhum, o que também cobre o Android (onde a barra Salvar FICA alcançável com o
+  teclado aberto e o cenário original seria real).
+- **`MoneyField` saiu do Flow e virou primitivo em `ui.tsx`** — é onde `Input`/`DecimalInput`/
+  `Stepper` já moram, e de lá dá pra testar sem carregar câmera e áudio.
+- **7 TESTES NOVOS** (`moneyfield.test.tsx`, react-test-renderer) cobrindo exatamente o que voltou
+  duas vezes: o slot entrega o valor digitado AGORA sem blur; enxerga a última digitação e não a do
+  foco; campo só olhado não aplica; percentual usa o parser de percentual ("12.567" → 12,6, não
+  12567); dinheiro lê "1.000,50" como mil e meio; lixo não aplica; o blur libera o slot.
+  **Um desses testes já pagou**: a função registrada mudava de identidade a cada render, então o
+  blur nunca reconhecia a própria inscrição pra limpá-la — achado pelo teste, corrigido com uma
+  identidade estável que delega pro apply mais recente.
+- **Gates**: tsc limpo, jest **155/155**, `expo export ios` OK.
+
+---
+
 ### [2026-08-26 01:10] — fix: revisão do bloco de desconto — 1 ALTO de interface (orçamento de graça)
 - **Contexto**: dois revisores em cima do `87cf078` antes de virar build. Este é o de "faz sentido e
   vai funcionar". A matemática passou com louvor; a interface do percentual não.

@@ -13,7 +13,7 @@ import { applyMarkup, buildStarterEstimate, calcTotals, deriveBase, discountFrom
 import { MAX_AI_PHOTOS, requestEstimate, transcribeAudio, translateNote } from '../lib/ai';
 import { createClient, createJob, fetchClients, fetchCompanyProfile, getMyLocation, lookupZip, Region, updateEstimateItems } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { Avatar, Between, Btn, Card, Chip, CatChip, DecimalInput, Divider, Field, FLOW_RESET, Input, Kav, LinkBtn, Nav, NavBtn, Row, SearchBar, SectionTitle, Sheet, Stepper, Switch, useStore } from '../ui';
+import { Avatar, Between, Btn, Card, Chip, CatChip, DecimalInput, Divider, Field, FLOW_RESET, Input, Kav, LinkBtn, MoneyField, Nav, NavBtn, Row, SearchBar, SectionTitle, Sheet, Stepper, Switch, useStore } from '../ui';
 import { getLocale, registerStrings, useT } from '../lib/i18n';
 
 registerStrings({
@@ -535,55 +535,6 @@ function Wave({ color }: { color: string }) {
 // each of those as a live value would clamp the discount to the whole subtotal and fight back.
 // `parseMoney`, never parseFloat: "1.000,50" typed on a pt/es keyboard reads as 1 with parseFloat,
 // and these numbers drive a DISCOUNT — reading 1 would turn a $1,098 quote into a $1.00 one.
-function MoneyField({ value, onApply, width = 120, percent = false }: { value: number; onApply: (v: number) => void; width?: number; percent?: boolean }) {
-  const tr = useT();
-  // a percentage keeps half a point (12.5% is a real deal) and always SHOWS its number, including
-  // zero; money shows two decimals and an empty field when there is nothing
-  const show = (v: number) => (percent ? String(Math.round(v * 10) / 10) : v > 0 ? v.toFixed(2) : '');
-  const [txt, setTxt] = useState('');
-  useEffect(() => {
-    setTxt(show(value));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, percent]);
-  // parsePercent for a percentage, parseMoney for money — they are NOT the same parser: money reads
-  // "1.000,50" as a thousand and a half, and applying that rule to "12.567" would produce 12567%
-  const parsed = percent ? parsePercent(txt) : parseMoney(txt);
-  const dirty = parsed != null && parsed >= 0 && Math.abs(parsed - value) > 0.005;
-  const reset = () => setTxt(show(value));
-  const apply = () => {
-    // untouched field = nothing to do. Without this, tapping the field just to LOOK at it and then
-    // tapping away re-applied the same number as a fixed amount, silently turning a "-12%" (which
-    // follows the items when they change) into a frozen number.
-    if (!dirty) return reset();
-    if (parsed != null && parsed >= 0) onApply(parsed);
-    else reset();
-  };
-  return (
-    <Row style={{ gap: 6 }}>
-      {/* iOS' decimal-pad has no return key, so a typed number needs a visible way to be confirmed.
-          The keyboard covers the "Save changes" bar on iOS (accepted trade-off since Onda F), so
-          "Apply" — or tapping another field / dragging the list — is how the value is committed. */}
-      {dirty ? <LinkBtn icon="check" title={tr('flow.applyTotal')} onPress={apply} /> : null}
-      {percent ? null : <Text style={{ fontFamily: fonts.bold, fontSize: 14, color: colors.muted }}>$</Text>}
-      <Input
-        value={txt}
-        onChangeText={setTxt}
-        onBlur={apply}
-        onSubmitEditing={apply}
-        keyboardType="decimal-pad"
-        returnKeyType="done"
-        // typing over the value instead of appending to it: the percent field is pre-filled with a
-        // number, and "12" typed to the left of a "0" used to read as 120 → clamped to a 100%
-        // discount, which quietly zeroes the quote the client receives
-        selectTextOnFocus
-        maxLength={percent ? 5 : 12}
-        style={{ width, textAlign: 'right' }}
-      />
-      {percent ? <Text style={{ fontFamily: fonts.bold, fontSize: 14, color: colors.muted }}>%</Text> : null}
-    </Row>
-  );
-}
-
 /* ---------------- ESTIMATE (AI + editing) ---------------- */
 type EstPhase = 'analyzing' | 'done' | 'rejected' | 'error';
 
@@ -676,6 +627,17 @@ export function EstimateScreen({ go, back, params }: NavProp) {
   // whether the owner taps Apply, taps away, or goes straight for the Save button.
   const discountRef = useRef(discount);
   discountRef.current = discount;
+  // Whatever is typed and NOT yet applied. Inside a ScrollView with keyboardShouldPersistTaps a tap
+  // on a sibling control never blurs the field, so without this every control that changes the
+  // quote silently threw the typed number away — the owner's "digitei e não pegou".
+  const commitSlot = useRef<(() => void) | null>(null);
+  const commitPending = () => {
+    const fn = commitSlot.current;
+    if (fn) {
+      commitSlot.current = null;
+      fn(); // writes discountRef synchronously when it is a discount field
+    }
+  };
   const applyDiscount = (d: { percent: number; amount: number }) => {
     // a dollar discount is capped at the subtotal here, not only in the trigger: `numeric(12,2)`
     // overflows above 10 billion and the save would come back as a raw Postgres 22003
@@ -688,6 +650,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
   // field fires blur and press in the same tick, and reading the render would throw away the
   // amount the field had just committed.
   const stepDiscount = (delta: number) => {
+    commitPending(); // the number typed in the field next to these buttons is not lost by a tap
     const cur = discountRef.current;
     const eff = cur.percent > 0 ? cur.percent : gross.subtotal > 0 ? Math.round((resolveDiscount(gross.subtotal, cur) / gross.subtotal) * 1000) / 10 : 0;
     const next = Math.round((eff + delta) * 10) / 10;
@@ -706,6 +669,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
   const [savingEdit, setSavingEdit] = useState(false);
   const saveEdit = async () => {
     if (!editJob) return;
+    commitPending(); // a value still in the keyboard is part of what the owner asked to save
     setSavingEdit(true);
     try {
       const note = (store.custNote || '').trim();
@@ -866,7 +830,11 @@ export function EstimateScreen({ go, back, params }: NavProp) {
                 <Icon name="percent" size={17} color={colors.muted} />
                 <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{tr('flow.taxRate')}</Text>
               </Row>
-              <Stepper value={`${taxRate}%`} onMinus={() => up({ taxRate: Math.max(0, +(taxRate - 0.25).toFixed(2)) })} onPlus={() => up({ taxRate: +(taxRate + 0.25).toFixed(2) })} />
+              <Stepper
+                value={`${taxRate}%`}
+                onMinus={() => { commitPending(); up({ taxRate: Math.max(0, +(taxRate - 0.25).toFixed(2)) }); }}
+                onPlus={() => { commitPending(); up({ taxRate: +(taxRate + 0.25).toFixed(2) }); }}
+              />
             </Between>
             <Divider />
             <Between>
@@ -879,8 +847,8 @@ export function EstimateScreen({ go, back, params }: NavProp) {
               </Row>
               <Stepper
                 value={`${marginRate}%`}
-                onMinus={() => up((st) => { const next = Math.max(0, st.marginRate - 5); return { marginRate: next, items: applyMarkup(st.items, next) }; })}
-                onPlus={() => up((st) => { const next = st.marginRate + 5; return { marginRate: next, items: applyMarkup(st.items, next) }; })}
+                onMinus={() => { commitPending(); up((st) => { const next = Math.max(0, st.marginRate - 5); return { marginRate: next, items: applyMarkup(st.items, next) }; }); }}
+                onPlus={() => { commitPending(); up((st) => { const next = st.marginRate + 5; return { marginRate: next, items: applyMarkup(st.items, next) }; }); }}
               />
             </Between>
             <Divider />
@@ -901,7 +869,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
                 <NavBtn icon="back" size={14} onPress={() => stepDiscount(-1)} />
                 {/* the percentage itself is typeable: walking from 0 to 30 one tap at a time is
                     not a UI, and 5-point jumps cannot express a 12% deal */}
-                <MoneyField value={effDiscountPct} percent width={54} onApply={(v) => applyDiscount({ percent: Math.min(100, Math.max(0, v)), amount: 0 })} />
+                <MoneyField value={effDiscountPct} percent width={54} commitSlot={commitSlot} onApply={(v) => applyDiscount({ percent: Math.min(100, Math.max(0, v)), amount: 0 })} />
                 <NavBtn icon="fwd" size={14} onPress={() => stepDiscount(1)} />
               </Row>
             </Between>
@@ -910,7 +878,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
                 <Icon name="dollar" size={16} color={colors.muted} />
                 <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{tr('flow.discountAmount')}</Text>
               </Row>
-              <MoneyField value={t.discount} onApply={(v) => applyDiscount({ percent: 0, amount: v })} />
+              <MoneyField value={t.discount} commitSlot={commitSlot} onApply={(v) => applyDiscount({ percent: 0, amount: v })} />
             </Between>
             {/* "deu 1.099, quer deixar 1.000 redondo": type the round number, the app works out
                 the discount that gets there */}
@@ -919,7 +887,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
                 <Icon name="receipt" size={16} color={colors.muted} />
                 <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{tr('flow.finalTotal')}</Text>
               </Row>
-              <MoneyField value={t.total} onApply={applyTargetTotal} />
+              <MoneyField value={t.total} commitSlot={commitSlot} onApply={applyTargetTotal} />
             </Between>
             {t.discount > 0 ? (
               <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.info, marginTop: 10 }}>
@@ -946,7 +914,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
         {editJob ? (
           <Btn title={savingEdit ? tr('flow.saving') : tr('flow.saveChanges')} icon={savingEdit ? undefined : 'check'} disabled={savingEdit} onPress={saveEdit} />
         ) : (
-          <Btn title={tr('flow.continue')} icon="arrowRight" disabled={phase !== 'done'} onPress={() => go('attach', {})} />
+          <Btn title={tr('flow.continue')} icon="arrowRight" disabled={phase !== 'done'} onPress={() => { commitPending(); go('attach', {}); }} />
         )}
       </View>
 

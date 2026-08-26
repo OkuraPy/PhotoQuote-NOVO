@@ -1,5 +1,5 @@
 // PhotoQuote v2 — shared UI primitives (ported from handoff app/ui.jsx + styles/app.css) for React Native.
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ActivityIndicator,
@@ -21,7 +21,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Icon } from './Icon';
-import { parseDateOnly, toDateOnly } from './data';
+import { parseDateOnly, parseMoney, parsePercent, toDateOnly } from './data';
 import { colors, fonts, radii, shadow, Stage, stageColors } from './theme';
 import { getLocale, registerStrings, useT } from './lib/i18n';
 
@@ -658,6 +658,79 @@ export function Kav({ children, style }: { children: React.ReactNode; style?: St
     <KeyboardAvoidingView behavior="padding" style={[{ flex: 1 }, style]}>
       {children}
     </KeyboardAvoidingView>
+  );
+}
+
+// A field is only "applied" on blur — and inside a ScrollView with keyboardShouldPersistTaps
+// tapping a SIBLING control (the ± next to it, a stepper, an item card) does NOT blur it. The
+// typed text then gets wiped by the re-render and never reaches the store: the owner types 12,
+// taps +, and watches his number turn into 1%. So the field also hands the screen a way to commit
+// what is pending, and every control that changes the quote calls it before doing its own thing.
+type CommitSlot = React.MutableRefObject<(() => void) | null>;
+
+export function MoneyField({ value, onApply, commitSlot, width = 120, percent = false }: { value: number; onApply: (v: number) => void; commitSlot: CommitSlot; width?: number; percent?: boolean }) {
+  const tr = useT();
+  // a percentage keeps half a point (12.5% is a real deal) and always SHOWS its number, including
+  // zero; money shows two decimals and an empty field when there is nothing
+  const show = (v: number) => (percent ? String(Math.round(v * 10) / 10) : v > 0 ? v.toFixed(2) : '');
+  const [txt, setTxt] = useState('');
+  // the text lives in a ref as well, so the commit function registered below is never stale
+  const txtRef = useRef('');
+  txtRef.current = txt;
+  useEffect(() => {
+    setTxt(show(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, percent]);
+  const reset = () => setTxt(show(value));
+  // parsePercent for a percentage, parseMoney for money — they are NOT the same parser: money reads
+  // "1.000,50" as a thousand and a half, and applying that rule to "12.567" would produce 12567%
+  const parse = (raw: string) => (percent ? parsePercent(raw) : parseMoney(raw));
+  const apply = () => {
+    const p = parse(txtRef.current);
+    // untouched field = nothing to do. Without this, tapping the field just to LOOK at it and then
+    // tapping away re-applied the same number as a fixed amount, silently turning a "-12%" (which
+    // follows the items when they change) into a frozen number.
+    if (p == null || p < 0 || Math.abs(p - value) <= 0.005) return reset();
+    onApply(p);
+  };
+  // A STABLE identity that always runs the LATEST apply: `apply` itself is a new function on every
+  // render, so registering it directly meant the blur could never recognize (and clear) its own
+  // registration — and a field losing focus to another one would clear the wrong slot.
+  const applyRef = useRef(apply);
+  applyRef.current = apply;
+  const commit = useRef(() => applyRef.current()).current;
+  const parsed = parse(txt);
+  const dirty = parsed != null && parsed >= 0 && Math.abs(parsed - value) > 0.005;
+  return (
+    <Row style={{ gap: 6 }}>
+      {/* iOS' decimal-pad has no return key, and the "Save changes" bar sits behind the keyboard
+          (accepted trade-off since Onda F) — so "Apply" is the explicit way to commit. Tapping any
+          other control now commits it too, which is what this field's commitSlot is for. */}
+      {dirty ? <LinkBtn icon="check" title={tr('flow.applyTotal')} onPress={apply} /> : null}
+      {percent ? null : <Text style={{ fontFamily: fonts.bold, fontSize: 14, color: colors.muted }}>$</Text>}
+      <Input
+        value={txt}
+        onChangeText={setTxt}
+        onFocus={() => {
+          commitSlot.current = commit;
+        }}
+        onBlur={() => {
+          // only clear OUR registration: focus moving to a sibling field can register it first
+          if (commitSlot.current === commit) commitSlot.current = null;
+          apply();
+        }}
+        onSubmitEditing={apply}
+        keyboardType="decimal-pad"
+        returnKeyType="done"
+        // typing over the value instead of appending to it: the percent field is pre-filled with a
+        // number, and "12" typed to the left of a "0" used to read as 120 → clamped to a 100%
+        // discount, which quietly zeroes the quote the client receives
+        selectTextOnFocus
+        maxLength={percent ? 5 : 12}
+        style={{ width, textAlign: 'right' }}
+      />
+      {percent ? <Text style={{ fontFamily: fonts.bold, fontSize: 14, color: colors.muted }}>%</Text> : null}
+    </Row>
   );
 }
 
