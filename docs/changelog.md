@@ -4,6 +4,29 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-08-26 00:40] — fix: 3 pedidos do Gladson no desconto — inclusive "salvei e não salvou"
+- **Origem**: primeiro uso real do desconto (build 34/35). Print + 2 áudios de 25/08.
+- 🔴 **BUG DE PERDA DE DADO — digitar o total e salvar não salvava.** Pelo stepper (5%, 10%) salvava;
+  digitando o valor, não. **Raiz**: tocar em "Save changes" com o campo ainda em foco dispara o
+  blur e o press no MESMO tick — o blur chama `up({discount})`, que o React só aplica no próximo
+  render, e o `saveEdit`, que fechou sobre o render ATUAL, lê o desconto ANTIGO. A tela então
+  re-renderizava com o desconto aplicado, então parecia salvo enquanto o banco não recebeu nada.
+  **Correção**: o valor é escrito também num ref (síncrono) e é ele que o save lê — tocando em
+  Aplicar, tocando fora ou indo direto no Salvar, o que está na tela é o que vai pro banco.
+- **De 5 em 5 → de 1 em 1, e digitável** ("pode ser 12%, 7%, 10%"): o percentual virou campo de
+  texto com ± de 1 ponto. Andar de 0 a 30 de um em um não é interface, e saltos de 5 não expressam
+  um acordo de 12%.
+- **Campo pro valor do desconto** ("um espacinho para valor"): agora são TRÊS entradas do mesmo
+  número — `Discount` em %, `Discount amount` em $, e `Final total`. Mexeu numa, as outras duas se
+  ajustam; é o mesmo desconto visto de três lados.
+- **Detalhe**: o percentual guarda meio ponto (12,5%) sem virar 13 na tela, e mostra 0 em vez de
+  campo vazio.
+- **Arquivos**: `src/v2/screens/Flow.tsx` (`MoneyField` novo substitui o `TotalTarget`,
+  `applyDiscount`/`applyTargetTotal` com o ref síncrono).
+- **Gates**: tsc limpo, jest 144/144, `expo export ios` OK.
+
+---
+
 ### [2026-08-24 23:20] — build: BUILD 35 (substitui a 34) — corrige o contrato da fatura complementar
 - EAS iOS production `--auto-submit` do worktree `pq-build24` @ `d6b86cc`. Version 2.0.0,
   **buildNumber 35**. Build `05c9c0fe-553b-41ce-88e9-b81a767c4f54`, submission

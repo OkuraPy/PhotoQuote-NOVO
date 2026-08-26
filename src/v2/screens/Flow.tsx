@@ -72,6 +72,7 @@ registerStrings({
   'flow.discount': { en: 'Discount', es: 'Descuento', pt: 'Desconto' },
   'flow.shownToClient': { en: 'Shown on the client documents', es: 'Aparece en los documentos del cliente', pt: 'Aparece nos documentos do cliente' },
   'flow.finalTotal': { en: 'Final total', es: 'Total final', pt: 'Total final' },
+  'flow.discountAmount': { en: 'Discount amount', es: 'Monto del descuento', pt: 'Valor do desconto' },
   'flow.applyTotal': { en: 'Apply', es: 'Aplicar', pt: 'Aplicar' },
   'flow.discountApplied': { en: 'Discount of {amount} applied before tax', es: 'Descuento de {amount} aplicado antes del impuesto', pt: 'Desconto de {amount} aplicado antes do imposto' },
   'flow.hiddenFromClient': { en: 'Hidden from client', es: 'Oculto para el cliente', pt: 'Oculto do cliente' },
@@ -527,35 +528,37 @@ function Wave({ color }: { color: string }) {
   );
 }
 
-/* ---------------- G-1: type the round total, get the discount ---------------- */
-// Applied on blur, never on every keystroke: typing "1000" passes through 1, 10 and 100, and each
-// of those as a live target would clamp the discount to the whole subtotal and fight the typing.
-function TotalTarget({ total, onApply }: { total: number; onApply: (target: number) => void }) {
+/* ---------------- G-1: the three ways into the same discount ---------------- */
+// Committed on blur, never on every keystroke: typing "1000" passes through 1, 10 and 100, and
+// each of those as a live value would clamp the discount to the whole subtotal and fight back.
+// `parseMoney`, never parseFloat: "1.000,50" typed on a pt/es keyboard reads as 1 with parseFloat,
+// and these numbers drive a DISCOUNT — reading 1 would turn a $1,098 quote into a $1.00 one.
+function MoneyField({ value, onApply, width = 120, decimals = 2 }: { value: number; onApply: (v: number) => void; width?: number; decimals?: number }) {
   const tr = useT();
+  // a percentage (decimals 0) shows as a plain number and keeps a half point when there is one —
+  // toFixed(0) would turn a 12.5% deal into "13"; money always shows its two decimals
+  const show = (v: number) => (decimals === 0 ? String(Math.round(v * 10) / 10) : v > 0 ? v.toFixed(decimals) : '');
   const [txt, setTxt] = useState('');
   useEffect(() => {
-    setTxt(total > 0 ? total.toFixed(2) : '');
-  }, [total]);
-  // parseMoney, never parseFloat: "1.000,50" typed on a pt/es keyboard reads as 1 with parseFloat,
-  // and this number drives a DISCOUNT — a $1,098 quote would silently become a $1.00 one
+    setTxt(show(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, decimals]);
   const parsed = parseMoney(txt);
-  const dirty = parsed != null && parsed >= 0 && Math.abs(parsed - total) > 0.005;
+  const dirty = parsed != null && parsed >= 0 && Math.abs(parsed - value) > 0.005;
+  const reset = () => setTxt(show(value));
   const apply = () => {
     // untouched field = nothing to do. Without this, tapping the field just to LOOK at it and then
-    // tapping away re-applied the same number as a fixed-dollar discount, silently turning a "-30%"
-    // (which follows the items when they change) into a frozen amount.
-    if (!dirty) {
-      setTxt(total > 0 ? total.toFixed(2) : '');
-      return;
-    }
+    // tapping away re-applied the same number as a fixed amount, silently turning a "-12%" (which
+    // follows the items when they change) into a frozen number.
+    if (!dirty) return reset();
     if (parsed != null && parsed >= 0) onApply(parsed);
-    else setTxt(total > 0 ? total.toFixed(2) : '');
+    else reset();
   };
   return (
     <Row style={{ gap: 8 }}>
-      {/* iOS' decimal-pad has no return key (same reason the Sheet has tap-to-dismiss), so a
-          typed total needs a visible way to be confirmed — otherwise the owner types it, sees
-          nothing happen and has no idea whether it took */}
+      {/* iOS' decimal-pad has no return key (same reason the Sheet has tap-to-dismiss), so a typed
+          number needs a visible way to be confirmed — and tapping "Save changes" straight from the
+          field commits through the same path (see applyDiscount), so nothing is lost either way */}
       {dirty ? <LinkBtn icon="check" title={tr('flow.applyTotal')} onPress={apply} /> : null}
       <Input
         value={txt}
@@ -564,7 +567,7 @@ function TotalTarget({ total, onApply }: { total: number; onApply: (target: numb
         onSubmitEditing={apply}
         keyboardType="decimal-pad"
         returnKeyType="done"
-        style={{ width: 120, textAlign: 'right' }}
+        style={{ width, textAlign: 'right' }}
       />
     </Row>
   );
@@ -652,6 +655,27 @@ export function EstimateScreen({ go, back, params }: NavProp) {
   const t = calcTotals(items, taxRate, 0, resolveDiscount(gross.subtotal, discount));
   // the discount as a percentage of the subtotal, whichever way it was entered
   const effDiscountPct = discount.percent > 0 ? discount.percent : gross.subtotal > 0 ? Math.round((t.discount / gross.subtotal) * 1000) / 10 : 0;
+
+  // THE SAVE RACE (owner's report 25/08: "digitei o total, salvei e não salvou"). Tapping "Save
+  // changes" while the field still has focus fires the blur and the press in the SAME tick: the
+  // blur calls up({discount}) — a state update React applies on the NEXT render — and saveEdit,
+  // which closed over the CURRENT render, reads the OLD discount. The screen then re-rendered
+  // showing the discount applied, so it looked saved while the database got nothing.
+  // The ref is written synchronously, so whatever the field just committed is what gets saved,
+  // whether the owner taps Apply, taps away, or goes straight for the Save button.
+  const discountRef = useRef(discount);
+  discountRef.current = discount;
+  const applyDiscount = (d: { percent: number; amount: number }) => {
+    discountRef.current = d;
+    up({ discount: d });
+  };
+  const applyTargetTotal = (target: number) => {
+    const c = calcTotals(items, taxRate, 0);
+    const d = !(c.subtotal > 0) || target >= c.total - 0.005
+      ? { percent: 0, amount: 0 }
+      : { percent: 0, amount: discountFromTarget(c.subtotal, c.taxableSubtotal, taxRate, target) };
+    applyDiscount(d);
+  };
   const [d, c] = split(t.total);
   // edit mode: persist the edited items back into the SAME estimate (trigger recomputes totals)
   const queryClient = useQueryClient();
@@ -664,7 +688,7 @@ export function EstimateScreen({ go, back, params }: NavProp) {
       await updateEstimateItems(editJob.estimateId, store.items, taxRate, marginRate, {
         customerNote: note || null,
         customerNoteSrc: (note && (store.custNoteSrc || '').trim()) || null, // no note → no original either
-      }, discount);
+      }, discountRef.current);
       await queryClient.invalidateQueries({ queryKey: ['jobDetail', editJob.projectId] });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
       back();
@@ -837,38 +861,41 @@ export function EstimateScreen({ go, back, params }: NavProp) {
             </Between>
             <Divider />
             {/* G-1: the way DOWN. Unlike the markup (embedded in the prices, invisible), the
-                discount is the client's — it prints as its own line on the document (owner's D1). */}
+                discount is the client's — it prints as its own line on the document (owner's D1).
+                THREE ways in because a discount is thought of in three ways: "12% off" (typed or
+                nudged one point at a time — it can be 7, 12, 13, not only multiples of 5), "$79
+                off", and "make it $1,500 even". They are the same number seen from three sides. */}
             <Between>
-              <Row style={{ gap: 9 }}>
+              <Row style={{ gap: 9, flex: 1 }}>
                 <Icon name="trend" size={16} color={colors.info} />
                 <View>
                   <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{tr('flow.discount')}</Text>
                   <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted }}>{tr('flow.shownToClient')}</Text>
                 </View>
               </Row>
-              <Stepper
-                // shows the EFFECTIVE percentage even when the discount was typed in dollars:
-                // showing 0% next to a live $99 discount made the "−" look inert while it wiped it
-                value={`${effDiscountPct}%`}
-                onMinus={() => up(() => ({ discount: { percent: Math.max(0, Math.round(effDiscountPct) - 5), amount: 0 } }))}
-                onPlus={() => up(() => ({ discount: { percent: Math.min(100, Math.round(effDiscountPct) + 5), amount: 0 } }))}
-              />
+              <Row style={{ gap: 8 }}>
+                <NavBtn icon="back" size={14} onPress={() => applyDiscount({ percent: Math.max(0, Math.round(effDiscountPct) - 1), amount: 0 })} />
+                {/* the percentage itself is typeable: walking from 0 to 30 one tap at a time is
+                    not a UI, and 5-point jumps cannot express a 12% deal */}
+                <MoneyField value={effDiscountPct} decimals={0} width={62} onApply={(v) => applyDiscount({ percent: Math.min(100, Math.max(0, v)), amount: 0 })} />
+                <NavBtn icon="fwd" size={14} onPress={() => applyDiscount({ percent: Math.min(100, Math.round(effDiscountPct) + 1), amount: 0 })} />
+              </Row>
             </Between>
-            {/* "deu 1.099, quer deixar 1.000 redondo": type the round number, the app works out
-                the discount that gets there (applied on blur, so 1 → 10 → 100 never fights back) */}
             <Between style={{ marginTop: 14 }}>
               <Row style={{ gap: 9, flex: 1 }}>
                 <Icon name="dollar" size={16} color={colors.muted} />
+                <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{tr('flow.discountAmount')}</Text>
+              </Row>
+              <MoneyField value={t.discount} onApply={(v) => applyDiscount({ percent: 0, amount: v })} />
+            </Between>
+            {/* "deu 1.099, quer deixar 1.000 redondo": type the round number, the app works out
+                the discount that gets there */}
+            <Between style={{ marginTop: 14 }}>
+              <Row style={{ gap: 9, flex: 1 }}>
+                <Icon name="receipt" size={16} color={colors.muted} />
                 <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{tr('flow.finalTotal')}</Text>
               </Row>
-              <TotalTarget
-                total={t.total}
-                onApply={(target) => up((st) => {
-                  const c = calcTotals(st.items, st.taxRate, 0);
-                  if (!(c.subtotal > 0) || target >= c.total - 0.005) return { discount: { percent: 0, amount: 0 } };
-                  return { discount: { percent: 0, amount: discountFromTarget(c.subtotal, c.taxableSubtotal, st.taxRate, target) } };
-                })}
-              />
+              <MoneyField value={t.total} onApply={applyTargetTotal} />
             </Between>
             {t.discount > 0 ? (
               <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.info, marginTop: 10 }}>
