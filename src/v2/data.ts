@@ -372,6 +372,14 @@ export function invoiceRollup(list: InvoiceLike[]) {
 export const creditTotal = (credits: { amount: number }[]) =>
   round2(credits.reduce((s, c) => s + (Number(c.amount) || 0), 0));
 
+// Credits recorded UP TO a given day. A receipt re-issued later must print the balance as of ITS
+// payment, so a credit entered afterwards cannot rewrite it — same rule the payment ledger follows.
+export function creditTotalUpTo(credits: { amount: number; createdAt: string }[], dayISO: string): number {
+  return round2(
+    credits.reduce((s, c) => (toDateOnly(new Date(c.createdAt)) <= dayISO ? s + (Number(c.amount) || 0) : s), 0)
+  );
+}
+
 // What the client actually owes on an invoice once credits are applied.
 export const invoiceDue = (total: number, credits: number) =>
   round2(Math.max(0, (Number(total) || 0) - (Number(credits) || 0)));

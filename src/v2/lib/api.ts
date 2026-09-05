@@ -661,11 +661,15 @@ export async function addInvoiceCredit(
   const paid = paidTotal(pays || []);
   const room = creditRoom(total, already, paid);
   if (amount > room + 0.005) {
-    throw new Error(
+    // coded so the screen can say it in the owner's language (the message itself is a fallback)
+    const err: any = new Error(
       room > 0
         ? `This invoice can take at most ${fmt(room)} in credit — that is the balance still open.`
         : 'This invoice has no open balance left to credit.'
     );
+    err.code = 'CREDIT_OVER_ROOM';
+    err.room = room;
+    throw err;
   }
 
   const { data: ins, error } = await supabase
@@ -677,8 +681,31 @@ export async function addInvoiceCredit(
 
   // the credit can close the invoice by itself (the client had already paid the reduced amount)
   const status = statusFromPayments(invoiceDue(total, round2(already + amount)), paid);
-  await supabase.from('invoices').update({ status }).eq('id', invoiceId);
+  // checked, like the payment path: a silent failure here leaves the job open on the Home screen —
+  // the very symptom this feature exists to kill
+  const { error: uErr } = await supabase.from('invoices').update({ status }).eq('id', invoiceId);
+  if (uErr) throw uErr;
+  // the contract freezes the invoice total at generation time: an UNSIGNED one would stay
+  // signable for the pre-credit amount. Same rule the payment plan already follows.
+  await voidUnsignedAgreements(invoiceId);
   return { id: ins.id, status };
+}
+
+// Undo a credit. Typing 400 instead of 40 marks an invoice paid forever otherwise — and unlike a
+// payment (money that really moved), a credit is just a number the owner entered.
+export async function deleteInvoiceCredit(invoiceId: string, creditId: string): Promise<{ status: string }> {
+  const { error } = await supabase.from('invoice_credits').delete().eq('id', creditId);
+  if (error) throw error;
+  const [{ data: inv }, { data: pays }] = await Promise.all([
+    supabase.from('invoices').select('total').eq('id', invoiceId).maybeSingle(),
+    supabase.from('invoice_payments').select('amount').eq('invoice_id', invoiceId),
+  ]);
+  const total = Number(inv?.total) || 0;
+  const status = statusFromPayments(invoiceDue(total, await creditsFor(invoiceId)), paidTotal(pays || []));
+  const { error: uErr } = await supabase.from('invoices').update({ status }).eq('id', invoiceId);
+  if (uErr) throw uErr;
+  await voidUnsignedAgreements(invoiceId);
+  return { status };
 }
 
 // Mint-once receipt number (G3). Written exactly once per payment; re-issuing reuses it.
@@ -1018,7 +1045,10 @@ export async function createAgreement(userId: string, projectId: string, invoice
   const tpl = (await supabase.from('contract_templates').select('content, terms_blocks').eq('is_default', true).limit(1).maybeSingle()).data;
   if (!tpl?.content) throw new Error('No contract template available.');
 
-  const total = Number(inv.total) || 0;
+  // credits already applied come off the amount the client is asked to sign for: the contract is
+  // generated fresh after a credit (addInvoiceCredit voids the unsigned ones), and signing for the
+  // pre-credit amount would be a legal document for money that is no longer owed
+  const total = invoiceDue(Number(inv.total) || 0, await creditsFor(invoiceId));
   // the invoice's stored plan → English document rows (v2 template's {{payment_schedule_table}});
   // invoice & contract always match because both read the same snapshot
   const rows = planRows(
@@ -1106,6 +1136,7 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
     // was credited back (returned material) as invoiced and collectable
     supabase.from('invoice_credits').select('invoice_id, amount').eq('user_id', userId),
   ]);
+  if (cred.error) throw cred.error;
   if (proj.error) throw proj.error;
 
   const clients = new Map<string, string>((cli.data || []).map((c: any) => [c.id, c.full_name]));

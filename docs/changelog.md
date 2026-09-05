@@ -4,6 +4,49 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-05 19:10] — fix: 2 revisores no crédito — 1 BLOQUEANTE e o dinheiro vazando para 3 documentos
+O dono perguntou "está tudo certo? é a prática certa? está intuitivo?". Um revisor olhou **prática
+contábil/de mercado**, outro **usabilidade + correção**. Veredito do primeiro: o desenho (crédito
+na própria fatura, com motivo impresso e "Revised total") é o equivalente a um *credit memo* e é
+aceitável para um GC pequeno nos EUA — mas o valor pré-crédito estava vazando para documentos.
+
+🔴 **BLOQUEANTE — o recibo ignorava o crédito** (`Job.tsx:901` e `:949`). Caso real: 580,55 com
+crédito de 40; o cliente paga 290,27 + 250,28 e quita. O app dizia **Paid** e o recibo imprimia
+**"Remaining balance: $40.00"**. Era o mesmo defeito do `69abce0`, agora pelo lado do crédito.
+- Corrigido — e o segundo revisor pegou que a correção reintroduzia o outro lado do problema:
+  aplicar o crédito de HOJE a um recibo ANTIGO reescreveria um papel já entregue. Agora existe
+  `creditTotalUpTo`: o recibo só enxerga os créditos até o dia daquele pagamento.
+
+**ALTO — contrato assinável pelo valor errado** (`api.ts:1044`): o contrato congela `inv.total`.
+Sem isso, o cliente podia assinar por $580,55 devendo $540,55. Agora `createAgreement` congela o
+valor DEVIDO, e `addInvoiceCredit` anula contratos não assinados (mesma regra do plano de pagamento).
+
+**ALTO — não havia como desfazer**: digitar 400 em vez de 40 marcava a fatura como paga para
+sempre. `deleteInvoiceCredit` + policy DELETE (migration `20260905130000`) + "x" na lista, com
+confirmação dizendo que o valor volta ao saldo.
+
+**ALTO (usabilidade) — beco sem saída**: o cartão só aparecia se o orçamento tivesse sido editado
+para baixo E ainda houvesse saldo. Com a fatura já quitada, não havia porta nenhuma — e a explicação
+("sem saldo em aberto para creditar") vivia dentro da folha que ele não conseguia abrir. Agora
+"Lançar crédito" fica sempre visível na aba Invoice, ao lado de "Editar plano de pagamento".
+
+**Corrida entre dois créditos** (migration `20260905140000`): o teto do app é lido antes do insert,
+então dois lançamentos simultâneos passavam os dois. Trigger `check_invoice_credit_cap` no banco.
+**Provado em produção com rollback** na fatura real INV-2026-0039 (total 580,55 · pago 290,27):
+crédito de 40 aceito, crédito de 999 barrado com "max 250.28", nada gravado.
+
+**Também**: tarja "o orçamento mudou" aparecia junto do cartão de crédito, se contradizendo; o chip
+da fatura mostrava o valor bruto ao lado do roll-up líquido; `firstOwing` elegia uma fatura já
+quitada por crédito; o PDF imprimia as parcelas somando o valor cheio embaixo do "Revised total"
+(dois saldos no mesmo papel — agora o plano não é impresso quando há crédito, e na tela ele leva o
+rótulo "Parcelas como combinadas, antes do crédito"); erros de update não checados; data do crédito
+no documento; mensagem de teto traduzida (código `CREDIT_OVER_ROOM`).
+
+- **Ficou em aberto, decisão do dono**: o imposto não é rateado no crédito (`invoiceDue` abate o
+  bruto). Se ele fatura *retail sale + installation*, o crédito deveria abater imposto junto; se é
+  lump-sum de melhoria imobiliária, o crédito cheio está certo. É pergunta para o contador dele.
+- jest **202/202**, tsc limpo.
+
 ### [2026-09-05 18:05] — feat: crédito na fatura — o espelho da fatura complementar
 **O caso real** (áudio + print do dono, 05/09): fatura de $580.55 da Jami Rahn por 3 smoke
 detectors, metade já paga por Zelle. No local só couberam 2, um voltou pro fornecedor. A fatura

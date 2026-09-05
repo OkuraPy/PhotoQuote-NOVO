@@ -127,7 +127,7 @@ export type SendData = {
   // Credits applied AFTER the invoice went out (returned material, agreed cut). Printed as their
   // own lines under the total, with the reason: the client received a document for the original
   // amount, so the drop has to be explained, not silently applied.
-  credits?: { amount: number; reason: string | null }[];
+  credits?: { amount: number; reason: string | null; date?: string | null }[];
   // invoice payment plan + ledger (labels/dates already English — planRows/DB method keys)
   payment?: {
     rows: { label: string; amount: number; due: string | null }[];
@@ -292,7 +292,7 @@ function buildHtml(d: SendData): string {
       ${
         d.credits && d.credits.length
           ? `${d.credits
-              .map((c) => `<div class="row" style="margin-top:6px"><span>Credit${c.reason ? ` — ${escapeHtml(c.reason)}` : ''}</span><b class="ok">-${fmt(c.amount)}</b></div>`)
+              .map((c) => `<div class="row" style="margin-top:6px"><span>Credit${c.date ? ` ${escapeHtml(dueTxt(c.date))}` : ''}${c.reason ? ` — ${escapeHtml(c.reason)}` : ''}</span><b class="ok">-${fmt(c.amount)}</b></div>`)
               .join('')}
       <div class="grand" style="border-top:1px solid #E6E9EE"><span>Revised total</span><span>${fmt(Math.max(0, d.totals.total - d.credits.reduce((s2, c) => s2 + (Number(c.amount) || 0), 0)))}</span></div>`
           : ''
@@ -349,7 +349,7 @@ function buildText(d: SendData): string {
   const note = d.customerNote ? `\n\nNotes: ${d.customerNote}` : '';
   // same facts as the PDF: each credit with its reason, then the revised total
   const credits = d.credits && d.credits.length
-    ? d.credits.map((c) => `\nCredit${c.reason ? ` — ${c.reason}` : ''} -${fmt(c.amount)}`).join('') +
+    ? d.credits.map((c) => `\nCredit${c.date ? ` ${dueTxt(c.date)}` : ''}${c.reason ? ` — ${c.reason}` : ''} -${fmt(c.amount)}`).join('') +
       `\nRevised total ${fmt(Math.max(0, d.totals.total - d.credits.reduce((s2, c) => s2 + (Number(c.amount) || 0), 0)))}`
     : '';
   return `${d.docLabel}${d.number ? ' ' + d.number : ''} — ${d.company.name}\n${d.client?.name ? `For: ${d.client.name}\n` : ''}${d.jobSite ? `Job site: ${d.jobSite}\n` : ''}\n${lines}\n\nSubtotal ${fmt(d.totals.subtotal)}${d.totals.discount && d.totals.discount > 0 ? ` · Discount -${fmt(d.totals.discount)}` : ''} · Tax ${fmt(d.totals.tax)} · Total ${fmt(d.totals.total)}${credits}${pay}${note}`;

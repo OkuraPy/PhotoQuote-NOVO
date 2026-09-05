@@ -1,5 +1,7 @@
 import {
   addDaysISO,
+  balanceAfterNewPayment,
+  creditTotalUpTo,
   balanceAfterPayment,
   creditRoom,
   creditTotal,
@@ -351,5 +353,46 @@ describe('créditos na fatura (devolveu material depois de faturado)', () => {
     expect(r.total).toBe(740.55); // 540.55 + 200
     expect(r.paid).toBe(PAGO);
     expect(r.balance).toBe(450.28);
+  });
+});
+
+describe('recibo de fatura com crédito (achado BLOQUEANTE do revisor)', () => {
+  // 580,55 faturados, 40 creditados (detector devolvido) → devidos 540,55.
+  // Cliente pagou 290,27 e depois 250,28 = quitado.
+  const DUE = invoiceDue(580.55, 40);
+  const ledger = [
+    { id: 'p1', amount: 290.27, paidAt: '2026-09-03' },
+    { id: 'p2', amount: 250.28, paidAt: '2026-09-06' },
+  ];
+
+  it('o recibo do pagamento que fecha a fatura diz saldo ZERO', () => {
+    expect(balanceAfterPayment(DUE, ledger, 'p2')).toBe(0);
+    // sem descontar o crédito, o mesmo recibo imprimiria "faltam $40" numa fatura quitada
+    expect(balanceAfterPayment(580.55, ledger, 'p2')).toBe(40);
+  });
+
+  it('o recibo do primeiro pagamento mostra o saldo já com o crédito aplicado', () => {
+    expect(balanceAfterPayment(DUE, ledger, 'p1')).toBe(250.28);
+  });
+
+  it('e o recibo imediato (mesmo número) chega no mesmo valor', () => {
+    expect(balanceAfterNewPayment(DUE, [ledger[0]], ledger[1])).toBe(0);
+  });
+});
+
+describe('creditTotalUpTo (recibo antigo não pode ser reescrito por crédito novo)', () => {
+  const credits = [
+    { amount: 40, createdAt: '2026-09-05T14:00:00Z', reason: null },
+    { amount: 10, createdAt: '2026-09-09T14:00:00Z', reason: null },
+  ];
+  it('conta só o que existia até o dia daquele pagamento', () => {
+    expect(creditTotalUpTo(credits, '2026-09-03')).toBe(0); // recibo do 1º pagamento: sem crédito
+    expect(creditTotalUpTo(credits, '2026-09-05')).toBe(40); // mesmo dia entra
+    expect(creditTotalUpTo(credits, '2026-09-10')).toBe(50);
+  });
+  it('o recibo do pagamento anterior ao crédito mantém o saldo que foi impresso', () => {
+    const ledger = [{ id: 'p1', amount: 290.27, paidAt: '2026-09-03' }];
+    const dueNaEpoca = invoiceDue(580.55, creditTotalUpTo(credits, '2026-09-03'));
+    expect(balanceAfterPayment(dueNaEpoca, ledger, 'p1')).toBe(290.28);
   });
 });
