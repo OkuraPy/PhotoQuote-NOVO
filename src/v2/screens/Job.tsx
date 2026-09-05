@@ -142,7 +142,15 @@ registerStrings({
   'job.method.card': { en: 'Card', es: 'Tarjeta', pt: 'Cartão' },
   'job.method.ach': { en: 'Bank transfer', es: 'Transferencia', pt: 'Transferência' },
   'job.method.other': { en: 'Other', es: 'Otro', pt: 'Outro' },
-  'job.receivedToday': { en: 'Received today · {date}', es: 'Recibido hoy · {date}', pt: 'Recebido hoje · {date}' },
+  // Zelle is a brand, so it stays Zelle in every language (the US equivalent of Pix)
+  'job.method.zelle': { en: 'Zelle', es: 'Zelle', pt: 'Zelle' },
+  'job.paidOnLabel': { en: 'Payment date', es: 'Fecha de pago', pt: 'Data do pagamento' },
+  'job.paidOnSub': {
+    en: 'The day the client paid — a post-dated check keeps its own date.',
+    es: 'El día en que el cliente pagó — un cheque posfechado conserva su fecha.',
+    pt: 'O dia em que o cliente pagou — cheque pré-datado mantém a data dele.',
+  },
+  'job.today': { en: 'today', es: 'hoy', pt: 'hoje' },
   'job.couldNotRecordPayment': { en: 'Could not record the payment', es: 'No se pudo registrar el pago', pt: 'Não foi possível registrar o pagamento' },
   // receipt (G3) — the document itself is English; only this app copy is translated
   'job.paymentRecordedTitle': { en: 'Payment recorded', es: 'Pago registrado', pt: 'Pagamento registrado' },
@@ -784,7 +792,7 @@ export function JobScreen({ go, back, params }: NavProp) {
   // "Mark paid" became "Record payment": money received goes to the ledger and the status
   // (Unpaid / Partially Paid / Paid) is derived server-side from Σ(payments) vs total.
   // After a successful record the contractor is offered a receipt for it (G3).
-  const confirmPayment = async (amount: number, method: string | null, note: string) => {
+  const confirmPayment = async (amount: number, method: string | null, note: string, paidAt: string) => {
     if (!ownerId || !inv?.id) return;
     // guard a fat-finger overpayment ($9409 for a $940.90 balance): the ledger is append-only,
     // there's no in-app refund, and the receipt would print a wrong "Paid in full" (final-review M1)
@@ -795,19 +803,19 @@ export function JobScreen({ go, back, params }: NavProp) {
         t('job.overpayBody', { amount: fmt(amount), balance: fmt(balanceNow) }),
         [
           { text: t('job.notNow'), style: 'cancel' },
-          { text: t('job.overpayConfirm'), onPress: () => void doRecordPayment(amount, method, note) },
+          { text: t('job.overpayConfirm'), onPress: () => void doRecordPayment(amount, method, note, paidAt) },
         ]
       );
       return;
     }
-    void doRecordPayment(amount, method, note);
+    void doRecordPayment(amount, method, note, paidAt);
   };
-  const doRecordPayment = async (amount: number, method: string | null, note: string) => {
+  const doRecordPayment = async (amount: number, method: string | null, note: string, paidAt: string) => {
     if (!ownerId || !inv?.id) return;
     const invoice = inv; // freeze — detail refetches under the alert below
     setSavingPay(true);
     try {
-      const { id: paymentId } = await recordInvoicePayment(ownerId, invoice.id, { amount, method, note });
+      const { id: paymentId } = await recordInvoicePayment(ownerId, invoice.id, { amount, method, note, paidAt });
       await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
       setPaySheet(false);
@@ -818,7 +826,9 @@ export function JobScreen({ go, back, params }: NavProp) {
         { text: t('job.notNow'), style: 'cancel' },
         {
           text: t('job.sendReceipt'),
-          onPress: () => requireCompany(() => { void sendReceipt(paymentId, { amount, method, note, date: toDateOnly(new Date()), balanceAfter }, invoice.number); }),
+          // the receipt carries the day the client PAID, not the day it was typed in — that is the
+          // whole point of the date field ("recebeu ontem… hoje vai fazer o recibo")
+          onPress: () => requireCompany(() => { void sendReceipt(paymentId, { amount, method, note, date: paidAt, balanceAfter }, invoice.number); }),
         },
       ]), 380);
     } catch (e: any) {
@@ -1395,7 +1405,7 @@ function rowLabel(t: (k: string, v?: Record<string, string | number>) => string,
   return m ? t('job.paymentN', { n: m[1] }) : label;
 }
 // method keys are stored in English (Cash/Check/Card/ACH/Other) — translate for display
-const METHOD_KEY: Record<string, string> = { Cash: 'job.method.cash', Check: 'job.method.check', Card: 'job.method.card', ACH: 'job.method.ach', Other: 'job.method.other' };
+const METHOD_KEY: Record<string, string> = { Cash: 'job.method.cash', Check: 'job.method.check', Zelle: 'job.method.zelle', Card: 'job.method.card', ACH: 'job.method.ach', Other: 'job.method.other' };
 const methodLabel = (t: (k: string) => string, m: string) => (METHOD_KEY[m] ? t(METHOD_KEY[m]) : m);
 // app-side date chip ("Aug 5" / "5 de ago"): follows the CONTRACTOR's language. The documents
 // keep their own English formatting in send.ts / createAgreement — those are the client's.
@@ -1941,18 +1951,25 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
 }
 
 /* ---------------- Record payment sheet (F12): money received → ledger ---------------- */
-function RecordPaymentSheet({ open, onClose, balance, busy, onConfirm }: { open: boolean; onClose: () => void; balance: number; busy: boolean; onConfirm: (amount: number, method: string | null, note: string) => void }) {
+function RecordPaymentSheet({ open, onClose, balance, busy, onConfirm }: { open: boolean; onClose: () => void; balance: number; busy: boolean; onConfirm: (amount: number, method: string | null, note: string, paidAt: string) => void }) {
   const t = useT();
   const [amount, setAmount] = useState(0);
   const [method, setMethod] = useState<string | null>(null);
   const [note, setNote] = useState(''); // G-6: check number / bank — prints on the receipt
+  // The date used to be hardcoded to today. Two real cases break that: a post-dated check ("it's
+  // for a week from now") and money that landed yesterday but is only being logged now, with the
+  // receipt going out today — the receipt has to carry the day the client actually paid.
+  const [paidAt, setPaidAt] = useState(() => toDateOnly(new Date()));
+  const [dateOpen, setDateOpen] = useState(false);
   // pre-fill with the outstanding balance on every open (fresh per job/press — local state)
   useEffect(() => {
-    if (open) { setAmount(round2(balance)); setMethod(null); setNote(''); }
+    if (open) { setAmount(round2(balance)); setMethod(null); setNote(''); setPaidAt(toDateOnly(new Date())); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
-  // method KEYS stay English in the DB; only the chip labels are translated
-  const methods: [string, string][] = [['Cash', 'cash'], ['Check', 'check'], ['Card', 'card'], ['ACH', 'ach'], ['Other', 'other']];
+  // method KEYS stay English in the DB; only the chip labels are translated. Zelle is how a US
+  // contractor gets paid instantly — "é igual o Pix no Brasil".
+  const methods: [string, string][] = [['Cash', 'cash'], ['Check', 'check'], ['Zelle', 'zelle'], ['Card', 'card'], ['ACH', 'ach'], ['Other', 'other']];
+  const todayIso = toDateOnly(new Date());
   return (
     <Sheet open={open} onClose={onClose} title={t('job.recordPayment')} sub={t('job.recordPaymentSub')}>
       <Field label={t('job.amountLabel')}><DecimalInput value={amount} onChangeValue={setAmount} /></Field>
@@ -1969,11 +1986,27 @@ function RecordPaymentSheet({ open, onClose, balance, busy, onConfirm }: { open:
       <Field label={t('job.referenceLabel')} opt>
         <Input value={note} onChangeText={setNote} placeholder={t('job.referenceHint')} maxLength={120} autoCapitalize="words" />
       </Field>
-      <Row style={{ gap: 6 }}>
-        <Icon name="calendar" size={14} color={colors.muted} />
-        <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{t('job.receivedToday', { date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) })}</Text>
-      </Row>
-      <Btn title={busy ? t('job.working') : t('job.recordPayment')} icon={busy ? undefined : 'check'} disabled={busy || !(amount > 0)} onPress={() => onConfirm(round2(amount), method, note)} style={{ marginTop: 16 }} />
+      <Field label={t('job.paidOnLabel')}>
+        <Pressable onPress={() => setDateOpen(true)}>
+          <Row style={{ gap: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 14 }}>
+            <Icon name="calendar" size={15} color={colors.muted} />
+            <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 14.5, color: colors.ink }}>
+              {parseDateOnly(paidAt).toLocaleDateString(localeTag(), { month: 'short', day: 'numeric', year: 'numeric' })}
+              {paidAt === todayIso ? ` · ${t('job.today')}` : ''}
+            </Text>
+            <Icon name="chevR" size={15} color={colors.faint} />
+          </Row>
+        </Pressable>
+      </Field>
+      <Btn title={busy ? t('job.working') : t('job.recordPayment')} icon={busy ? undefined : 'check'} disabled={busy || !(amount > 0)} onPress={() => onConfirm(round2(amount), method, note, paidAt)} style={{ marginTop: 16 }} />
+      <DateSheet
+        open={dateOpen}
+        onClose={() => setDateOpen(false)}
+        value={paidAt}
+        onPick={(iso) => { setPaidAt(iso); setDateOpen(false); }}
+        title={t('job.paidOnLabel')}
+        sub={t('job.paidOnSub')}
+      />
     </Sheet>
   );
 }

@@ -1,5 +1,6 @@
 import {
   addDaysISO,
+  balanceAfterPayment,
   daysFromToday,
   deriveStage,
   invoiceBalance,
@@ -267,5 +268,30 @@ describe('deriveStage × partial payments (regression)', () => {
 
   it('only a fully paid invoice reaches Paid', () => {
     expect(deriveStage('Approved', 'Paid')).toBe('Paid');
+  });
+});
+
+describe('pagamento com data escolhida (cheque pré-datado / recebido ontem)', () => {
+  // o banco devolve o ledger ordenado por paid_at, então um pagamento lançado hoje com data de
+  // ONTEM entra ANTES do que já estava — e o "saldo após" de cada recibo segue a cronologia
+  it('o saldo por pagamento segue a data, não a ordem em que foi digitado', () => {
+    const total = 1000;
+    // digitado primeiro: $400 hoje. Depois lançado $600 com data de ontem → vem antes na lista.
+    const ledger = [
+      { id: 'ontem', amount: 600 },
+      { id: 'hoje', amount: 400 },
+    ];
+    expect(balanceAfterPayment(total, ledger, 'ontem')).toBe(400);
+    expect(balanceAfterPayment(total, ledger, 'hoje')).toBe(0);
+  });
+
+  it('o total recebido não depende da ordem', () => {
+    expect(paidTotal([{ amount: 600 }, { amount: 400 }])).toBe(paidTotal([{ amount: 400 }, { amount: 600 }]));
+  });
+
+  it('data escolhida é date-only: não escorrega um dia por fuso', () => {
+    // o cheque datado de 12/09 tem que continuar 12/09 na Flórida (UTC-4), não 11/09
+    expect(toDateOnly(parseDateOnly('2026-09-12'))).toBe('2026-09-12');
+    expect(parseDateOnly('2026-09-12').getDate()).toBe(12);
   });
 });

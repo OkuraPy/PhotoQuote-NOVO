@@ -4,6 +4,29 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-05 15:20] — feat: data do pagamento escolhida à mão + Zelle como método
+Dois áudios do Gladson (28/08) com print do "Record payment":
+1. **"a data de pagamento a gente não consegue escolher"** — dois casos reais: (a) cheque
+   pré-datado, "que é pra daqui uma semana"; (b) recebeu ontem, só hoje está lançando e emitindo o
+   recibo, e "a data eu preciso colocar de ontem". O texto fixo "Received today · <hoje>" virou um
+   campo **Payment date** que abre o `DateSheet` (passado e futuro liberados).
+2. **Zelle** entre os métodos — "é igual o Pix no Brasil". Entra como chave `Zelle` (marca, igual
+   nos 3 idiomas) entre Check e Card, que é a ordem de uso dele.
+- 🔴 **Bug que eu teria criado e peguei na conferência**: o recibo oferecido logo depois de
+  registrar (`Job.tsx:829`) mandava `date: toDateOnly(new Date())` — a data de HOJE. O recibo do
+  "recebi ontem" sairia com a data errada, ou seja, o pedido pela metade. Agora manda `paidAt`.
+  O outro caminho (recibo pela lista, `Job.tsx:859`) já lia `p.paidAt` do banco e estava certo.
+- **Arquivos**: `src/v2/screens/Job.tsx` (estado `paidAt`, campo novo, `METHOD_KEY`, strings),
+  `src/v2/lib/__tests__/payments.test.ts` (+3)
+- **Sem migration**: `invoice_payments.paid_at` é `date NOT NULL default CURRENT_DATE` e
+  `recordInvoicePayment` já aceitava `paidAt` — só a tela não oferecia. `method` é texto livre, sem
+  CHECK, então Zelle entra sem tocar no banco (conferido por SQL em prod).
+- **Efeitos aceitos**: o ledger é ordenado por `paid_at`, então um pagamento lançado hoje com data
+  de ontem entra ANTES na cronologia e o "saldo após" segue essa ordem (é o correto contábil, mas um
+  recibo já emitido reimprime com outro saldo). Um cheque pré-datado conta como recebido na hora —
+  que é exatamente o que ele pediu.
+- jest **183/183**, tsc limpo.
+
 ### [2026-09-05 14:40] — fix: revisão profunda da busca e do teclado — 2 ALTOS reais, um deles o caso de uso do pedido
 O dono mandou "revisa profundamente". Dois revisores adversariais + uma varredura contra a base de
 produção inteira (101 jobs, 144 números, cada um digitado de 4 a 7 jeitos).
