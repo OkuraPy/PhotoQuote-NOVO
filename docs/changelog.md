@@ -4,6 +4,30 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-05 13:10] — feat: busca por nº de fatura/cotação + o teclado parou de tapar a lista
+- **O que mudou** (2 áudios do Gladson de 03/09, com print da tela Jobs):
+  1. **Buscar pelo número**: o cheque do contractor vem com o número do invoice, e para dar baixa
+     ele tinha que abrir job por job. Agora a busca da lista aceita `40`, `0040`, `INV-2026-0040`,
+     `inv 2026 0040`, `EST-099`, `99`. O número do documento passou a aparecer no card (INV se
+     houver, senão EST), que é o que permite identificar o certo sem abrir.
+  2. **Teclado**: ao buscar, o teclado ficava por cima dos últimos resultados e só saía tocando num
+     canto vazio — "a pessoa tem que saber que tem que clicar do lado". Agora arrastar a lista fecha
+     o teclado (`keyboardDismissMode="on-drag"`), o iOS recua a lista pela altura do teclado
+     (`automaticallyAdjustKeyboardInsets`, RN 0.81 suporta) e tocar num card abre o job direto em vez
+     do toque ser gasto fechando o teclado (`keyboardShouldPersistTaps="handled"`). Mesma correção
+     aplicada na lista de Clientes, que tinha exatamente o mesmo problema.
+- **Arquivos**: `src/v2/data.ts` (`jobMatchesQuery` — puro e testado), `src/v2/lib/api.ts`
+  (`fetchJobs` agora traz `invoice_number`/`estimate_number` → `docNumbers`/`docLabel`),
+  `src/v2/screens/Tabs.tsx` (busca, props de teclado em Jobs e Clients, número no card, placeholder),
+  `src/v2/lib/__tests__/data.test.ts` (+9 testes).
+- **Decisão técnica**: número puro (`40`) é comparado com a **sequência final** do documento, nunca
+  com a string inteira — senão `2026`, que está dentro de toda fatura, casaria com tudo. Zeros à
+  esquerda são ignorados dos dois lados. A busca por texto continua sendo "contém" (sem regressão),
+  então `40` também traz quem tem 40 no CEP; o número no card é o desempate visual. Sem migration —
+  as duas colunas já existiam, só não vinham na query da lista.
+- **Limite conhecido**: a busca acontece dentro do filtro selecionado; o número de um job
+  arquivado/perdido só aparece nos chips Lost/Archived.
+
 ### [2026-09-05 12:20] — feat: comentário agora mostra data e hora (pedido do dono, áudio 04/09)
 - **O que mudou**: no painel de Comentários de cada fase (app), cada mensagem passou a exibir
   quando foi escrita — "Sep 4 · 4:03 PM" —, alinhada à direita do nome do autor. O ano só aparece

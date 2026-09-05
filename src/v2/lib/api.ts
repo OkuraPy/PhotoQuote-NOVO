@@ -1047,15 +1047,23 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
   const [proj, cli, est, inv] = await Promise.all([
     supabase.from('projects').select('id, name, client_id, address, city, created_at, photo_urls, status').eq('user_id', userId).order('created_at', { ascending: false }),
     supabase.from('clients').select('id, full_name').eq('user_id', userId),
-    supabase.from('estimates').select('project_id, status, total, grand_total, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    supabase.from('invoices').select('project_id, status, total, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    supabase.from('estimates').select('project_id, status, total, grand_total, estimate_number, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    supabase.from('invoices').select('project_id, status, total, invoice_number, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
   ]);
   if (proj.error) throw proj.error;
 
   const clients = new Map<string, string>((cli.data || []).map((c: any) => [c.id, c.full_name]));
   const estByProj = new Map<string, any>();
+  // every estimate number the job ever had — the list searches by number and a job can carry more
+  // than one estimate (revisions), so the newest alone is not enough
+  const estNumsByProj = new Map<string, string[]>();
   (est.data || []).forEach((e: any) => {
     if (!estByProj.has(e.project_id)) estByProj.set(e.project_id, e); // first = newest (ordered desc)
+    if (e.estimate_number) {
+      const list = estNumsByProj.get(e.project_id);
+      if (list) list.push(e.estimate_number);
+      else estNumsByProj.set(e.project_id, [e.estimate_number]);
+    }
   });
   // G-9: a job can carry more than one invoice — the money it is worth is the SUM of them, not
   // the newest one. Without this a $10,400 job with a paid $8,000 and a fresh $2,400 would read
@@ -1077,6 +1085,10 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
     const allPaid = ivs.length > 0 && ivs.every((i: any) => String(i.status || '').toLowerCase() === 'paid');
     const anyMoneyIn = ivs.some((i: any) => ['paid', 'partially paid'].includes(String(i.status || '').toLowerCase()));
     const aggStatus = ivs.length ? (allPaid ? 'Paid' : 'Unpaid') : undefined;
+    // invoices first: the check the contractor receives quotes the INVOICE number, so that is the
+    // one the card shows; a job still without an invoice falls back to its estimate number
+    const invNums = ivs.map((i: any) => i.invoice_number).filter(Boolean) as string[];
+    const estNums = estNumsByProj.get(p.id) || [];
     return {
       id: p.id,
       projectId: p.id,
@@ -1092,6 +1104,8 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
       thumb: Array.isArray(p.photo_urls) && p.photo_urls[0] ? String(p.photo_urls[0]) : null,
       date: monthDay(p.created_at),
       closed: closedFromStatus(p.status),
+      docNumbers: [...invNums, ...estNums],
+      docLabel: invNums[0] || estNums[0] || null,
     };
   });
 }

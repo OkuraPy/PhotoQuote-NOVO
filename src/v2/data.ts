@@ -578,7 +578,37 @@ export type Job = {
   // G-5: money already landed but the invoice is not closed. deriveStage cannot carry this (a
   // half-paid invoice is still "Invoiced"), and from the list that read as "nothing was paid".
   partial?: boolean;
+  // every invoice/estimate number this job owns ("INV-2026-0040", "EST-099") — the list searches
+  // them; docLabel is the newest one, shown on the card so a hit is identifiable at a glance
+  docNumbers?: string[];
+  docLabel?: string | null;
 };
+
+// The contractor gets paid by check quoting the INVOICE NUMBER, so the jobs list has to answer by
+// number as well as by name/address. Typing the bare sequence ("40") is the common case — that is
+// matched against the document's own sequence, never against the whole string, otherwise "2026"
+// (the year inside every invoice number) would match every job.
+const docSeq = (n: string) => {
+  const m = n.match(/(\d+)\s*$/);
+  return m ? m[1].replace(/^0+/, '') || '0' : null;
+};
+const alnum = (s: string) => s.replace(/[^a-z0-9]/g, '');
+
+export function jobMatchesQuery(j: Job, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  // name/address/title first — unchanged behaviour, and it keeps "1017" finding the street number
+  if ([j.client || 'no client', j.addr, j.title].join(' ').toLowerCase().includes(q)) return true;
+  const nums = j.docNumbers || [];
+  if (!nums.length) return false;
+  if (/^\d+$/.test(q)) {
+    const seq = q.replace(/^0+/, '') || '0';
+    return nums.some((raw) => docSeq(String(raw).toLowerCase()) === seq);
+  }
+  // typed with the prefix ("INV-2026-0040", "inv 2026 0040", "est99"): compare letters+digits only
+  const qc = alnum(q);
+  return nums.some((raw) => alnum(String(raw).toLowerCase()).includes(qc));
+}
 
 export const JOBS: Job[] = [
   { id: 'j1', client: 'Maria Alvarez', addr: '14 Linden Ave', title: 'Exterior repaint', stage: 'Quoted', value: 4238.8, photos: 6, date: 'May 28' },

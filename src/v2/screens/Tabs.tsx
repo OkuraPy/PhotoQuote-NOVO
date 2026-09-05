@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
-import { billingState, ClosedKind, fmt, fmt0, homeMetrics, initials, Job, split, STAGES, trialDaysLeft } from '../data';
+import { billingState, ClosedKind, fmt, fmt0, homeMetrics, initials, Job, jobMatchesQuery, split, STAGES, trialDaysLeft } from '../data';
 import { Avatar, Between, Btn, Card, Empty, NavBtn, Row, SearchBar, SectionTitle, StageChip, Switch, SwipeRow, useStore } from '../ui';
 import { useAuth } from '../lib/auth';
 import { deleteAccount, deleteProject, fetchClients, fetchCompanyProfile, fetchJobs, fetchOwnBilling, projectDeleteFacts } from '../lib/api';
@@ -77,10 +77,11 @@ registerStrings({
 
   // Jobs list
   'tabs.jobs': { en: 'Jobs', es: 'Trabajos', pt: 'Trabalhos' },
+  // the number is in the placeholder on purpose: nobody guesses a search field takes INV-2026-0040
   'tabs.searchClientOrAddress': {
-    en: 'Search client or address',
-    es: 'Buscar cliente o dirección',
-    pt: 'Buscar cliente ou endereço',
+    en: 'Search client, address or #',
+    es: 'Buscar cliente, dirección o n.º',
+    pt: 'Buscar cliente, endereço ou nº',
   },
   'tabs.filterAll': { en: 'All', es: 'Todos', pt: 'Todos' },
   // closed filters — labels match the ClosedChip the cards show (values stay English in the store)
@@ -302,6 +303,8 @@ export function JobCard({ j, i, onPress }: { j: Job; i: number; onPress: () => v
           <Row style={{ gap: 5, marginTop: 2 }}>
             <Icon name="mapPin" size={13} color={colors.faint} />
             <Text numberOfLines={1} style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, flex: 1 }}>{j.addr}</Text>
+            {/* the number the client pays against — also what the search now answers by */}
+            {j.docLabel ? <Text numberOfLines={1} style={{ fontFamily: fonts.num, fontSize: 10.5, color: colors.faint }}>{j.docLabel}</Text> : null}
           </Row>
           <Between style={{ marginTop: 9 }}>
             {showMoney ? (
@@ -462,7 +465,8 @@ export function JobsScreen({ go }: NavProp) {
     : filter === 'Archived' ? j.closed === 'archived'
     : !j.closed && (filter === 'All' || j.stage === filter)
   );
-  if (q) list = list.filter((j) => (j.client || 'no client').toLowerCase().includes(q.toLowerCase()) || j.addr.toLowerCase().includes(q.toLowerCase()) || j.title.toLowerCase().includes(q.toLowerCase()));
+  // name/address/title as before, plus the invoice/estimate number (jobMatchesQuery, unit-tested)
+  if (q) list = list.filter((j) => jobMatchesQuery(j, q));
   return (
     <>
       <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>
@@ -499,6 +503,13 @@ export function JobsScreen({ go }: NavProp) {
         showsVerticalScrollIndicator={false}
         initialNumToRender={8}
         windowSize={7}
+        // searching used to trap the keyboard over the last results: it only closed by tapping some
+        // empty spot, which nobody guesses. Dragging the list now dismisses it, iOS insets the list
+        // by the keyboard height so the last card is always reachable, and a tap on a card opens
+        // the job straight away instead of being eaten as "close the keyboard".
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
         ListEmptyComponent={
           isLoading ? (
             <View style={{ paddingTop: 40, alignItems: 'center' }}><ActivityIndicator color={colors.primary} /></View>
@@ -558,7 +569,8 @@ export function ClientsScreen({ go }: NavProp) {
       <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
         <SearchBar placeholder={t('tabs.searchClients')} value={q} onChangeText={(v) => up({ clientQ: v })} />
       </View>
-      <ScrollView contentContainerStyle={[scroll, { paddingTop: 8 }]} showsVerticalScrollIndicator={false}>
+      {/* same keyboard trap as the jobs list: drag closes it, iOS insets for it, taps still land */}
+      <ScrollView contentContainerStyle={[scroll, { paddingTop: 8 }]} showsVerticalScrollIndicator={false} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         {isLoading ? (
           <View style={{ paddingTop: 60, alignItems: 'center' }}><ActivityIndicator color={colors.primary} /></View>
         ) : list.length === 0 ? (

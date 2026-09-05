@@ -1,5 +1,5 @@
-import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobSiteLine, needsPhaseSync, NO_DISCOUNT, parseMoney, parsePercent, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitChangeOrder, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
-import type { ClosedKind, LineItem, SyncPhase } from '../../data';
+import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobMatchesQuery, jobSiteLine, needsPhaseSync, NO_DISCOUNT, parseMoney, parsePercent, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitChangeOrder, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
+import type { ClosedKind, Job, LineItem, SyncPhase } from '../../data';
 import type { Stage } from '../../theme';
 
 const item = (over: Partial<LineItem> = {}): LineItem => ({
@@ -621,5 +621,71 @@ describe('parsePercent (percentual não é dinheiro)', () => {
   it('é null quando não há número', () => {
     expect(parsePercent('')).toBeNull();
     expect(parsePercent('%')).toBeNull();
+  });
+});
+
+describe('jobMatchesQuery (achar o job pelo número do cheque)', () => {
+  const job = (over: Partial<Job> = {}): Job => ({
+    id: 'j1',
+    client: 'WL General Services',
+    addr: '1017 Hansen St West Palm Beach, fl 33405',
+    title: 'Drywall repair',
+    stage: 'Invoiced' as Stage,
+    value: 14947.01,
+    photos: 1,
+    date: 'Sep 3',
+    docNumbers: ['INV-2026-0040', 'EST-099'],
+    docLabel: 'INV-2026-0040',
+    ...over,
+  });
+
+  it('mantém a busca por nome, endereço e título', () => {
+    expect(jobMatchesQuery(job(), 'wl')).toBe(true);
+    expect(jobMatchesQuery(job(), 'hansen')).toBe(true);
+    expect(jobMatchesQuery(job(), 'drywall')).toBe(true);
+    expect(jobMatchesQuery(job(), 'cornerstone')).toBe(false);
+  });
+
+  it('acha pelo número puro da fatura, com ou sem os zeros', () => {
+    expect(jobMatchesQuery(job(), '40')).toBe(true);
+    expect(jobMatchesQuery(job(), '0040')).toBe(true);
+    expect(jobMatchesQuery(job(), '41')).toBe(false);
+  });
+
+  it('acha pelo número da cotação', () => {
+    expect(jobMatchesQuery(job(), '99')).toBe(true);
+  });
+
+  it('NÃO casa com o ano de dentro do número — senão tudo apareceria', () => {
+    expect(jobMatchesQuery(job(), '2026')).toBe(false);
+  });
+
+  it('aceita o número escrito por extenso, do jeito que vem no cheque', () => {
+    expect(jobMatchesQuery(job(), 'INV-2026-0040')).toBe(true);
+    expect(jobMatchesQuery(job(), 'inv 2026 0040')).toBe(true);
+    expect(jobMatchesQuery(job(), 'est-099')).toBe(true);
+    expect(jobMatchesQuery(job(), 'INV-2026-0041')).toBe(false);
+  });
+
+  it('o número da rua continua ganhando do número do documento', () => {
+    expect(jobMatchesQuery(job(), '1017')).toBe(true);
+  });
+
+  it('job sem documento nenhum não quebra a busca por número', () => {
+    const draft = job({ docNumbers: [], docLabel: null, addr: 'Rivercrest Apts, Apt 202' });
+    expect(jobMatchesQuery(draft, '40')).toBe(false);
+    expect(jobMatchesQuery(draft, 'wl')).toBe(true);
+  });
+
+  // comportamento ANTIGO preservado de propósito: o texto casa por pedaço, então "40" também traz
+  // quem tem 40 no CEP/endereço. É ruído conhecido — o número do documento agora aparece no card,
+  // que é o que deixa o contratante identificar o certo sem abrir um por um.
+  it('o texto continua casando por pedaço (sem regressão na busca antiga)', () => {
+    expect(jobMatchesQuery(job({ docNumbers: [], docLabel: null }), '40')).toBe(true); // 33405
+  });
+
+  it('busca vazia devolve tudo', () => {
+    expect(jobMatchesQuery(job(), '')).toBe(true);
+    expect(jobMatchesQuery(job(), '   ')).toBe(true);
   });
 });
