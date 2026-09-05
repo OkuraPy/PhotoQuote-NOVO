@@ -1,11 +1,11 @@
 // PhotoQuote v2 — tab roots: Home, Jobs, Clients, Profile
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
-import { billingState, ClosedKind, fmt, fmt0, homeMetrics, initials, Job, searchJobs, shortDocLabel, split, STAGES, trialDaysLeft } from '../data';
+import { billingState, ClosedKind, fmt, fmt0, fold, homeMetrics, initials, Job, searchJobs, shortDocLabel, split, STAGES, trialDaysLeft } from '../data';
 import { Avatar, Between, Btn, Card, Empty, NavBtn, Row, SearchBar, SectionTitle, StageChip, Switch, SwipeRow, useStore } from '../ui';
 import { useAuth } from '../lib/auth';
 import { deleteAccount, deleteProject, fetchClients, fetchCompanyProfile, fetchJobs, fetchOwnBilling, projectDeleteFacts } from '../lib/api';
@@ -267,7 +267,9 @@ export function useJobDelete() {
 }
 
 /* ---------------- JOB CARD ---------------- */
-export function JobCard({ j, i, onPress }: { j: Job; i: number; onPress: () => void }) {
+// memoized: the jobs list re-renders on every keystroke of the search box, and each card carries an
+// Image + LinearGradient. Without this, ~20 of them remount per letter typed.
+export const JobCard = React.memo(function JobCard({ j, i, onPress }: { j: Job; i: number; onPress: () => void }) {
   const t = useT();
   const { role, canSeeFinancials } = useAuth();
   // Field mode (Onda B): money hides behind the per-member flag, and the stage chip goes with it
@@ -321,7 +323,7 @@ export function JobCard({ j, i, onPress }: { j: Job; i: number; onPress: () => v
       </Card>
     </Pressable>
   );
-}
+});
 
 /* ---------------- HOME ---------------- */
 export function HomeScreen({ go }: NavProp) {
@@ -458,12 +460,22 @@ export function JobsScreen({ go }: NavProp) {
   // field members: no stage filters (stages derive from RLS-hidden financials) and no New Quote
   const fieldMode = role === 'field';
   const filter = fieldMode ? 'All' : store.jobFilter || 'All';
-  const q = store.jobQ || '';
+  // trimmed: a stray space is not a search. Using the raw value made " " take the search branch
+  // while searchJobs treated it as empty — the whole base, closed jobs included, with no reason.
+  const q = (store.jobQ || '').trim();
   // 'All' and the stage filters show OPEN jobs only; Lost/Archived list just their own closed kind
   const filters = ['All', ...STAGES, 'Lost', 'Archived'];
   // Searching looks at EVERY job, filter chip included: five production invoices belong to lost
   // projects, so a check for one of them used to answer "No matches" under the default All chip.
   // Number hits sort first, then text hits; closed jobs go last and keep their Lost/Archived chip.
+  const renderJob = useCallback(
+    ({ item: j, index: i }: { item: Job; index: number }) => (
+      <SwipeRow enabled={canDelete && !deleting} onAction={() => confirmDelete(j)}>
+        <JobCard j={j} i={i} onPress={() => go('job', { job: j })} />
+      </SwipeRow>
+    ),
+    [canDelete, deleting, confirmDelete, go]
+  );
   const list = q
     ? searchJobs(jobs, q)
     : jobs.filter((j) =>
@@ -481,7 +493,9 @@ export function JobsScreen({ go }: NavProp) {
         {/* the chips need keyboardShouldPersistTaps too: on the default 'never', with the keyboard
             up, the first tap on "Lost" only closes it and the filter does not change */}
         {fieldMode ? null : (
-        <ScrollView horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }} style={{ marginTop: 12 }}>
+        // while searching, the chips are dimmed and inert: the search deliberately looks past the
+        // filter (a check for a Lost job has to be findable), so a lit-up chip would be a lie
+        <ScrollView horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }} style={{ marginTop: 12, opacity: q ? 0.4 : 1 }} pointerEvents={q ? 'none' : 'auto'}>
           {filters.map((f) => (
             <Pressable
               key={f}
@@ -500,11 +514,9 @@ export function JobsScreen({ go }: NavProp) {
       <FlatList
         data={isLoading ? [] : list}
         keyExtractor={(j) => j.id}
-        renderItem={({ item: j, index: i }) => (
-          <SwipeRow enabled={canDelete && !deleting} onAction={() => confirmDelete(j)}>
-            <JobCard j={j} i={i} onPress={() => go('job', { job: j })} />
-          </SwipeRow>
-        )}
+        // stable identity so the memoized JobCard actually skips: an inline arrow here would hand
+        // every card a brand-new onPress on each keystroke and defeat the memo
+        renderItem={renderJob}
         contentContainerStyle={[scroll, { paddingTop: 14, gap: 10 }]}
         showsVerticalScrollIndicator={false}
         initialNumToRender={8}
@@ -568,8 +580,9 @@ export function ClientsScreen({ go }: NavProp) {
     queryFn: () => fetchClients(ownerId!),
     enabled: !!ownerId,
   });
-  const ql = q.toLowerCase();
-  const list = clients.filter((c) => c.name.toLowerCase().includes(ql) || c.phone.toLowerCase().includes(ql) || c.email.toLowerCase().includes(ql) || c.city.toLowerCase().includes(ql));
+  // folded + trimmed: "luis" has to find "Luís", and a stray space must not hide every client
+  const ql = fold(q.trim());
+  const list = clients.filter((c) => [c.name, c.phone, c.email, c.city].some((f) => fold(String(f || '')).includes(ql)));
   return (
     <>
       <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>

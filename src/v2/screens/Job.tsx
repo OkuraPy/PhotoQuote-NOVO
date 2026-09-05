@@ -4,7 +4,7 @@ import { ActivityIndicator, Alert, Image, Linking, Pressable, Share, ScrollView,
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
-import { addDaysISO, applyMarkup, balanceAfterPayment, calcTotals, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, invoiceRollup, NO_DISCOUNT, resolveDiscount, splitChangeOrder, uninvoiced, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
+import { addDaysISO, applyMarkup, balanceAfterNewPayment, balanceAfterPayment, calcTotals, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, invoiceRollup, NO_DISCOUNT, resolveDiscount, splitChangeOrder, uninvoiced, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { addPhaseComment, addPhasePhotos, addProjectPhotos, agreementLink, assignMember, BEFORE_PHASE_NAME, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deletePhasePhoto, deleteProject, deleteProjectPhoto, deriveStage, ensureBookendPhases, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, FINAL_PHASE_NAME, JobDetail, progressLink, ProgressPhase, PhaseStatus, projectDeleteFacts, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -151,6 +151,18 @@ registerStrings({
     pt: 'O dia em que o cliente pagou — cheque pré-datado mantém a data dele.',
   },
   'job.today': { en: 'today', es: 'hoy', pt: 'hoje' },
+  'job.postDatedWarn': {
+    en: 'Post-dated: this counts as received now, and a payment cannot be undone in the app.',
+    es: 'Posfechado: cuenta como recibido ahora, y un pago no se puede deshacer en la app.',
+    pt: 'Pré-datado: conta como recebido agora, e a app não desfaz um pagamento.',
+  },
+  'job.postDatedTitle': { en: 'Post-dated payment', es: 'Pago posfechado', pt: 'Pagamento pré-datado' },
+  'job.postDatedBody': {
+    en: 'You picked {date}, which is in the future. The invoice will count this money as received today — and payments cannot be deleted in the app. Record it anyway?',
+    es: 'Elegiste {date}, una fecha futura. La factura contará este dinero como recibido hoy — y los pagos no se pueden borrar en la app. ¿Registrar igual?',
+    pt: 'Você escolheu {date}, uma data futura. A fatura vai contar esse dinheiro como recebido hoje — e a app não apaga pagamentos. Registrar mesmo assim?',
+  },
+  'job.postDatedConfirm': { en: 'Record it', es: 'Registrar', pt: 'Registrar' },
   'job.couldNotRecordPayment': { en: 'Could not record the payment', es: 'No se pudo registrar el pago', pt: 'Não foi possível registrar o pagamento' },
   // receipt (G3) — the document itself is English; only this app copy is translated
   'job.paymentRecordedTitle': { en: 'Payment recorded', es: 'Pago registrado', pt: 'Pagamento registrado' },
@@ -794,6 +806,20 @@ export function JobScreen({ go, back, params }: NavProp) {
   // After a successful record the contractor is offered a receipt for it (G3).
   const confirmPayment = async (amount: number, method: string | null, note: string, paidAt: string) => {
     if (!ownerId || !inv?.id) return;
+    // a future date is allowed on purpose (the post-dated check the owner asked for), but it closes
+    // the invoice with money that has not cleared and there is no void in the app — so it asks
+    if (paidAt > toDateOnly(new Date())) {
+      const pretty = parseDateOnly(paidAt).toLocaleDateString(localeTag(), { month: 'short', day: 'numeric', year: 'numeric' });
+      Alert.alert(t('job.postDatedTitle'), t('job.postDatedBody', { date: pretty }), [
+        { text: t('job.notNow'), style: 'cancel' },
+        { text: t('job.postDatedConfirm'), onPress: () => void confirmPaymentChecked(amount, method, note, paidAt) },
+      ]);
+      return;
+    }
+    void confirmPaymentChecked(amount, method, note, paidAt);
+  };
+  const confirmPaymentChecked = async (amount: number, method: string | null, note: string, paidAt: string) => {
+    if (!ownerId || !inv?.id) return;
     // guard a fat-finger overpayment ($9409 for a $940.90 balance): the ledger is append-only,
     // there's no in-app refund, and the receipt would print a wrong "Paid in full" (final-review M1)
     const balanceNow = invoiceBalance(inv.total, inv.amountPaid);
@@ -820,7 +846,9 @@ export function JobScreen({ go, back, params }: NavProp) {
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
       setPaySheet(false);
       clearStage();
-      const balanceAfter = invoiceBalance(invoice.total, invoice.amountPaid + amount);
+      // chronological, NOT "total − everything paid": with a back-dated payment the two disagree,
+      // and this receipt carries the same number the re-issue will print (reviewer finding).
+      const balanceAfter = balanceAfterNewPayment(invoice.total, invoice.payments || [], { id: paymentId, amount, paidAt });
       // 380ms: the receipt offer (G3) was racing the sheet's dismiss animation and could vanish
       setTimeout(() => Alert.alert(t('job.paymentRecordedTitle'), t('job.sendReceiptBody', { amount: fmt(amount) }), [
         { text: t('job.notNow'), style: 'cancel' },
@@ -1963,7 +1991,7 @@ function RecordPaymentSheet({ open, onClose, balance, busy, onConfirm }: { open:
   const [dateOpen, setDateOpen] = useState(false);
   // pre-fill with the outstanding balance on every open (fresh per job/press — local state)
   useEffect(() => {
-    if (open) { setAmount(round2(balance)); setMethod(null); setNote(''); setPaidAt(toDateOnly(new Date())); }
+    if (open) { setAmount(round2(balance)); setMethod(null); setNote(''); setPaidAt(toDateOnly(new Date())); setDateOpen(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
   // method KEYS stay English in the DB; only the chip labels are translated. Zelle is how a US
@@ -1997,6 +2025,15 @@ function RecordPaymentSheet({ open, onClose, balance, busy, onConfirm }: { open:
             <Icon name="chevR" size={15} color={colors.faint} />
           </Row>
         </Pressable>
+        {/* a post-dated check counts as received the moment it is recorded — the invoice can close
+            and the money lands in "collected" before the check clears, and the app has no way to
+            void a payment. Say it out loud, and make the owner confirm on the way out. */}
+        {paidAt > todayIso ? (
+          <Row style={{ gap: 6, marginTop: 8 }}>
+            <Icon name="clock" size={13} color={colors.warning} />
+            <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 12, color: colors.warning, lineHeight: 16 }}>{t('job.postDatedWarn')}</Text>
+          </Row>
+        ) : null}
       </Field>
       <Btn title={busy ? t('job.working') : t('job.recordPayment')} icon={busy ? undefined : 'check'} disabled={busy || !(amount > 0)} onPress={() => onConfirm(round2(amount), method, note, paidAt)} style={{ marginTop: 16 }} />
       <DateSheet

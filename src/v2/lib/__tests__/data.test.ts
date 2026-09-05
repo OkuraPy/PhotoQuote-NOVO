@@ -1,4 +1,4 @@
-import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobMatchesQuery, jobSiteLine, MATCH_DOC, MATCH_EXACT, MATCH_INVOICE, MATCH_NONE, MATCH_TEXT, rankJobMatch, searchJobs, shortDocLabel, needsPhaseSync, NO_DISCOUNT, parseMoney, parsePercent, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitChangeOrder, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
+import { applyMarkup, balanceAfterNewPayment, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobMatchesQuery, jobSiteLine, MATCH_DOC, MATCH_EXACT, MATCH_INVOICE, MATCH_NONE, MATCH_TEXT, rankJobMatch, searchJobs, shortDocLabel, needsPhaseSync, NO_DISCOUNT, parseMoney, parsePercent, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitChangeOrder, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
 import type { ClosedKind, Job, LineItem, SyncPhase } from '../../data';
 import type { Stage } from '../../theme';
 
@@ -778,10 +778,16 @@ describe('searchJobs (ordem: número > texto, e job fechado não some)', () => {
 });
 
 describe('shortDocLabel (o que cabe no card)', () => {
-  it('encurta o número atual', () => {
-    expect(shortDocLabel('INV-2026-0040')).toBe('INV #0040');
+  it('encurta o número, mas NUNCA joga fora o ano', () => {
     expect(shortDocLabel('EST-099')).toBe('EST #099');
-    expect(shortDocLabel('EST-2026-023')).toBe('EST #023');
+    expect(shortDocLabel('INV-2026-0040')).toBe('INV #2026-0040');
+    expect(shortDocLabel('EST-2026-023')).toBe('EST #2026-023');
+  });
+
+  it('dois jobs reais não podem mostrar o MESMO rótulo', () => {
+    // EST-022 (Jason Fikes) e EST-2026-022 (Ginger Petty) existem os dois em produção
+    expect(shortDocLabel('EST-022')).not.toBe(shortDocLabel('EST-2026-022'));
+    expect(shortDocLabel('EST-011')).not.toBe(shortDocLabel('EST-2026-011'));
   });
   it('id legado sem sequência aparece inteiro', () => {
     expect(shortDocLabel('INV-MP1K631K')).toBe('INV-MP1K631K');
@@ -789,5 +795,64 @@ describe('shortDocLabel (o que cabe no card)', () => {
   it('vazio é nulo', () => {
     expect(shortDocLabel(null)).toBeNull();
     expect(shortDocLabel('')).toBeNull();
+  });
+});
+
+describe('busca: achados da 2ª rodada de revisão', () => {
+  const j = (over: Partial<Job> = {}): Job => ({
+    id: 'j1', client: 'Iron Works LLC', addr: 'Rua x', title: 'T',
+    stage: 'Invoiced' as Stage, value: 1, photos: 0, date: '',
+    docNumbers: ['INV-2026-0040'], docLabel: 'INV-2026-0040', ...over,
+  });
+
+  it('uma letra solta NÃO transforma todo job faturado em hit de documento', () => {
+    // digitar o "i" de "Iron Works" fazia toda fatura casar e subir acima do cliente procurado
+    expect(rankJobMatch(j(), 'i')).toBe(MATCH_TEXT); // casou "Iron", como texto
+    expect(rankJobMatch(j(), 'in')).not.toBe(MATCH_INVOICE); // "in" não está em "Iron Works LLC"
+    // "e" não pode arrastar toda cotação para o topo
+    expect(rankJobMatch(j({ client: 'Zulu', addr: 'x', title: 'y', docNumbers: ['EST-099'] }), 'e')).toBe(MATCH_NONE);
+    expect(rankJobMatch(j(), 'inv')).toBe(MATCH_INVOICE); // o prefixo inteiro segue valendo
+  });
+
+  it('busca sem acento acha nome com acento (e vice-versa)', () => {
+    const luis = j({ client: 'Luís Fernando', addr: 'x', title: 'y', docNumbers: [], docLabel: null });
+    expect(jobMatchesQuery(luis, 'luis')).toBe(true);
+    expect(jobMatchesQuery(luis, 'Luís')).toBe(true);
+    expect(jobMatchesQuery(j({ client: 'Luis Fernando', addr: 'x', title: 'y', docNumbers: [] }), 'luís')).toBe(true);
+  });
+
+  it('espaço em branco não é busca — devolve a lista intacta', () => {
+    const jobs = [j(), j({ id: 'j2', closed: 'lost' })];
+    expect(searchJobs(jobs, ' ')).toBe(jobs);
+    expect(searchJobs(jobs, '')).toBe(jobs);
+  });
+});
+
+describe('balanceAfterNewPayment (o recibo imediato e a 2ª via têm que bater)', () => {
+  it('pagamento retroativo: saldo é o da cronologia, não o de hoje', () => {
+    // $1.000 de fatura, $600 já pagos em 01/09. Agora lança $400 com data 25/08 (antes).
+    const jaNoLedger = [{ id: 'a', amount: 600, paidAt: '2026-09-01' }];
+    const novo = { id: 'b', amount: 400, paidAt: '2026-08-25' };
+    // o recibo do NOVO tem que dizer $600 de saldo (só ele havia sido pago até 25/08)
+    expect(balanceAfterNewPayment(1000, jaNoLedger, novo)).toBe(600);
+    // e é exatamente o que a 2ª via calcula a partir do ledger que o banco devolve ordenado
+    const ledgerDoBanco = [novo, ...jaNoLedger];
+    expect(balanceAfterPayment(1000, ledgerDoBanco, 'b')).toBe(600);
+  });
+
+  it('pagamento de hoje continua fechando a fatura', () => {
+    const jaNoLedger = [{ id: 'a', amount: 600, paidAt: '2026-09-01' }];
+    const hoje = { id: 'b', amount: 400, paidAt: '2026-09-05' };
+    expect(balanceAfterNewPayment(1000, jaNoLedger, hoje)).toBe(0);
+  });
+
+  it('mesma data: o novo entra depois dos que já existiam (como o created_at do banco)', () => {
+    const jaNoLedger = [{ id: 'a', amount: 300, paidAt: '2026-09-05' }];
+    const novo = { id: 'b', amount: 200, paidAt: '2026-09-05' };
+    expect(balanceAfterNewPayment(1000, jaNoLedger, novo)).toBe(500);
+  });
+
+  it('primeiro pagamento do ledger', () => {
+    expect(balanceAfterNewPayment(1000, [], { id: 'a', amount: 250, paidAt: '2026-09-05' })).toBe(750);
   });
 });

@@ -4,6 +4,46 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-05 16:10] — fix: 3 revisores em cima de tudo — 1 BLOQUEANTE e 1 ALTO de dinheiro
+O dono mandou "coloca revisores para analisar tudo". Três agentes adversariais (dinheiro / busca e
+teclado / integração), cada um com escopo próprio. Acharam coisa que eu não tinha visto.
+
+🔴 **ALTO — o MESMO recibo saía com dois saldos diferentes** (`Job.tsx:823`). O recibo oferecido
+logo após registrar calculava `total − tudo que já foi pago`; a 2ª via calcula pela **cronologia**
+(`balanceAfterPayment` sobre o ledger, que o banco devolve ordenado por `paid_at`). Enquanto a data
+era sempre hoje, os dois batiam. Com data retroativa, divergem: fatura de $1.000 com $600 pagos em
+01/09, ao lançar $400 datados de 25/08, o recibo imediato imprimia **"Paid in full"** e a 2ª via do
+**mesmo número de recibo** imprimia **"Remaining balance $600"**. Corrigido com
+`balanceAfterNewPayment` (pura, 4 testes), que insere o novo pagamento na posição cronológica e usa
+a mesma matemática dos dois lados.
+
+🔴 **BLOQUEANTE apontado — cheque pré-datado fecha a fatura com dinheiro que não entrou.** Um
+pagamento com data futura conta imediatamente: a fatura vira `Paid`, o job sai do pipeline, entra em
+"collected" na Home, e **a app não tem como apagar um pagamento** (só SQL). Mas a data futura é
+exatamente o que foi pedido ("cheque pra daqui uma semana… e ele já recebido"), então **não** tirei
+a capacidade: o campo agora avisa em amarelo assim que a data é futura, e ao confirmar aparece um
+alerta dizendo o efeito e que não dá pra desfazer. **A decisão de negócio — contar agora ou só na
+data — está com o dono** (perguntado no Telegram).
+
+**Busca (2ª rodada):**
+- **ALTO**: `shortDocLabel` jogava fora o ano e produzia rótulos IDÊNTICOS para jobs diferentes —
+  6 pares reais em produção (`EST-022` do Jason Fikes e `EST-2026-022` da Ginger Petty viravam os
+  dois "EST #022"). Agora o ano fica: `EST #2026-022`.
+- **MÉDIO**: `q` era usado sem `trim`, então um espaço caía no ramo de busca e devolvia a base
+  inteira, fechados inclusive. Idem na tela de Clientes.
+- **MÉDIO**: os chips de filtro ficavam acesos e clicáveis durante a busca, mentindo (a busca ignora
+  o filtro de propósito). Agora ficam esmaecidos e inertes enquanto há termo.
+- **MÉDIO**: re-render, não a busca — `searchJobs` custa 0,13-0,19 ms por tecla, mas o `JobCard` não
+  era memoizado e o `renderItem` era arrow inline: ~20 cards com `Image` remontavam por letra
+  digitada. `React.memo` + `useCallback`.
+- **BAIXO**: uma letra ("i", "e") casava o prefixo `inv`/`est` e arrastava 23-32 jobs para cima do
+  cliente procurado — agora o prefixo exige 3 letras. Busca passou a ignorar acento ("luis" acha
+  "Luís Fernando", que existe na base). Botão de limpar com alvo de 44pt e rótulo traduzido.
+- **Arquivos**: `src/v2/data.ts`, `src/v2/screens/Job.tsx`, `src/v2/screens/Tabs.tsx`,
+  `src/v2/ui.tsx`, `src/v2/lib/api.ts` (comentário que prometia demais), testes (+8 → **191**).
+- **Sem risco no portal**: `get_project_by_share_token` não devolve `invoices` nem
+  `invoice_payments`, então Zelle e data retroativa não chegam lá (verificado pelo revisor).
+
 ### [2026-09-05 15:20] — feat: data do pagamento escolhida à mão + Zelle como método
 Dois áudios do Gladson (28/08) com print do "Record payment":
 1. **"a data de pagamento a gente não consegue escolher"** — dois casos reais: (a) cheque

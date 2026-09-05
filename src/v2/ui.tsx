@@ -28,6 +28,7 @@ import { getLocale, registerStrings, useT } from './lib/i18n';
 registerStrings({
   'ui.optional': { en: 'optional', es: 'opcional', pt: 'opcional' },
   'ui.today': { en: 'Today', es: 'Hoy', pt: 'Hoje' },
+  'ui.clearSearch': { en: 'Clear search', es: 'Borrar búsqueda', pt: 'Limpar busca' },
   // pipeline stage labels (the Stage value stays English in logic; only the label is translated)
   'stage.Draft': { en: 'Draft', es: 'Borrador', pt: 'Rascunho' },
   'stage.Quoted': { en: 'Quoted', es: 'Cotizado', pt: 'Orçado' },
@@ -379,6 +380,7 @@ export function DecimalInput({ value, onChangeValue, style, placeholder }: { val
 }
 
 export function SearchBar({ placeholder, value, onChangeText }: { placeholder: string; value: string; onChangeText: (t: string) => void }) {
+  const t = useT();
   return (
     <View
       style={{
@@ -405,8 +407,9 @@ export function SearchBar({ placeholder, value, onChangeText }: { placeholder: s
       {/* the query survives leaving the tab (it lives in the store), so a list can come back still
           filtered by a number typed minutes ago with no keyboard on screen to explain it */}
       {value ? (
-        <Pressable onPress={() => onChangeText('')} hitSlop={10} accessibilityLabel="Clear search">
-          <Icon name="x" size={16} color={colors.faint} />
+        // 44pt target (HIG): the icon itself is 17, the padding around it does the rest
+        <Pressable onPress={() => onChangeText('')} hitSlop={14} accessibilityRole="button" accessibilityLabel={t('ui.clearSearch')} style={{ padding: 4 }}>
+          <Icon name="x" size={17} color={colors.faint} />
         </Pressable>
       ) : null}
     </View>

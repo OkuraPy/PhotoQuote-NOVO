@@ -1314,7 +1314,10 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
     const [schRes, payRes] = await Promise.all([
       supabase.from('invoice_schedule').select('invoice_id, id, label, amount, due_date, phase_id, sort').in('invoice_id', invIds).order('sort', { ascending: true }),
       // created_at tiebreaker: paid_at is date-only, and same-day payments must keep a stable
-      // order so a re-issued receipt always shows the same running balance
+      // order. Note this is stable per SET of payments, not forever: recording a payment dated
+      // EARLIER than existing ones re-orders the ledger, so a receipt re-issued afterwards prints
+      // the balance as of that date — which is why the immediate receipt uses the same
+      // chronological math (balanceAfterNewPayment) instead of "total − everything paid".
       supabase.from('invoice_payments').select('invoice_id, id, amount, paid_at, method, schedule_id, note').in('invoice_id', invIds).order('paid_at', { ascending: true }).order('created_at', { ascending: true }),
     ]);
     if (schRes.error) throw schRes.error;

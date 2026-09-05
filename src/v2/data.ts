@@ -298,6 +298,19 @@ export function planRows(plan: PaymentPlan, total: number): { label: string; amo
 export const paidTotal = (payments: { amount: number }[]) =>
   round2(payments.reduce((s, p) => s + (Number(p.amount) || 0), 0));
 
+// The receipt offered right after recording has to print the SAME balance the re-issue prints —
+// same receipt number, same PDF. The ledger comes back ordered by paid_at, so a back-dated payment
+// lands BEFORE ones already recorded: "total − everything paid so far" is not that number.
+// Sort is stable, so same-day payments keep insertion order = the DB's created_at tiebreak.
+export function balanceAfterNewPayment(
+  total: number,
+  payments: { id: string; amount: number; paidAt: string }[],
+  added: { id: string; amount: number; paidAt: string }
+): number {
+  const ledger = [...payments, added].sort((a, b) => (a.paidAt < b.paidAt ? -1 : a.paidAt > b.paidAt ? 1 : 0));
+  return balanceAfterPayment(total, ledger, added.id);
+}
+
 // Remaining balance right AFTER a given ledger payment (G3 receipts): total − Σ(payments up to
 // and including it, in ledger order). Re-issuing an OLD receipt shows the balance as of that
 // payment, not today's. An unknown id sums the whole ledger (= current balance) — safe fallback.
@@ -605,6 +618,8 @@ const parseDoc = (raw: string): ParsedDoc => {
 };
 // "inv 2026 0040", "INV-2026-0040", "#40", "est99" all tokenize the same way
 const queryTokens = (q: string) => q.toLowerCase().match(/[a-z]+|\d+/g) || [];
+// "Luís" ↔ "luis": the contractor types without accents, the client list is full of them
+export const fold = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 const DOC_NO = 0;
 const DOC_SEQ = 1; // matched the document's sequence
@@ -620,8 +635,9 @@ function docMatches(raw: string, tokens: string[]): 0 | 1 | 2 {
     // a numbered document answers to at most ONE word (its prefix). Without this, typing the whole
     // legacy id "INV-MOLX1QGP" matched INV-2026-0001, because the "1" inside it read as sequence 1.
     if (words.length > 1) return DOC_NO;
-    // "est…" must not answer for an invoice, and vice versa
-    if (words.length && !(d.alpha && d.alpha.startsWith(words[0]))) return DOC_NO;
+    // "est…" must not answer for an invoice, and vice versa. The 3-letter floor matters: on a bare
+    // "i", every invoiced job matched as a document and outranked the client the owner was typing.
+    if (words.length && !(words[0].length >= 3 && d.alpha && d.alpha.startsWith(words[0]))) return DOC_NO;
     // the sequence is compared by VALUE, never by substring. Substring would make "EST-100" match
     // EST-1001/1002/1003 (all real), and "#40" match INV-2026-0140.
     if (!nums.length) return DOC_SEQ; // typing just "inv" lists the invoices
@@ -664,18 +680,24 @@ export function rankJobMatch(j: Job, query: string): 0 | 1 | 2 | 3 | 4 {
     }
     if (best) return best;
   }
-  // name/address/title, each on its own: joining them let "services 1017" match across two fields
-  return [j.client || 'no client', j.addr, j.title].some((f) => f.toLowerCase().includes(q)) ? MATCH_TEXT : MATCH_NONE;
+  // name/address/title, each on its own: joining them let "services 1017" match across two fields.
+  // Accent-folded both ways — the client list has "Luís Fernando", and nobody types the accent.
+  const qf = fold(q);
+  return [j.client || 'no client', j.addr, j.title].some((f) => fold(f).includes(qf)) ? MATCH_TEXT : MATCH_NONE;
 }
 
 // Card label: "INV #0040" reads at a glance and leaves room for the address, where the full
 // "INV-2026-0040" ate ~80pt on a small iPhone. A legacy id has no sequence, so it shows whole.
+// The middle segment (the year) is KEPT when there is one: dropping it made EST-022 and
+// EST-2026-022 — two different jobs, both real — show the identical "EST #022" on the list.
 export function shortDocLabel(raw?: string | null): string | null {
   if (!raw) return null;
   const segs = String(raw).split(/[^A-Za-z0-9]+/).filter(Boolean);
   const last = segs[segs.length - 1] || '';
   const head = segs[0] || '';
-  return /^\d+$/.test(last) && /^[A-Za-z]+$/.test(head) ? `${head.toUpperCase()} #${last}` : String(raw);
+  if (!/^\d+$/.test(last) || !/^[A-Za-z]+$/.test(head)) return String(raw);
+  const middle = segs.slice(1, -1).join('-');
+  return `${head.toUpperCase()} #${middle ? `${middle}-` : ''}${last}`;
 }
 
 export function jobMatchesQuery(j: Job, query: string): boolean {
