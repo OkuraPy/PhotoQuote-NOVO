@@ -424,6 +424,13 @@ export const creditRoom = (total: number, credits: number, paid: number) =>
 export const uninvoiced = (quoteTotal: number, invoicedTotal: number) =>
   round2(Math.max(0, (Number(quoteTotal) || 0) - (Number(invoicedTotal) || 0)));
 
+// Which invoice absorbs an abatement. Both halves of the pair have to look at the same thing: the
+// "bill more" card is computed over the WHOLE job, so "take off" cannot be tied to whatever invoice
+// happens to be selected — on a job with two invoices whose first is settled, that offered $0.
+export function pickCreditTarget<T extends { total: number; creditTotal: number; amountPaid: number }>(invoices: T[]): T | undefined {
+  return invoices.find((i) => creditRoom(i.total, i.creditTotal, i.amountPaid) > 0.005);
+}
+
 // The mirror of `uninvoiced`: how far the quote fell BELOW what was already billed. That is the
 // credit the job is asking for — the same card, the other direction.
 export const overbilled = (quoteTotal: number, invoicedTotal: number) =>

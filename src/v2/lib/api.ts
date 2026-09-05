@@ -5,7 +5,7 @@ import * as Crypto from 'expo-crypto';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from './supabase';
 import { readErrorBody } from './ai';
-import { Client, ClosedKind, closedFromStatus, CreditRecord, creditRoom, creditTotal, jobValueFromInvoices, deriveBase, deriveStage, Discount, DOC_PHOTO_CAP, fmt, invoiceDue, Job, LineItem, MemberRole, paidTotal, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, Photo, planFromInvoice, planRows, rescaleSchedule, round2, ScheduleRow, seedPhasePlan, statusFromPayments, syncPhasePlan, toDateOnly } from '../data';
+import { Client, ClosedKind, applyCreditToRows, closedFromStatus, CreditRecord, creditRoom, creditTotal, jobValueFromInvoices, deriveBase, deriveStage, Discount, DOC_PHOTO_CAP, fmt, invoiceDue, Job, LineItem, MemberRole, paidTotal, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, Photo, planFromInvoice, planRows, rescaleSchedule, round2, ScheduleRow, seedPhasePlan, statusFromPayments, syncPhasePlan, toDateOnly } from '../data';
 export { deriveStage }; // re-exported for screens (lives in ../data so it's unit-testable)
 
 /* ---------------- Location: real ZIP (Zippopotam, keyless) + GPS (expo-location) ---------------- */
@@ -527,7 +527,8 @@ export async function createInvoice(
   estimateId: string,
   projectId: string,
   plan: PaymentPlan,
-  override?: { subtotal: number; tax: number; total: number }
+  override?: { subtotal: number; tax: number; total: number },
+  changeNote?: string | null
 ): Promise<{ id: string; number: string; downgraded: boolean }> {
   const { data: est, error: eErr } = await supabase
     .from('estimates')
@@ -562,6 +563,10 @@ export async function createInvoice(
       discount_amount: override ? 0 : Number(est?.discount_amount ?? 0),
       // marks the document as a change order: it prints ONE agreed line, never the quote's items
       is_change_order: !!override,
+      // o QUE é o extra, na língua do cliente. Sem isso o PDF dizia só "Additional work per change
+      // order" e o cliente perguntava "o que são esses $2.400?". `notes` já existe na tabela e o v2
+      // nunca a usou (5 linhas legadas, todas is_change_order=false) — nada de migration nova.
+      notes: override ? (changeNote || '').trim().slice(0, 120) || null : null,
       total: override ? override.total : Number(est?.total ?? est?.grand_total ?? 0),
       ...invoicePlanColumns(plan),
     })
@@ -712,11 +717,12 @@ export async function deleteInvoiceCredit(invoiceId: string, creditId: string): 
 // Race-safe: the guarded update only lands on a NULL cell, so the loser of a concurrent mint
 // re-reads the winner's number (its own RPC draw burns a harmless counter slot); the partial
 // unique index on (user_id, receipt_number) is the hard backstop.
-export async function ensureReceiptNumber(paymentId: string): Promise<string> {
-  const { data: row, error } = await supabase.from('invoice_payments').select('receipt_number').eq('id', paymentId).maybeSingle();
+export async function ensureReceiptNumber(paymentId: string, balanceAfter?: number): Promise<{ number: string; balanceAfter: number | null }> {
+  const { data: row, error } = await supabase.from('invoice_payments').select('receipt_number, balance_after').eq('id', paymentId).maybeSingle();
   if (error) throw error;
   if (!row) throw new Error('Payment not found.');
-  if (row.receipt_number) return String(row.receipt_number);
+  // já é documento: devolve o retrato guardado, não uma conta refeita hoje
+  if (row.receipt_number) return { number: String(row.receipt_number), balanceAfter: row.balance_after != null ? Number(row.balance_after) : null };
 
   const { data: numData, error: nErr } = await supabase.rpc('next_receipt_number');
   if (nErr) throw nErr;
@@ -724,16 +730,17 @@ export async function ensureReceiptNumber(paymentId: string): Promise<string> {
 
   const { data: upd, error: uErr } = await supabase
     .from('invoice_payments')
-    .update({ receipt_number: number })
+    // o saldo é congelado JUNTO do número: é o instante em que isto vira papel do cliente
+    .update({ receipt_number: number, balance_after: balanceAfter != null ? round2(balanceAfter) : null })
     .eq('id', paymentId)
     .is('receipt_number', null)
     .select('id');
   if (uErr) throw uErr;
-  if (upd?.length) return number;
+  if (upd?.length) return { number, balanceAfter: balanceAfter != null ? round2(balanceAfter) : null };
 
-  const { data: again, error: aErr } = await supabase.from('invoice_payments').select('receipt_number').eq('id', paymentId).maybeSingle();
+  const { data: again, error: aErr } = await supabase.from('invoice_payments').select('receipt_number, balance_after').eq('id', paymentId).maybeSingle();
   if (aErr) throw aErr;
-  if (again?.receipt_number) return String(again.receipt_number);
+  if (again?.receipt_number) return { number: String(again.receipt_number), balanceAfter: again.balance_after != null ? Number(again.balance_after) : null };
   // 0 rows updated AND still no number on re-read = the write was silently denied (RLS)
   // or the row vanished — issuing a number the DB never stored puts a phantom receipt
   // number on a client PDF (final-review A3). Fail loudly instead.
@@ -1051,7 +1058,9 @@ export async function createAgreement(userId: string, projectId: string, invoice
   const total = invoiceDue(Number(inv.total) || 0, await creditsFor(invoiceId));
   // the invoice's stored plan → English document rows (v2 template's {{payment_schedule_table}});
   // invoice & contract always match because both read the same snapshot
-  const rows = planRows(
+  // as parcelas do contrato seguem o mesmo abatimento do total (applyCreditToRows abaixo): sem isso
+  // o documento assinado listaria parcelas somando o bruto sob um total líquido
+  const rowsGross = planRows(
     planFromInvoice({
       paymentMode: asPaymentMode(inv.payment_mode),
       dueDate: inv.due_date ?? null,
@@ -1060,8 +1069,10 @@ export async function createAgreement(userId: string, projectId: string, invoice
       total,
       schedule: (schedule || []).map((r: any, i: number) => ({ id: r.id, label: r.label || `Payment ${i + 1}`, amount: Number(r.amount) || 0, dueDate: r.due_date ?? null, sort: r.sort ?? i })),
     }),
-    total
+    Number(inv.total) || 0
   );
+  // o abatimento sai das últimas parcelas, exatamente como a tela mostra
+  const rows = applyCreditToRows(rowsGross, round2((Number(inv.total) || 0) - total));
   // legacy-template compat ({{deposit_percent}}/{{deposit_amount}}/{{balance_amount}}): the first
   // row plays the "deposit" part when the plan has an up-front payment; a full plan yields 0/total.
   const firstAmt = rows.length > 1 ? rows[0].amount : 0;
@@ -1318,6 +1329,7 @@ export type JobInvoice = {
   tax: number;
   discount: number; // G-1: dollars, frozen with the invoice
   isChangeOrder: boolean; // G-9: complementary invoice — prints one agreed line, not the items
+  changeNote: string | null; // what the extra IS, printed on that line (English, client-facing)
   total: number;
   created: string;
   paymentMode: PaymentMode;
@@ -1398,7 +1410,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
   // after the client already paid). Oldest first — #1 is the one the contract froze.
   const invRes = await supabase
     .from('invoices')
-    .select('id, invoice_number, status, subtotal, tax_rate, tax_amount, discount_amount, total, created_at, deposit_percent, payment_mode, due_date, deposit_amount, is_change_order')
+    .select('id, invoice_number, status, subtotal, tax_rate, tax_amount, discount_amount, total, created_at, deposit_percent, payment_mode, due_date, deposit_amount, is_change_order, notes')
     .eq('project_id', projectId)
     .order('created_at', { ascending: true });
   if (invRes.error) throw invRes.error;
@@ -1447,6 +1459,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
       tax: Number(row.tax_amount ?? 0),
       discount: Number(row.discount_amount ?? 0), // G-1: frozen with the invoice
       isChangeOrder: !!row.is_change_order, // G-9: bills an agreed amount, not the quote's items
+      changeNote: row.is_change_order ? row.notes || null : null, // o que é o extra (client-facing)
       total: Number(row.total ?? 0),
       created: row.created_at,
       paymentMode: asPaymentMode(row.payment_mode),

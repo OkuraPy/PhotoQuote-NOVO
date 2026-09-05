@@ -4,6 +4,62 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-05 21:00] — feat: os dois lados da fatura, espelhados (time completo: 3 mapas + 2 críticas)
+O dono pediu para "estruturar muito bem tanto o remover quanto o adicionar… tem que ficar muito bem
+intuitivo", e autorizou um time. Rodaram 3 mapeadores (fluxo de cobrar, fluxo de abater, jornada
+real nos 4 cenários) e 2 críticos (lógica/dinheiro e simplicidade).
+
+**O diagnóstico que mudou o trabalho**: a trava não era nenhum dos dois lados — era **o vão entre
+eles**. Ao salvar o orçamento de um job já faturado, o app voltava na aba Orçamento, nada dizia que
+a fatura do cliente tinha ficado velha, e o cartão "PRÓXIMO PASSO" ainda apontava para "Registrar
+pagamento". O recurso inteiro dependia de o contratante trocar de aba sem motivo para isso. E o lado
+ADICIONAR, que eu supunha pronto, era o mais pobre dos dois.
+
+🔴 **BLOQUEANTE achado pelo crítico de lógica, no portal**: `get_agreement_by_token` devolvia
+`i.total` BRUTO. O corpo do contrato é congelado com o valor DEVIDO, então o cliente via
+"Invoice #N • $580.55" no cabeçalho, acima de um contrato dizendo $540.55 — **na tela em que ele
+assina**. Migration `20260905150000`.
+
+**O que mudou**
+- **O app fala primeiro** (`Job.tsx`): existindo diferença entre orçamento e faturado, um alerta
+  diz "O trabalho aumentou $2.400" / "O trabalho diminuiu $40" com o botão da ação. Uma vez por job
+  e por valor — se ele disser "agora não", só volta a perguntar se o número mudar.
+- **Os dois cartões falam número + ação**, nunca o conceito: "Cobrar mais $2.400" e "Tirar $40 da
+  fatura". Some "crédito"/"creditar"/"faturar a diferença" da interface — o contratante não precisa
+  saber que existem dois mecanismos.
+- **Vocabulário de obra**: "Abater"/"Lançar crédito" → **"Tirar da fatura"** (a palavra que o app já
+  usava em `job.removeCredit`); "Créditos lançados" → "Tirado da fatura".
+- **Dizer o que mudou, dos dois lados**: a fatura complementar ganhou descrição ("O que é o extra?"),
+  pré-preenchida com o último item do orçamento e impressa no lugar do genérico "Additional work per
+  change order". **Sem migration**: `invoices.notes` já existia e o v2 nunca a usou (5 linhas
+  legadas, todas `is_change_order=false`).
+- **Terminar mandando**: abater agora confirma ("Tirado da fatura · o saldo agora é $250,28") e
+  oferece enviar a fatura atualizada. Antes era silencioso e o cliente ficava com o PDF velho.
+- **Excedente explicado**: quando a devolução passa do saldo, a folha diz "Os outros $X passam do
+  saldo — isso você devolve pro cliente fora do app", em vez de calar.
+- **Bases alinhadas** (`pickCreditTarget`, pura, 4 testes): "cobrar" olhava o job inteiro e "tirar"
+  olhava a fatura selecionada — num job com 2 faturas e a #1 quitada, o cartão oferecia "$0".
+- **Recibo virou retrato** (migration `20260905160000`): `balance_after` é congelado junto do número.
+  Era a causa de dois bugs que já tratei pelo sintoma (pagamento retroativo e abatimento posterior
+  reescrevendo um papel entregue). NULL = recibo antigo, recalcula como antes, sem back-fill.
+- **Bugs de dinheiro dos mapas**: aviso de pagamento a maior usava saldo bruto; `contractTotals` e as
+  parcelas do contrato (tela e documento) ignoravam o abatimento; a dica de imposto que escrevi hoje
+  mandava somar o imposto duas vezes num valor que já vem com imposto; `canAddInvoice` não checava
+  papel enquanto o abatimento bloqueava `field`.
+
+**Cortado pelos críticos, com motivo**
+- teto do abatimento no TOTAL (em vez do saldo): `roll.total < roll.paid` faria o topo imprimir
+  "Paid $580 · Balance $0", `collected` subnotificaria caixa real e o contrato poderia sair
+  assinável por $0,00. Substituído pela frase do excedente;
+- contrato de fatura complementar: `createAgreement` monta itens do orçamento com preço da fatura —
+  é exatamente o bloqueante do `d6b86cc`;
+- excluir a fatura complementar: `agreements.invoice_id` é ON DELETE **CASCADE** e apagaria até
+  contrato assinado se a guarda do app falhasse.
+
+- **Limitação conhecida, para o dono decidir**: quando a fatura ainda não tem pagamento, salvar o
+  orçamento a reescreve em silêncio — sem cartão e sem aviso — e o cliente segue com o PDF antigo.
+- jest **215/215**, tsc limpo.
+
 ### [2026-09-05 19:58] — fix: o crédito não pode virar receita no fechamento (de6f66b)
 Pergunta do dono: *"no fechamento geral da empresa esse valor entra como recebido? pq ele removeu
 isso não pode contabilizar."*

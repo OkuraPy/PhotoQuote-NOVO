@@ -1,10 +1,10 @@
 // PhotoQuote v2 — Job screen: timeline + Quote / Invoice / Contract / Progress tabs
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Linking, Pressable, Share, ScrollView, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
-import { addDaysISO, applyCreditToRows, applyMarkup, balanceAfterNewPayment, balanceAfterPayment, calcTotals, creditRoom, creditTotalUpTo, invoiceDue, overbilled, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, invoiceRollup, NO_DISCOUNT, resolveDiscount, splitChangeOrder, uninvoiced, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
+import { addDaysISO, applyCreditToRows, applyMarkup, balanceAfterNewPayment, balanceAfterPayment, calcTotals, creditRoom, creditTotalUpTo, invoiceDue, overbilled, pickCreditTarget, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, invoiceRollup, NO_DISCOUNT, resolveDiscount, splitChangeOrder, uninvoiced, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { deleteInvoiceCredit, addInvoiceCredit, addPhaseComment, addPhasePhotos, addProjectPhotos, agreementLink, assignMember, BEFORE_PHASE_NAME, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deletePhasePhoto, deleteProject, deleteProjectPhoto, deriveStage, ensureBookendPhases, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, FINAL_PHASE_NAME, JobDetail, progressLink, ProgressPhase, PhaseStatus, projectDeleteFacts, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -73,25 +73,29 @@ registerStrings({
   'job.subtotal': { en: 'Subtotal', es: 'Subtotal', pt: 'Subtotal' },
   'job.discount': { en: 'Discount', es: 'Descuento', pt: 'Desconto' },
   // G-9: more than one invoice on the same job
-  'job.createExtraInvoice': { en: 'Create invoice', es: 'Crear factura', pt: 'Criar fatura' },
-  'job.addInvoiceTitle': { en: 'Bill the difference', es: 'Facturar la diferencia', pt: 'Faturar a diferença' },
+  'job.createExtraInvoice': { en: 'Bill {amount} more', es: 'Cobrar {amount} más', pt: 'Cobrar mais {amount}' },
+  // Os dois cartões dizem NÚMERO + AÇÃO, nunca o conceito ("fatura complementar", "crédito"): o
+  // contratante não precisa saber que existem dois mecanismos, só que a obra mudou de tamanho.
+  'job.addInvoiceTitle': { en: 'The job grew {amount}', es: 'El trabajo creció {amount}', pt: 'O trabalho aumentou {amount}' },
   // the mirror of the complementary invoice: the scope shrank after billing (material returned)
-  'job.creditCardTitle': { en: 'Credit the difference', es: 'Acreditar la diferencia', pt: 'Creditar a diferença' },
+  'job.creditCardTitle': { en: 'The job shrank {amount}', es: 'El trabajo bajó {amount}', pt: 'O trabalho diminuiu {amount}' },
   'job.creditCardBody': {
-    en: 'The quote is {amount} below what is already invoiced. Apply it as a credit — the invoice keeps its history and the balance drops.',
-    es: 'La cotización está {amount} por debajo de lo ya facturado. Aplícalo como crédito — la factura conserva su historial y el saldo baja.',
-    pt: 'O orçamento está {amount} abaixo do que já foi faturado. Lance como crédito — a fatura mantém o histórico e o saldo cai.',
+    en: 'The balance drops and the client sees why. The invoice keeps what was billed.',
+    es: 'El saldo baja y el cliente ve por qué. La factura conserva lo que se facturó.',
+    pt: 'O saldo cai e o cliente vê o motivo. A fatura mantém o que foi cobrado.',
   },
-  'job.applyCredit': { en: 'Apply credit', es: 'Aplicar crédito', pt: 'Lançar crédito' },
-  'job.creditsApplied': { en: 'Credits applied', es: 'Créditos aplicados', pt: 'Créditos lançados' },
+  'job.applyCredit': { en: 'Take {amount} off the invoice', es: 'Quitar {amount} de la factura', pt: 'Tirar {amount} da fatura' },
+  // sem valor: o link permanente do rodapé, que existe mesmo sem diferença no orçamento
+  'job.applyCreditPlain': { en: 'Take money off the invoice', es: 'Quitar de la factura', pt: 'Tirar da fatura' },
+  'job.creditsApplied': { en: 'Taken off', es: 'Descontado', pt: 'Tirado da fatura' },
   'job.billedTotal': { en: 'Billed', es: 'Facturado', pt: 'Faturado' },
-  'job.creditTitle': { en: 'Apply a credit', es: 'Aplicar un crédito', pt: 'Lançar um crédito' },
+  'job.creditTitle': { en: 'Take money off the invoice', es: 'Quitar de la factura', pt: 'Tirar da fatura' },
   'job.creditSub': {
     en: 'Reduces what the client owes. No money changes hands.',
     es: 'Reduce lo que el cliente debe. No hay dinero de por medio.',
     pt: 'Reduz o que o cliente deve. Nenhum dinheiro troca de mãos.',
   },
-  'job.creditAmount': { en: 'Credit amount', es: 'Monto del crédito', pt: 'Valor do crédito' },
+  'job.creditAmount': { en: 'How much to take off', es: 'Cuánto quitar', pt: 'Quanto tirar' },
   'job.creditReason': { en: 'Reason', es: 'Motivo', pt: 'Motivo' },
   // client-facing: it prints on the invoice, so the hint is English like every other printed string
   'job.creditReasonHint': { en: 'Returned material — 1 smoke detector', es: 'Returned material — 1 smoke detector', pt: 'Returned material — 1 smoke detector' },
@@ -102,7 +106,21 @@ registerStrings({
     es: 'No queda nada por acreditar: esta factura está pagada. Si le debes dinero al cliente, devuélvelo fuera de la app.',
     pt: 'Não há o que creditar — esta fatura está paga. Se você tem que devolver dinheiro ao cliente, a devolução acontece fora do app.',
   },
-  'job.creditDone': { en: 'Credit applied', es: 'Crédito aplicado', pt: 'Crédito lançado' },
+  // client-facing: o texto vai IMPRESSO na fatura, então o exemplo é em inglês como o resto do doc
+  'job.whatChanged': { en: 'What is the extra?', es: '¿Qué es el extra?', pt: 'O que é o extra?' },
+  'job.whatChangedHint': { en: 'Extra drywall patch and paint', es: 'Extra drywall patch and paint', pt: 'Extra drywall patch and paint' },
+  'job.creditDone': { en: 'Taken off the invoice', es: 'Quitado de la factura', pt: 'Tirado da fatura' },
+  'job.creditDoneBody': {
+    en: 'The balance is now {balance}. Send the client the updated invoice?',
+    es: 'El saldo ahora es {balance}. ¿Enviar al cliente la factura actualizada?',
+    pt: 'O saldo agora é {balance}. Mandar a fatura atualizada pro cliente?',
+  },
+  // o que sobra além do saldo não vira crédito (não há reembolso na app) — mas ele tem que saber
+  'job.creditOverflow': {
+    en: 'The other {amount} is past the balance — you owe the client that back outside the app.',
+    es: 'Los otros {amount} pasan del saldo — eso le debes al cliente fuera de la app.',
+    pt: 'Os outros {amount} passam do saldo — isso você devolve pro cliente fora do app.',
+  },
   'job.couldNotCredit': { en: 'Could not apply the credit', es: 'No se pudo aplicar el crédito', pt: 'Não deu para lançar o crédito' },
   'job.removeCreditTitle': { en: 'Remove this credit?', es: '¿Quitar este crédito?', pt: 'Tirar este crédito?' },
   'job.removeCreditBody': {
@@ -111,12 +129,14 @@ registerStrings({
     pt: 'Os {amount} voltam para o saldo. Use para corrigir um crédito digitado errado.',
   },
   'job.removeCredit': { en: 'Remove', es: 'Quitar', pt: 'Tirar' },
+  // o valor sugerido sai da diferença entre TOTAIS, que já trazem imposto dentro. O texto anterior
+  // mandava somar o imposto de novo — dobrava a conta de quem seguisse a instrução.
   'job.creditTaxHint': {
-    en: 'This invoice has {rate}% tax. If the returned item was taxed, include its tax in the amount.',
-    es: 'Esta factura tiene {rate}% de impuesto. Si el artículo devuelto pagaba impuesto, inclúyelo en el monto.',
-    pt: 'Esta fatura tem {rate}% de imposto. Se o item devolvido era tributado, inclua o imposto no valor.',
+    en: 'Amount includes the {rate}% tax, like the invoice total. Typing your own? Include the tax in it.',
+    es: 'El monto incluye el {rate}% de impuesto, como el total. ¿Escribes el tuyo? Inclúyelo también.',
+    pt: 'O valor já é com o imposto de {rate}%, como o total. Se digitar o seu, inclua o imposto nele.',
   },
-  'job.addInvoiceBody': { en: 'The quote grew {amount} past what is already invoiced. Bill it as a second invoice — the one the client already paid stays as it is.', es: 'La cotización creció {amount} por encima de lo ya facturado. Factúralo como una segunda factura — la que el cliente ya pagó queda como está.', pt: 'O orçamento passou {amount} do que já foi faturado. Cobre como uma segunda fatura — a que o cliente já pagou fica como está.' },
+  'job.addInvoiceBody': { en: 'A new invoice goes out for the extra. The one the client already paid stays as it is.', es: 'Sale una factura nueva por el extra. La que el cliente ya pagó queda como está.', pt: 'Sai uma fatura nova só do extra. A que o cliente já pagou fica como está.' },
   'job.invoicesCount': { en: 'Invoices · {n}', es: 'Facturas · {n}', pt: 'Faturas · {n}' },
   'job.jobTotalRoll': { en: 'Job total {total} · Paid {paid} · Balance {balance}', es: 'Total del trabajo {total} · Pagado {paid} · Saldo {balance}', pt: 'Total do trabalho {total} · Pago {paid} · Saldo {balance}' },
   'job.markupIncluded': { en: 'Markup ({pct}%) included', es: 'Margen ({pct}%) incluido', pt: 'Margem ({pct}%) incluída' },
@@ -556,8 +576,10 @@ export function JobScreen({ go, back, params }: NavProp) {
   // G-9: a change order bills an AGREED AMOUNT, so its document shows one line for that amount —
   // printing the quote's items under a partial total handed the client a $2,400 invoice listing
   // $10,000 of work. English by the client-facing rule, like every other string on a document.
+  // a linha única da complementar: o que o contratante escreveu ("Extra drywall patch and paint"),
+  // caindo no genérico só quando a fatura é antiga e não tem descrição gravada
   const changeOrderItems = (i: JobDetail['invoice']): LineItem[] =>
-    i ? [{ id: -1, cat: 'Change order', desc: 'Additional work per change order', qty: 1, unit: 'job', price: i.subtotal, taxable: i.tax > 0.005 }] : [];
+    i ? [{ id: -1, cat: 'Change order', desc: i.changeNote || 'Additional work per change order', qty: 1, unit: 'job', price: i.subtotal, taxable: i.tax > 0.005 }] : [];
   const docItems = inv?.isChangeOrder ? changeOrderItems(inv) : items;
   // G-5: a payment landed but the invoice is not closed. The pipeline Stage has no room for it
   // (a half-paid invoice is still "Invoiced"), so the header said nothing and the owner read the
@@ -579,9 +601,14 @@ export function JobScreen({ go, back, params }: NavProp) {
   // D6: the agreement is frozen against invoice #1. Showing the SELECTED invoice's plan under a
   // green "Signed" chip told the owner the client had signed a $2,400 change order he never saw.
   const contractInv = invoices[0] || inv;
+  // o plano exibido na aba Contract segue o mesmo abatimento do valor: sem isso as parcelas somavam
+  // o bruto embaixo de um total líquido, e a tela discordava do papel que o cliente assina
   const contractPlan = contractInv ? planFromInvoice(contractInv) : null;
+  const contractCredited = contractInv?.creditTotal || 0;
+  // o documento gerado congela o valor DEVIDO (api.ts createAgreement usa invoiceDue), então a tela
+  // tem que mostrar o mesmo número — senão aba e papel discordam pelo valor do abatimento
   const contractTotals: Totals = contractInv
-    ? { subtotal: contractInv.subtotal, taxableSubtotal: 0, tax: contractInv.tax, total: contractInv.total, taxRate: contractInv.taxRate, discount: contractInv.discount }
+    ? { subtotal: contractInv.subtotal, taxableSubtotal: 0, tax: contractInv.tax, total: invoiceDue(contractInv.total, contractInv.creditTotal), taxRate: contractInv.taxRate, discount: contractInv.discount }
     : quoteTotals;
   // credits come off before the balance: what the client owes is the DUE amount, not the billed one
   const balance = inv ? invoiceBalance(invoiceDue(inv.total, inv.creditTotal), inv.amountPaid) : 0;
@@ -781,18 +808,55 @@ export function JobScreen({ go, back, params }: NavProp) {
   // and the work expanded). The difference becomes a SECOND invoice with its own plan — the first
   // one keeps the money that already landed, untouched.
   const extraToInvoice = uninvoiced(quoteTotals.total, roll.total);
-  const canAddInvoice = !closed && roll.count > 0 && extraToInvoice > 0.005 && !!est?.id && !!projectId;
+  const canAddInvoice = !closed && role !== 'field' && roll.count > 0 && extraToInvoice > 0.005 && !!est?.id && !!projectId;
   // the mirror (05/09): the quote fell BELOW what was billed — material returned after the client
   // already paid part. The invoice stopped following the quote then, so the gap becomes a credit.
   const creditToApply = overbilled(quoteTotals.total, roll.total);
+  // ...e ele tem que sair de uma fatura que AINDA tenha saldo. As duas metades do par precisam olhar
+  // a mesma coisa: "cobrar" nasce do job inteiro, então "tirar" também — escolhendo a fatura que
+  // consegue absorver o valor, senão num job com 2 faturas (a #1 quitada) o cartão oferecia $0.
+  const creditTarget = pickCreditTarget(invoices) || inv;
   // the door is open whenever there IS an invoice: the sheet itself explains when there is no room
   // (client already paid in full), which is a real case the owner has to see, not a dead end
-  const canAddCredit = !closed && !!inv && role !== 'field';
+  const canAddCredit = !closed && !!creditTarget && role !== 'field';
+  // O VÃO ENTRE OS DOIS LADOS era a trava de verdade (mapa da jornada, 05/09): ao salvar o
+  // orçamento de um job já faturado, o app voltava na aba Orçamento, nada dizia que a fatura do
+  // cliente tinha ficado velha, e o cartão "PRÓXIMO PASSO" ainda apontava para "Registrar
+  // pagamento". O recurso inteiro dependia de o contratante trocar de aba por conta própria, sem
+  // motivo nenhum para isso. Agora o app fala primeiro. Uma vez por job e por valor: se ele disser
+  // "agora não", só volta a perguntar se a diferença mudar.
+  const diffAsked = useRef('');
+  useEffect(() => {
+    if (closed || !projectId || !roll.count || role === 'field') return;
+    const grew = extraToInvoice > 0.005 && canAddInvoice;
+    const shrank = creditToApply > 0.005 && canAddCredit;
+    if (!grew && !shrank) return;
+    const amount = grew ? extraToInvoice : creditToApply;
+    const key = `${projectId}:${grew ? 'up' : 'down'}:${amount.toFixed(2)}`;
+    if (diffAsked.current === key) return;
+    diffAsked.current = key;
+    Alert.alert(
+      grew ? t('job.addInvoiceTitle', { amount: fmt(amount) }) : t('job.creditCardTitle', { amount: fmt(amount) }),
+      grew ? t('job.addInvoiceBody') : t('job.creditCardBody'),
+      [
+        { text: t('job.notNow'), style: 'cancel' },
+        {
+          text: grew ? t('job.createExtraInvoice', { amount: fmt(amount) }) : t('job.applyCredit', { amount: fmt(amount) }),
+          onPress: () => {
+            setTab('invoice');
+            if (grew) openExtraInvoice();
+            else setCreditSheet(true);
+          },
+        },
+      ]
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, extraToInvoice, creditToApply, roll.count, closed, canAddInvoice, canAddCredit, role]);
   const openExtraInvoice = () => {
     if (!canAddInvoice) return;
     setPlanSheet('extra');
   };
-  const confirmPlan = async (plan: PaymentPlan) => {
+  const confirmPlan = async (plan: PaymentPlan, what?: string) => {
     if (!ownerId) return;
     const editing = planSheet === 'edit';
     // freeze for the post-invoice phases prompt below — invalidate refreshes `est` under us
@@ -805,7 +869,7 @@ export function JobScreen({ go, back, params }: NavProp) {
         // the extra invoice bills an AMOUNT broken down at the quote's real tax rate, so its own
         // document adds up line by line (subtotal + tax on the taxable slice = amount)
         const split = splitChangeOrder(extraToInvoice, quoteTotals.subtotal, quoteTotals.taxableSubtotal, quoteTotals.taxRate);
-        const created = await createInvoice(ownerId, est.id, projectId, plan, { subtotal: split.subtotal, tax: split.tax, total: split.total });
+        const created = await createInvoice(ownerId, est.id, projectId, plan, { subtotal: split.subtotal, tax: split.tax, total: split.total }, what);
         downgraded = created.downgraded;
         // select the invoice that was just created: the default ("first one still owing") would
         // land back on #1, and the very next tap — Send invoice / PDF — would send the wrong one
@@ -857,14 +921,22 @@ export function JobScreen({ go, back, params }: NavProp) {
   // (Unpaid / Partially Paid / Paid) is derived server-side from Σ(payments) vs total.
   // After a successful record the contractor is offered a receipt for it (G3).
   const confirmCredit = async (amount: number, reason: string) => {
-    if (!ownerId || !inv?.id) return;
+    if (!ownerId || !creditTarget?.id) return;
     setSavingCredit(true);
     try {
-      await addInvoiceCredit(ownerId, inv.id, { amount, reason });
+      await addInvoiceCredit(ownerId, creditTarget.id, { amount, reason });
       await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['jobs'] });
       setCreditSheet(false);
       clearStage();
+      // sem isso o abatimento era silencioso e o cliente ficava com o PDF do valor velho — o
+      // documento é a razão de existir do recurso, não o número na tela do contratante
+      const novoSaldo = invoiceBalance(invoiceDue(creditTarget.total, round2(creditTarget.creditTotal + amount)), creditTarget.amountPaid);
+      setInvSel(creditTarget.id);
+      setTimeout(() => Alert.alert(t('job.creditDone'), t('job.creditDoneBody', { balance: fmt(novoSaldo) }), [
+        { text: t('job.notNow'), style: 'cancel' },
+        { text: t('job.sendInvoice'), onPress: () => requireCompany(() => up({ sheet: true, jobTab: 'invoice' })) },
+      ]), 380);
     } catch (e: any) {
       const msg =
         e?.code === 'CREDIT_OVER_ROOM'
@@ -917,7 +989,9 @@ export function JobScreen({ go, back, params }: NavProp) {
     if (!ownerId || !inv?.id) return;
     // guard a fat-finger overpayment ($9409 for a $940.90 balance): the ledger is append-only,
     // there's no in-app refund, and the receipt would print a wrong "Paid in full" (final-review M1)
-    const balanceNow = invoiceBalance(inv.total, inv.amountPaid);
+    // com abatimento na fatura, o saldo real é o líquido: usando o bruto, uma fatura de $580.55
+    // abatida em $40 aceitava calado um pagamento de $290.28 que já é a maior
+    const balanceNow = invoiceBalance(invoiceDue(inv.total, inv.creditTotal), inv.amountPaid);
     if (amount > balanceNow + 0.005) {
       Alert.alert(
         t('job.overpayTitle'),
@@ -968,7 +1042,11 @@ export function JobScreen({ go, back, params }: NavProp) {
     if (receiptBusy) return;
     setReceiptBusy(paymentId);
     try {
-      const number = await ensureReceiptNumber(paymentId);
+      // o número e o saldo são congelados juntos: reemitir devolve o retrato, nunca uma conta nova.
+      // `p.balanceAfter` só é usado na PRIMEIRA emissão (e em recibos antigos, sem retrato).
+      const minted = await ensureReceiptNumber(paymentId, p.balanceAfter);
+      const number = minted.number;
+      const balanceAfter = minted.balanceAfter != null ? minted.balanceAfter : p.balanceAfter;
       const co = (company as any) || {};
       await sendDoc('Save PDF', {
         kind: 'receipt',
@@ -978,7 +1056,7 @@ export function JobScreen({ go, back, params }: NavProp) {
         client: realClient,
         items: [],
         totals: { subtotal: 0, tax: 0, total: p.amount, taxRate: 0 }, // unused by the receipt branch
-        receipt: { number, date: p.date, method: p.method, reference: p.note || null, amount: p.amount, invoiceNumber, balanceAfter: p.balanceAfter },
+        receipt: { number, date: p.date, method: p.method, reference: p.note || null, amount: p.amount, invoiceNumber, balanceAfter },
       });
     } catch (e: any) {
       Alert.alert(t('job.couldNotCreateReceipt'), e?.message || t('job.alert.tryAgain'));
@@ -991,8 +1069,8 @@ export function JobScreen({ go, back, params }: NavProp) {
   // invoice printed "Remaining balance $40" while the app showed it as Paid.
   const onReceiptRow = (p: PaymentRecord) => {
     if (!inv) return;
-    // only credits recorded UP TO that payment's day: a credit entered afterwards must not rewrite
-    // a receipt the client already holds (the "two balances, one receipt number" trap again)
+    // recibo antigo (sem retrato congelado) cai na regra por data: um abatimento posterior não pode
+    // reescrever um papel já entregue. A partir de agora o retrato em `balance_after` decide.
     const dueThen = invoiceDue(inv.total, creditTotalUpTo(inv.credits, p.paidAt));
     requireCompany(() => { void sendReceipt(p.id, { amount: p.amount, method: p.method, note: p.note, date: p.paidAt, balanceAfter: balanceAfterPayment(dueThen, inv.payments, p.id) }, inv.number); });
   };
@@ -1213,8 +1291,8 @@ export function JobScreen({ go, back, params }: NavProp) {
             onSend={est && projectId && !closed ? () => requireCompany(() => up({ sheet: true })) : undefined}
           />
         )}
-        {tab === 'invoice' && <InvoiceTab stage={stage} items={docItems} totals={invoiceTotals} client={realClient} jobSite={jobSite} company={company} invoice={inv} invoices={invoices} onSelectInvoice={setInvSel} roll={roll} extraToInvoice={extraToInvoice} onAddInvoice={canAddInvoice ? openExtraInvoice : undefined} creditToApply={creditToApply} onAddCredit={canAddCredit ? () => setCreditSheet(true) : undefined} onRemoveCredit={!closed && role !== 'field' ? removeCredit : undefined} quoteTotal={est?.total} genning={savingPlan} onGen={openGenerateInvoice} onRecordPayment={() => setPaySheet(true)} onEditPlan={() => setPlanSheet('edit')} onReceipt={onReceiptRow} receiptBusyId={receiptBusy} setSheet={(b: boolean) => (b ? requireCompany(() => up({ sheet: true })) : up({ sheet: false }))} />}
-        {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={contractTotals} plan={contractPlan} company={company} genning={genningContract} onGenerate={generateContract} onView={detail?.agreement ? viewContract : undefined} />}
+        {tab === 'invoice' && <InvoiceTab stage={stage} items={docItems} totals={invoiceTotals} client={realClient} jobSite={jobSite} company={company} invoice={inv} invoices={invoices} onSelectInvoice={setInvSel} roll={roll} extraToInvoice={extraToInvoice} onAddInvoice={canAddInvoice ? openExtraInvoice : undefined} creditToApply={creditToApply} creditRoomTarget={creditTarget ? creditRoom(creditTarget.total, creditTarget.creditTotal, creditTarget.amountPaid) : 0} onAddCredit={canAddCredit ? () => setCreditSheet(true) : undefined} onRemoveCredit={!closed && role !== 'field' ? removeCredit : undefined} quoteTotal={est?.total} genning={savingPlan} onGen={openGenerateInvoice} onRecordPayment={() => setPaySheet(true)} onEditPlan={() => setPlanSheet('edit')} onReceipt={onReceiptRow} receiptBusyId={receiptBusy} setSheet={(b: boolean) => (b ? requireCompany(() => up({ sheet: true })) : up({ sheet: false }))} />}
+        {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={contractTotals} plan={contractPlan} credited={contractCredited} company={company} genning={genningContract} onGenerate={generateContract} onView={detail?.agreement ? viewContract : undefined} />}
         {tab === 'progress' && (
           <ProgressTab
             projectId={projectId}
@@ -1295,7 +1373,9 @@ export function JobScreen({ go, back, params }: NavProp) {
         initial={planSheet === 'edit' && invoicePlan ? invoicePlan : defaultPlan}
         hasPayments={planSheet === 'edit' && !!inv?.payments.length}
         busy={savingPlan}
-        confirmLabel={planSheet === 'edit' ? t('job.savePlan') : planSheet === 'extra' ? t('job.createExtraInvoice') : t('job.generateInvoice')}
+        confirmLabel={planSheet === 'edit' ? t('job.savePlan') : planSheet === 'extra' ? t('job.createExtraInvoice', { amount: fmt(extraToInvoice) }) : t('job.generateInvoice')}
+        askWhat={planSheet === 'extra'}
+        whatSuggestion={planSheet === 'extra' ? (items[items.length - 1]?.desc || '') : ''}
         onConfirm={confirmPlan}
       />
       <RecordPaymentSheet open={paySheet} onClose={() => setPaySheet(false)} balance={balance} busy={savingPay} onConfirm={confirmPayment} />
@@ -1303,8 +1383,8 @@ export function JobScreen({ go, back, params }: NavProp) {
         open={creditSheet}
         onClose={() => setCreditSheet(false)}
         suggestion={creditToApply}
-        room={inv ? creditRoom(inv.total, inv.creditTotal, inv.amountPaid) : 0}
-        taxRate={inv?.taxRate || 0}
+        room={creditTarget ? creditRoom(creditTarget.total, creditTarget.creditTotal, creditTarget.amountPaid) : 0}
+        taxRate={creditTarget?.taxRate || 0}
         busy={savingCredit}
         onConfirm={confirmCredit}
       />
@@ -1565,7 +1645,7 @@ const cmStamp = (iso: string) => {
 // shows them in the contractor's language
 const phaseLabel = (t: Tr, name: string) => (name === BEFORE_PHASE_NAME ? t('job.phase.beforeName') : name === FINAL_PHASE_NAME ? t('job.phase.finalName') : name);
 
-function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, invoices = [], onSelectInvoice, roll, extraToInvoice = 0, onAddInvoice, creditToApply = 0, onAddCredit, onRemoveCredit, quoteTotal, genning, onGen, onRecordPayment, onEditPlan, onReceipt, receiptBusyId, setSheet }: { stage: Stage; items: LineItem[]; totals: Totals; client: JobDetail['client']; jobSite?: string; company?: any; invoice?: JobDetail['invoice']; invoices?: JobDetail['invoices']; onSelectInvoice?: (id: string) => void; roll?: { count: number; total: number; paid: number; balance: number }; extraToInvoice?: number; onAddInvoice?: () => void; creditToApply?: number; onAddCredit?: () => void; onRemoveCredit?: (c: { id: string; amount: number }) => void; quoteTotal?: number; genning: boolean; onGen: () => void; onRecordPayment: () => void; onEditPlan: () => void; onReceipt?: (p: PaymentRecord) => void; receiptBusyId?: string | null; setSheet: (b: boolean) => void }) {
+function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, invoices = [], onSelectInvoice, roll, extraToInvoice = 0, onAddInvoice, creditToApply = 0, creditRoomTarget = 0, onAddCredit, onRemoveCredit, quoteTotal, genning, onGen, onRecordPayment, onEditPlan, onReceipt, receiptBusyId, setSheet }: { stage: Stage; items: LineItem[]; totals: Totals; client: JobDetail['client']; jobSite?: string; company?: any; invoice?: JobDetail['invoice']; invoices?: JobDetail['invoices']; onSelectInvoice?: (id: string) => void; roll?: { count: number; total: number; paid: number; balance: number }; extraToInvoice?: number; onAddInvoice?: () => void; creditToApply?: number; creditRoomTarget?: number; onAddCredit?: () => void; onRemoveCredit?: (c: { id: string; amount: number }) => void; quoteTotal?: number; genning: boolean; onGen: () => void; onRecordPayment: () => void; onEditPlan: () => void; onReceipt?: (p: PaymentRecord) => void; receiptBusyId?: string | null; setSheet: (b: boolean) => void }) {
   const t = useT();
   const has = !!invoice || ['Invoiced', 'Paid'].includes(stage);
   const co = company || {};
@@ -1610,7 +1690,7 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, i
   const invoicedTotal = roll ? roll.total : invoice?.total ?? 0;
   const showsAddCard = !!onAddInvoice && extraToInvoice > 0.005;
   // capped at the open balance: crediting past it would owe money back, and there is no refund flow
-  const creditSuggestion = Math.min(creditToApply, invoice ? creditRoom(invoice.total, credited, amountPaid) : 0);
+  const creditSuggestion = Math.min(creditToApply, creditRoomTarget);
   const showsCreditCard = !!onAddCredit && creditSuggestion > 0.005;
   const outOfSync = quoteTotal != null && !!invoice && Math.abs(quoteTotal - invoicedTotal) > 0.005 && !showsAddCard && !showsCreditCard;
   return (
@@ -1775,22 +1855,23 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, i
           rewriting an invoice the client already paid against */}
       {showsAddCard ? (
         <Card pad style={{ marginTop: 16, backgroundColor: colors.primaryTint, borderColor: colors.primaryTint2 }}>
-          <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{t('job.addInvoiceTitle')}</Text>
+          <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{t('job.addInvoiceTitle', { amount: fmt(extraToInvoice) })}</Text>
           <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.ink2, marginTop: 6, lineHeight: 18 }}>
-            {t('job.addInvoiceBody', { amount: fmt(extraToInvoice) })}
+            {t('job.addInvoiceBody')}
           </Text>
-          <Btn sm icon="receipt" title={t('job.createExtraInvoice')} onPress={onAddInvoice} style={{ marginTop: 12 }} />
+          <Btn sm icon="receipt" title={t('job.createExtraInvoice', { amount: fmt(extraToInvoice) })} onPress={onAddInvoice} style={{ marginTop: 12 }} />
         </Card>
       ) : null}
       {/* the mirror: the quote fell BELOW what was already billed (material returned, agreed cut).
           Same card, other direction — instead of a second invoice, a credit that closes the gap. */}
       {showsCreditCard ? (
         <Card pad style={{ marginTop: 16, backgroundColor: colors.infoTint, borderColor: colors.infoTint }}>
-          <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{t('job.creditCardTitle')}</Text>
+          <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{t('job.creditCardTitle', { amount: fmt(creditSuggestion) })}</Text>
           <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.ink2, marginTop: 6, lineHeight: 18 }}>
-            {t('job.creditCardBody', { amount: fmt(creditSuggestion) })}
+            {t('job.creditCardBody')}
           </Text>
-          <Btn sm icon="edit" title={t('job.applyCredit')} onPress={onAddCredit} style={{ marginTop: 12 }} />
+          {/* mesmo ícone do outro cartão: os dois mexem no mesmo papel, em sentidos opostos */}
+          <Btn sm icon="receipt" title={t('job.applyCredit', { amount: fmt(creditSuggestion) })} onPress={onAddCredit} style={{ marginTop: 12 }} />
         </Card>
       ) : null}
       {invoice && balance > 0.005 ? <Btn title={t('job.recordPayment')} icon="wallet" onPress={onRecordPayment} style={{ marginTop: 16 }} /> : null}
@@ -1804,7 +1885,7 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, i
           {/* always reachable, not only when the quote was edited down: without a door here, an
               invoice already paid in full had NO way to say "material came back" — the card is
               hidden in that case and the explanation lived inside a sheet he could not open */}
-          {onAddCredit ? <LinkBtn icon="receipt" title={t('job.applyCredit')} onPress={onAddCredit} /> : null}
+          {onAddCredit ? <LinkBtn icon="receipt" title={t('job.applyCreditPlain')} onPress={onAddCredit} /> : null}
         </View>
       ) : null}
     </View>
@@ -1812,13 +1893,15 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, i
 }
 const DpLab = ({ text }: { text: string }) => <Text style={{ fontFamily: fonts.extrabold, fontSize: 10, letterSpacing: 1, color: colors.faint }}>{text.toUpperCase()}</Text>;
 
-function ContractTab({ agreement, hasInvoice, totals, plan, company, genning, onGenerate, onView }: { agreement: JobDetail['agreement']; hasInvoice: boolean; totals: Totals; plan: PaymentPlan | null; company?: any; genning: boolean; onGenerate: () => void; onView?: () => void }) {
+function ContractTab({ agreement, hasInvoice, totals, plan, credited = 0, company, genning, onGenerate, onView }: { agreement: JobDetail['agreement']; hasInvoice: boolean; totals: Totals; plan: PaymentPlan | null; credited?: number; company?: any; genning: boolean; onGenerate: () => void; onView?: () => void }) {
   const t = useT();
   const coName = company?.company_name || t('job.yourCompany');
   const signed = agreement?.status === 'signed';
   const sent = !!agreement && !signed;
-  // the same payment plan the contract's "3. PAYMENT TERMS" table is generated from
-  const rows = plan ? planRows(plan, totals.total) : [];
+  // the same payment plan the contract's "3. PAYMENT TERMS" table is generated from.
+  // `totals.total` já vem líquido; planRows precisa do bruto para recompor as linhas, e o
+  // abatimento sai das últimas — igual à aba Invoice, senão as parcelas somam mais que o total.
+  const rows = plan ? applyCreditToRows(planRows(plan, round2(totals.total + credited)), credited) : [];
   const statusLabel = signed ? t('job.statusSigned') : sent ? t('job.statusSent') : t('job.statusDraft');
   const statusColor = signed ? colors.success : sent ? colors.accentInk : '#8A93A3';
   const statusBg = signed ? colors.successTint : sent ? colors.accentTint : '#EEF0F3';
@@ -1913,8 +1996,12 @@ const dueDays = (t: (k: string, v?: Record<string, string | number>) => string, 
 const draftRows = (total: number, n: number): DraftRow[] =>
   splitInstallments(total, n).map((a, i) => ({ label: `Payment ${i + 1}`, amount: a, days: 15 + 30 * i }));
 
-function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, confirmLabel, onConfirm }: { open: boolean; onClose: () => void; total: number; initial: PaymentPlan; hasPayments: boolean; busy: boolean; confirmLabel: string; onConfirm: (plan: PaymentPlan) => void }) {
+function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, confirmLabel, askWhat, whatSuggestion = '', onConfirm }: { open: boolean; onClose: () => void; total: number; initial: PaymentPlan; hasPayments: boolean; busy: boolean; confirmLabel: string; askWhat?: boolean; whatSuggestion?: string; onConfirm: (plan: PaymentPlan, what?: string) => void }) {
   const t = useT();
+  // "o que é o extra": vai IMPRESSO na linha única da fatura complementar. Vem pré-preenchido com o
+  // último item que ele adicionou ao orçamento (já em inglês, como todo item) — digitação zero no
+  // caso comum, e editável. Obrigar a digitar num app de obra viraria "asdf".
+  const [what, setWhat] = useState('');
   // LOCAL state on purpose (not the global store): closing/reopening or switching jobs can
   // never leak a half-edited plan anywhere else.
   const [mode, setMode] = useState<PaymentMode>('full');
@@ -1924,6 +2011,10 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
   const [depPct, setDepPct] = useState(25);
   const [depAmt, setDepAmt] = useState(0);
   const [rows, setRows] = useState<DraftRow[]>([]);
+  useEffect(() => {
+    if (open) setWhat(whatSuggestion);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
   // once the rows carry stored/hand-edited amounts, the N× stepper must PRESERVE them
   // (resizeDraftRows) instead of re-splitting evenly and wiping the edits
   const [rowsDirty, setRowsDirty] = useState(false);
@@ -2111,8 +2202,13 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
           </Pressable>
         );
       })}
+      {askWhat ? (
+        <Field label={t('job.whatChanged')}>
+          <Input value={what} onChangeText={setWhat} placeholder={t('job.whatChangedHint')} maxLength={120} autoCapitalize="sentences" />
+        </Field>
+      ) : null}
       {hasPayments ? <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, textAlign: 'center', marginBottom: 10 }}>{t('job.editPlanKeepsPayments')}</Text> : null}
-      <Btn title={busy ? t('job.working') : confirmLabel} icon={busy ? undefined : 'check'} disabled={!canConfirm} onPress={() => onConfirm(buildPlan())} style={{ marginTop: 4 }} />
+      <Btn title={busy ? t('job.working') : confirmLabel} icon={busy ? undefined : 'check'} disabled={!canConfirm} onPress={() => onConfirm(buildPlan(), what)} style={{ marginTop: 4 }} />
       {/* nested INSIDE this sheet's content on purpose — that's how a second Modal presents
           reliably over the first on iOS. Picking a day converts it back into the plan's day count. */}
       <DateSheet
@@ -2155,6 +2251,8 @@ function CreditSheet({ open, onClose, suggestion, room, taxRate = 0, busy, onCon
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
   const overRoom = amount > room + 0.005;
+  // quanto da diferença do orçamento NÃO cabe no saldo desta fatura
+  const overflow = round2(Math.max(0, suggestion - room));
   return (
     <Sheet open={open} onClose={onClose} title={t('job.creditTitle')} sub={t('job.creditSub')}>
       <Field label={t('job.creditAmount')}><DecimalInput value={amount} onChangeValue={setAmount} /></Field>
@@ -2163,15 +2261,22 @@ function CreditSheet({ open, onClose, suggestion, room, taxRate = 0, busy, onCon
       {taxRate > 0 ? (
         <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: -6, marginBottom: 12, lineHeight: 17 }}>{t('job.creditTaxHint', { rate: taxRate })}</Text>
       ) : null}
-      <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: overRoom ? colors.error : colors.muted, marginTop: -6, marginBottom: 12 }}>
+      <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: overRoom ? colors.error : colors.muted, marginTop: -6, marginBottom: overflow > 0.005 ? 4 : 12, lineHeight: 17 }}>
         {room > 0.005 ? t('job.creditMax', { amount: fmt(room) }) : t('job.creditNoRoom')}
       </Text>
+      {/* a devolução que passa do saldo acontece por fora; calar sobre ela deixava o contratante
+          achando que o app tinha resolvido tudo */}
+      {overflow > 0.005 ? (
+        <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.warning, marginBottom: 12, lineHeight: 17 }}>
+          {t('job.creditOverflow', { amount: fmt(overflow) })}
+        </Text>
+      ) : null}
       {/* prints on the invoice — this is the line that tells the client WHY the amount changed */}
       <Field label={t('job.creditReason')}>
         <Input value={reason} onChangeText={setReason} placeholder={t('job.creditReasonHint')} maxLength={120} autoCapitalize="sentences" />
       </Field>
       <Btn
-        title={busy ? t('job.working') : t('job.applyCredit')}
+        title={busy ? t('job.working') : t('job.applyCreditPlain')}
         icon={busy ? undefined : 'check'}
         disabled={busy || !(amount > 0) || overRoom}
         onPress={() => onConfirm(round2(amount), reason)}

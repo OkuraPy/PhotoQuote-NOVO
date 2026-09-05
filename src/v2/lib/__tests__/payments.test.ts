@@ -10,6 +10,7 @@ import {
   invoiceDue,
   invoiceRollup,
   overbilled,
+  pickCreditTarget,
   uninvoiced,
   daysFromToday,
   deriveStage,
@@ -433,5 +434,28 @@ describe('applyCreditToRows (o crédito tem que caber nas parcelas)', () => {
 
   it('não inventa parcela negativa', () => {
     expect(applyCreditToRows(rows(), 9999).length).toBe(0);
+  });
+});
+
+describe('pickCreditTarget (de qual fatura sai o abatimento)', () => {
+  const inv = (id: string, total: number, paid: number, credit = 0) => ({ id, total, amountPaid: paid, creditTotal: credit });
+
+  it('escolhe a primeira fatura que ainda tem saldo', () => {
+    // job com 2 faturas: a #1 quitada, a complementar em aberto
+    const alvo = pickCreditTarget([inv('a', 580.55, 580.55), inv('b', 2400, 0)]);
+    expect(alvo?.id).toBe('b');
+  });
+
+  it('quando a primeira tem saldo, é ela', () => {
+    expect(pickCreditTarget([inv('a', 580.55, 290.27), inv('b', 2400, 0)])?.id).toBe('a');
+  });
+
+  it('tudo quitado: nenhuma absorve', () => {
+    expect(pickCreditTarget([inv('a', 100, 100), inv('b', 200, 200)])).toBeUndefined();
+  });
+
+  it('conta o que já foi abatido antes', () => {
+    // 100 faturados, 60 pagos, 40 já abatidos → não cabe mais nada
+    expect(pickCreditTarget([inv('a', 100, 60, 40)])).toBeUndefined();
   });
 });
