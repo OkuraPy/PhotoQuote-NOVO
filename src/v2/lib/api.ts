@@ -1368,7 +1368,9 @@ export type JobDetail = {
   jobSite: { address: string; city: string; zip: string; state: string };
   photoUrls: string[];
   docPhotoUrls: string[]; // curated subset of photoUrls that prints on the quote (G2, max 6)
-  agreement: { id: string; token: string; status: string; signedName: string | null; signedDate: string | null } | null;
+  // totalAmount = o valor com que o contrato FOI GERADO (retrato). A tela mostra este, não o de
+  // hoje: sob um chip "Assinado", exibir o valor atual seria dizer que o cliente assinou outra coisa.
+  agreement: { id: string; token: string; status: string; signedName: string | null; signedDate: string | null; totalAmount: number | null } | null;
   closed: ClosedKind | null; // lost/archived (projects.status) — orthogonal to the derived stage
 };
 
@@ -1482,7 +1484,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
 
   const agrRes = await supabase
     .from('agreements')
-    .select('id, token, status, signed_name, signed_date')
+    .select('id, token, status, signed_name, signed_date, total_amount')
     .eq('project_id', projectId)
     .neq('status', 'void') // A1: a voided (superseded) contract must not drive the Contract tab
     .order('created_at', { ascending: false })
@@ -1520,7 +1522,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
     },
     photoUrls: Array.isArray(projRes.data?.photo_urls) ? (projRes.data!.photo_urls as string[]) : [],
     docPhotoUrls: Array.isArray(projRes.data?.doc_photo_urls) ? (projRes.data!.doc_photo_urls as string[]) : [],
-    agreement: agr ? { id: agr.id, token: agr.token, status: agr.status, signedName: agr.signed_name, signedDate: agr.signed_date } : null,
+    agreement: agr ? { id: agr.id, token: agr.token, status: agr.status, signedName: agr.signed_name, signedDate: agr.signed_date, totalAmount: agr.total_amount != null ? Number(agr.total_amount) : null } : null,
     closed: closedFromStatus(projRes.data?.status),
   };
 }

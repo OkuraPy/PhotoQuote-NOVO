@@ -461,26 +461,42 @@ describe('pickCreditTarget (de qual fatura sai o abatimento)', () => {
 });
 
 describe('o par cobrar/tirar tem que ZERAR depois de cada ação (bases diferentes de propósito)', () => {
-  // provado com contra-exemplo de produção: com as duas comparações no mesmo total, o app pedia
-  // para cobrar de volta o saldo que o dono acabara de perdoar
-  const quote = 580.55;
+  // A fiação de verdade, não literais: um verificador mostrou que testar com números soltos deixava
+  // o defeito passar — trocar a base na tela mantinha tudo verde. Aqui o roll-up é calculado, e é
+  // dele que saem os dois lados, exatamente como em Job.tsx.
+  const lados = (quote: number, invoices: { total: number; amountPaid: number; creditTotal?: number }[]) => {
+    const roll = invoiceRollup(invoices);
+    return { cobrar: uninvoiced(quote, roll.billed), tirar: overbilled(quote, roll.total) };
+  };
 
   it('perdoar saldo (sem mexer no orçamento) não vira "o trabalho aumentou"', () => {
-    const grossBilled = 580.55; // a fatura continua sendo de 580.55
-    const netBilled = 540.55; // 40 tirados
-    expect(uninvoiced(quote, grossBilled)).toBe(0); // nada novo a cobrar
-    expect(overbilled(quote, netBilled)).toBe(0); // e nada mais a tirar
+    // fatura 580,55, pago 290,27, perdoados 290,28 → o orçamento continua 580,55
+    const r = lados(580.55, [{ total: 580.55, amountPaid: 290.27, creditTotal: 290.28 }]);
+    expect(r.cobrar).toBe(0); // era ISTO que anunciava "cobrar mais $290,28"
+    expect(r.tirar).toBe(0);
   });
 
   it('material devolvido: sugere tirar uma vez, e some depois de tirado', () => {
-    const quoteMenor = 540.55; // o orçamento encolheu
-    expect(overbilled(quoteMenor, 580.55)).toBe(40); // antes: tirar 40
-    expect(overbilled(quoteMenor, 540.55)).toBe(0); // depois: nada
-    expect(uninvoiced(quoteMenor, 580.55)).toBe(0); // e nunca sugere cobrar
+    const antes = lados(540.55, [{ total: 580.55, amountPaid: 290.27 }]);
+    expect(antes.tirar).toBe(40);
+    expect(antes.cobrar).toBe(0);
+    const depois = lados(540.55, [{ total: 580.55, amountPaid: 290.27, creditTotal: 40 }]);
+    expect(depois.tirar).toBe(0);
+    expect(depois.cobrar).toBe(0);
   });
 
   it('obra cresceu: sugere cobrar, e nada a tirar', () => {
-    expect(uninvoiced(700, 580.55)).toBe(119.45);
-    expect(overbilled(700, 580.55)).toBe(0);
+    const r = lados(700, [{ total: 580.55, amountPaid: 290.27 }]);
+    expect(r.cobrar).toBe(119.45);
+    expect(r.tirar).toBe(0);
+  });
+
+  it('complementar + abatimento no mesmo job também zera', () => {
+    const r = lados(10400, [
+      { total: 8000, amountPaid: 8000 },
+      { total: 2440, amountPaid: 0, creditTotal: 40 },
+    ]);
+    expect(r.cobrar).toBe(0); // bruto 10.440 ≥ orçamento
+    expect(r.tirar).toBe(0); // líquido 10.400 = orçamento
   });
 });

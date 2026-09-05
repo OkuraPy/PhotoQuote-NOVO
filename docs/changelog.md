@@ -4,6 +4,38 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-05 23:10] — fix: passada final — o bloqueante do portal continuava vivo nos 17 assinados
+Verificação de fechamento (6ª fase). Veredito: laço, recibo e RLS **confirmados fechados** com
+contra-exemplo numérico; sobrou o rabo do bloqueante do portal e meio laço num banner.
+
+🔴 **ALTO — `agreements.total_amount` só valia para contratos FUTUROS.** Os 30 contratos que já
+existem (17 assinados) tinham a coluna nula, então a RPC caía no cálculo ao vivo e o primeiro
+abatimento numa fatura já assinada traria o bloqueante de volta pelos antigos: cabeçalho $52.000
+sobre um corpo de $53.000, na tela da assinatura. **Back-fill aplicado** (`invoice_credits` está
+vazia, então `invoices.total` ainda é exatamente o número congelado em cada corpo): 30/30 congelados,
+0 faltando.
+
+**MÉDIO — meio laço sobrando no banner** "o orçamento mudou depois desta fatura": ele comparava com
+o total LÍQUIDO, então perdoar um saldo o acendia para sempre — sem cartão nenhum para resolver, e
+sem o orçamento ter mudado. Agora compara com o bruto, como o resto do par.
+
+**MÉDIO — a migration `20260905180000` continha só um comentário dizendo que a função tinha sido
+aplicada.** Produção tinha o `coalesce`, o repositório não: um replay das migrations regrediria o
+ALTO em silêncio. A função e o back-fill agora estão no arquivo.
+
+**BAIXO, e o mais instrutivo — o teste que eu tinha escrito para o laço era tautológico.** Alimentava
+bruto e líquido como literais, então trocar a base na tela mantinha 219 verdes. Reescrito para
+calcular o `invoiceRollup` de verdade e derivar os dois lados dele, como `Job.tsx` faz —
+**e verifiquei que agora ele falha** quando eu reintroduzo o defeito de propósito.
+
+**Também**: o aviso guardava uma chave só (alternar dois jobs com diferença fazia repetir) e o
+comentário dizia "uma vez por job" sem mencionar que a memória é da sessão — agora guarda as últimas
+20 chaves e o comentário diz a verdade; a aba Contract mostrava o valor de HOJE sob o chip
+"Assinado" (passa a mostrar o retrato do documento, via `agreement.totalAmount`); `useRef` ficou sem
+uso e saiu.
+
+- jest **219/219**, tsc limpo, `git status` limpo.
+
 ### [2026-09-05 22:30] — fix: os 3 verificadores — 1 bloqueante que eu criei e 4 altos de dinheiro
 Fase de verificação do time (mecânico / dinheiro / fluxo, em paralelo). Todos os três acharam coisa.
 

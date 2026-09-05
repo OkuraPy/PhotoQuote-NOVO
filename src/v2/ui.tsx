@@ -88,9 +88,11 @@ export type V2Store = {
   stageOverride: Record<string, Stage>;
   jobFilter: string;
   jobQ: string;
-  // "já perguntei sobre esta diferença": mora no store porque sair do job desmonta a tela — num ref
-  // o aviso voltava a cada abertura do job, virando ruído em vez de ajuda
-  diffAsked: string;
+  // "já perguntei sobre estas diferenças" (uma chave por job+sentido+valor). Mora no store porque
+  // sair do job desmonta a tela e um ref voltaria a perguntar a cada abertura. É memória da SESSÃO:
+  // o store não é persistido, então reabrir o app pergunta de novo — aceitável, e melhor do que
+  // gravar em disco um lembrete que pode ficar desatualizado.
+  diffAsked: string[];
   clientQ: string;
 };
 type Ctx = { store: V2Store; up: (patch: Partial<V2Store> | ((s: V2Store) => Partial<V2Store>)) => void };

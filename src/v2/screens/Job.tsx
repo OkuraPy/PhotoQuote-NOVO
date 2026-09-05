@@ -1,5 +1,5 @@
 // PhotoQuote v2 — Job screen: timeline + Quote / Invoice / Contract / Progress tabs
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Linking, Pressable, Share, ScrollView, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
@@ -610,11 +610,15 @@ export function JobScreen({ go, back, params }: NavProp) {
   // o plano exibido na aba Contract segue o mesmo abatimento do valor: sem isso as parcelas somavam
   // o bruto embaixo de um total líquido, e a tela discordava do papel que o cliente assina
   const contractPlan = contractInv ? planFromInvoice(contractInv) : null;
-  const contractCredited = contractInv?.creditTotal || 0;
-  // o documento gerado congela o valor DEVIDO (api.ts createAgreement usa invoiceDue), então a tela
-  // tem que mostrar o mesmo número — senão aba e papel discordam pelo valor do abatimento
+  // Com contrato JÁ gerado a tela mostra o RETRATO dele (agreements.total_amount); sem contrato,
+  // mostra o valor de hoje — que é o que será congelado quando ele gerar. Sob um chip "Assinado",
+  // exibir o número de hoje seria dizer que o cliente assinou outra coisa.
+  const frozenTotal = detail?.agreement?.totalAmount ?? null;
+  // quanto do abatimento o CONTRATO já refletia: se foi gerado depois do abatimento, o retrato já é
+  // líquido e as parcelas não podem descontar de novo
+  const contractCredited = frozenTotal != null ? round2(Math.max(0, (contractInv?.total || 0) - frozenTotal)) : contractInv?.creditTotal || 0;
   const contractTotals: Totals = contractInv
-    ? { subtotal: contractInv.subtotal, taxableSubtotal: 0, tax: contractInv.tax, total: invoiceDue(contractInv.total, contractInv.creditTotal), taxRate: contractInv.taxRate, discount: contractInv.discount }
+    ? { subtotal: contractInv.subtotal, taxableSubtotal: 0, tax: contractInv.tax, total: frozenTotal != null ? frozenTotal : invoiceDue(contractInv.total, contractInv.creditTotal), taxRate: contractInv.taxRate, discount: contractInv.discount }
     : quoteTotals;
   // credits come off before the balance: what the client owes is the DUE amount, not the billed one
   const balance = inv ? invoiceBalance(invoiceDue(inv.total, inv.creditTotal), inv.amountPaid) : 0;
@@ -831,8 +835,9 @@ export function JobScreen({ go, back, params }: NavProp) {
   // orçamento de um job já faturado, o app voltava na aba Orçamento, nada dizia que a fatura do
   // cliente tinha ficado velha, e o cartão "PRÓXIMO PASSO" ainda apontava para "Registrar
   // pagamento". O recurso inteiro dependia de o contratante trocar de aba por conta própria, sem
-  // motivo nenhum para isso. Agora o app fala primeiro. Uma vez por job e por valor: se ele disser
-  // "agora não", só volta a perguntar se a diferença mudar.
+  // motivo nenhum para isso. Agora o app fala primeiro. Pergunta uma vez por job e por valor
+  // ENQUANTO O APP ESTIVER ABERTO (o store não é persistido); alternar entre dois jobs com
+  // diferença não faz nenhum dos dois repetir.
   useEffect(() => {
     if (closed || !projectId || !roll.count || role === 'field') return;
     const grew = extraToInvoice > 0.005 && canAddInvoice;
@@ -844,8 +849,8 @@ export function JobScreen({ go, back, params }: NavProp) {
     // o valor anunciado é o mesmo que a folha vai abrir — o aviso dizia "$200" e a folha abria "$40"
     const amount = grew ? extraToInvoice : Math.min(creditToApply, room);
     const key = `${projectId}:${grew ? 'up' : 'down'}:${amount.toFixed(2)}`;
-    if (store.diffAsked === key) return;
-    up({ diffAsked: key });
+    if (store.diffAsked.includes(key)) return;
+    up((st) => ({ diffAsked: [...st.diffAsked.slice(-19), key] }));
     Alert.alert(
       grew ? t('job.addInvoiceTitle', { amount: fmt(amount) }) : t('job.creditCardTitle', { amount: fmt(amount) }),
       grew ? t('job.addInvoiceBody') : t('job.creditCardBody'),
@@ -1668,7 +1673,7 @@ const cmStamp = (iso: string) => {
 // shows them in the contractor's language
 const phaseLabel = (t: Tr, name: string) => (name === BEFORE_PHASE_NAME ? t('job.phase.beforeName') : name === FINAL_PHASE_NAME ? t('job.phase.finalName') : name);
 
-function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, invoices = [], onSelectInvoice, roll, extraToInvoice = 0, onAddInvoice, creditToApply = 0, creditRoomTarget = 0, onAddCredit, onRemoveCredit, quoteTotal, genning, onGen, onRecordPayment, onEditPlan, onReceipt, receiptBusyId, setSheet }: { stage: Stage; items: LineItem[]; totals: Totals; client: JobDetail['client']; jobSite?: string; company?: any; invoice?: JobDetail['invoice']; invoices?: JobDetail['invoices']; onSelectInvoice?: (id: string) => void; roll?: { count: number; total: number; paid: number; balance: number }; extraToInvoice?: number; onAddInvoice?: () => void; creditToApply?: number; creditRoomTarget?: number; onAddCredit?: () => void; onRemoveCredit?: (c: { id: string; amount: number }) => void; quoteTotal?: number; genning: boolean; onGen: () => void; onRecordPayment: () => void; onEditPlan: () => void; onReceipt?: (p: PaymentRecord) => void; receiptBusyId?: string | null; setSheet: (b: boolean) => void }) {
+function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, invoices = [], onSelectInvoice, roll, extraToInvoice = 0, onAddInvoice, creditToApply = 0, creditRoomTarget = 0, onAddCredit, onRemoveCredit, quoteTotal, genning, onGen, onRecordPayment, onEditPlan, onReceipt, receiptBusyId, setSheet }: { stage: Stage; items: LineItem[]; totals: Totals; client: JobDetail['client']; jobSite?: string; company?: any; invoice?: JobDetail['invoice']; invoices?: JobDetail['invoices']; onSelectInvoice?: (id: string) => void; roll?: { count: number; total: number; billed: number; paid: number; balance: number }; extraToInvoice?: number; onAddInvoice?: () => void; creditToApply?: number; creditRoomTarget?: number; onAddCredit?: () => void; onRemoveCredit?: (c: { id: string; amount: number }) => void; quoteTotal?: number; genning: boolean; onGen: () => void; onRecordPayment: () => void; onEditPlan: () => void; onReceipt?: (p: PaymentRecord) => void; receiptBusyId?: string | null; setSheet: (b: boolean) => void }) {
   const t = useT();
   const has = !!invoice || ['Invoiced', 'Paid'].includes(stage);
   const co = company || {};
@@ -1710,7 +1715,7 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, i
   // G-9: compare the quote against EVERYTHING already invoiced, not against the invoice on screen —
   // with a complementary invoice the selected one is only a slice and would always look out of sync.
   // When the difference is billable the "bill the difference" card below says it better anyway.
-  const invoicedTotal = roll ? roll.total : invoice?.total ?? 0;
+  const invoicedTotal = roll ? roll.billed : invoice?.total ?? 0;
   const showsAddCard = !!onAddInvoice && extraToInvoice > 0.005;
   // capped at the open balance: crediting past it would owe money back, and there is no refund flow
   const creditSuggestion = Math.min(creditToApply, creditRoomTarget);
