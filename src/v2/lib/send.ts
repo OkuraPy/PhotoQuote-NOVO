@@ -124,6 +124,10 @@ export type SendData = {
   // `taxableSubtotal` só é impresso quando NÃO é o subtotal inteiro — é o que explica um imposto
   // que, sozinho, parece não bater com a alíquota (itens isentos, ou uma fatura complementar)
   totals: { subtotal: number; tax: number; total: number; taxRate: number; discount?: number; taxableSubtotal?: number };
+  // Credits applied AFTER the invoice went out (returned material, agreed cut). Printed as their
+  // own lines under the total, with the reason: the client received a document for the original
+  // amount, so the drop has to be explained, not silently applied.
+  credits?: { amount: number; reason: string | null }[];
   // invoice payment plan + ledger (labels/dates already English — planRows/DB method keys)
   payment?: {
     rows: { label: string; amount: number; due: string | null }[];
@@ -286,6 +290,14 @@ function buildHtml(d: SendData): string {
       <div class="row"><span>Tax (${escapeHtml(d.totals.taxRate)}%${d.totals.taxableSubtotal != null && d.totals.taxableSubtotal < d.totals.subtotal - 0.005 ? ` on ${fmt(d.totals.taxableSubtotal)}` : ''})</span><b>${fmt(d.totals.tax)}</b></div>
       <div class="grand"><span>Total</span><span>${fmt(d.totals.total)}</span></div>
       ${
+        d.credits && d.credits.length
+          ? `${d.credits
+              .map((c) => `<div class="row" style="margin-top:6px"><span>Credit${c.reason ? ` — ${escapeHtml(c.reason)}` : ''}</span><b class="ok">-${fmt(c.amount)}</b></div>`)
+              .join('')}
+      <div class="grand" style="border-top:1px solid #E6E9EE"><span>Revised total</span><span>${fmt(Math.max(0, d.totals.total - d.credits.reduce((s2, c) => s2 + (Number(c.amount) || 0), 0)))}</span></div>`
+          : ''
+      }
+      ${
         d.payment
           ? `${d.payment.paid > 0 ? `<div class="row" style="margin-top:6px"><span>Paid</span><b class="ok">${fmt(d.payment.paid)}</b></div>` : ''}
       <div class="grand" style="border-top:1px solid #E6E9EE;font-size:15px"><span>Balance due</span><span>${fmt(d.payment.balance)}</span></div>`
@@ -335,7 +347,12 @@ function buildText(d: SendData): string {
       }${d.payment.paid > 0 ? `Paid ${fmt(d.payment.paid)} · ` : ''}Balance due ${fmt(d.payment.balance)}`
     : '';
   const note = d.customerNote ? `\n\nNotes: ${d.customerNote}` : '';
-  return `${d.docLabel}${d.number ? ' ' + d.number : ''} — ${d.company.name}\n${d.client?.name ? `For: ${d.client.name}\n` : ''}${d.jobSite ? `Job site: ${d.jobSite}\n` : ''}\n${lines}\n\nSubtotal ${fmt(d.totals.subtotal)}${d.totals.discount && d.totals.discount > 0 ? ` · Discount -${fmt(d.totals.discount)}` : ''} · Tax ${fmt(d.totals.tax)} · Total ${fmt(d.totals.total)}${pay}${note}`;
+  // same facts as the PDF: each credit with its reason, then the revised total
+  const credits = d.credits && d.credits.length
+    ? d.credits.map((c) => `\nCredit${c.reason ? ` — ${c.reason}` : ''} -${fmt(c.amount)}`).join('') +
+      `\nRevised total ${fmt(Math.max(0, d.totals.total - d.credits.reduce((s2, c) => s2 + (Number(c.amount) || 0), 0)))}`
+    : '';
+  return `${d.docLabel}${d.number ? ' ' + d.number : ''} — ${d.company.name}\n${d.client?.name ? `For: ${d.client.name}\n` : ''}${d.jobSite ? `Job site: ${d.jobSite}\n` : ''}\n${lines}\n\nSubtotal ${fmt(d.totals.subtotal)}${d.totals.discount && d.totals.discount > 0 ? ` · Discount -${fmt(d.totals.discount)}` : ''} · Tax ${fmt(d.totals.tax)} · Total ${fmt(d.totals.total)}${credits}${pay}${note}`;
 }
 
 export async function sendDoc(option: string, d: SendData) {

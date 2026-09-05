@@ -5,7 +5,7 @@ import * as Crypto from 'expo-crypto';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from './supabase';
 import { readErrorBody } from './ai';
-import { Client, ClosedKind, closedFromStatus, deriveBase, deriveStage, Discount, DOC_PHOTO_CAP, Job, LineItem, MemberRole, paidTotal, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, Photo, planFromInvoice, planRows, rescaleSchedule, round2, ScheduleRow, seedPhasePlan, statusFromPayments, syncPhasePlan, toDateOnly } from '../data';
+import { Client, ClosedKind, closedFromStatus, CreditRecord, creditRoom, creditTotal, deriveBase, deriveStage, Discount, DOC_PHOTO_CAP, fmt, invoiceDue, Job, LineItem, MemberRole, paidTotal, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, Photo, planFromInvoice, planRows, rescaleSchedule, round2, ScheduleRow, seedPhasePlan, statusFromPayments, syncPhasePlan, toDateOnly } from '../data';
 export { deriveStage }; // re-exported for screens (lives in ../data so it's unit-testable)
 
 /* ---------------- Location: real ZIP (Zippopotam, keyless) + GPS (expo-location) ---------------- */
@@ -622,10 +622,63 @@ export async function recordInvoicePayment(
 
   const { data: pays, error: pErr } = await supabase.from('invoice_payments').select('amount').eq('invoice_id', invoiceId);
   if (pErr) throw pErr;
-  const status = statusFromPayments(Number(inv.total) || 0, paidTotal(pays || []));
+  // credits reduce what is owed, so they decide "Paid" together with the payments: a $580.55
+  // invoice with a $40 credit closes at $540.55, not at $580.55
+  const status = statusFromPayments(invoiceDue(Number(inv.total) || 0, await creditsFor(invoiceId)), paidTotal(pays || []));
   const { error: uErr } = await supabase.from('invoices').update({ status }).eq('id', invoiceId);
   if (uErr) throw uErr;
   return { id: ins.id };
+}
+
+// Σ credits on one invoice, straight from the DB (never from a screen's stale copy — this feeds
+// the stored status).
+async function creditsFor(invoiceId: string): Promise<number> {
+  const { data } = await supabase.from('invoice_credits').select('amount').eq('invoice_id', invoiceId);
+  return creditTotal(data || []);
+}
+
+// Record a credit against an invoice (returned material, agreed reduction after billing).
+// Capped at the OPEN BALANCE: crediting more than that would owe money back to the client, and
+// this app has no refund flow — the cap is enforced here, server-side numbers, not from the UI.
+export async function addInvoiceCredit(
+  userId: string,
+  invoiceId: string,
+  p: { amount: number; reason?: string | null }
+): Promise<{ id: string; status: string }> {
+  const amount = round2(p.amount);
+  if (!(amount > 0)) throw new Error('Enter a credit greater than zero.');
+  const reason = (p.reason || '').trim().slice(0, 120) || null;
+
+  const [{ data: inv, error: iErr }, { data: pays, error: pErr }] = await Promise.all([
+    supabase.from('invoices').select('total').eq('id', invoiceId).maybeSingle(),
+    supabase.from('invoice_payments').select('amount').eq('invoice_id', invoiceId),
+  ]);
+  if (iErr) throw iErr;
+  if (pErr) throw pErr;
+  if (!inv) throw new Error('Invoice not found.');
+  const total = Number(inv.total) || 0;
+  const already = await creditsFor(invoiceId);
+  const paid = paidTotal(pays || []);
+  const room = creditRoom(total, already, paid);
+  if (amount > room + 0.005) {
+    throw new Error(
+      room > 0
+        ? `This invoice can take at most ${fmt(room)} in credit — that is the balance still open.`
+        : 'This invoice has no open balance left to credit.'
+    );
+  }
+
+  const { data: ins, error } = await supabase
+    .from('invoice_credits')
+    .insert({ invoice_id: invoiceId, user_id: userId, amount, reason })
+    .select('id')
+    .single();
+  if (error) throw error;
+
+  // the credit can close the invoice by itself (the client had already paid the reduced amount)
+  const status = statusFromPayments(invoiceDue(total, round2(already + amount)), paid);
+  await supabase.from('invoices').update({ status }).eq('id', invoiceId);
+  return { id: ins.id, status };
 }
 
 // Mint-once receipt number (G3). Written exactly once per payment; re-issuing reuses it.
@@ -1044,11 +1097,14 @@ const monthDay = (iso?: string) => {
 };
 
 export async function fetchJobs(userId: string): Promise<RealJob[]> {
-  const [proj, cli, est, inv] = await Promise.all([
+  const [proj, cli, est, inv, cred] = await Promise.all([
     supabase.from('projects').select('id, name, client_id, address, city, created_at, photo_urls, status').eq('user_id', userId).order('created_at', { ascending: false }),
     supabase.from('clients').select('id, full_name').eq('user_id', userId),
     supabase.from('estimates').select('project_id, status, total, grand_total, estimate_number, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    supabase.from('invoices').select('project_id, status, total, invoice_number, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    supabase.from('invoices').select('id, project_id, status, total, invoice_number, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    // credits reduce what the job is worth: without this the Home would keep showing money that
+    // was credited back (returned material) as invoiced and collectable
+    supabase.from('invoice_credits').select('invoice_id, amount').eq('user_id', userId),
   ]);
   if (proj.error) throw proj.error;
 
@@ -1068,6 +1124,10 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
   // G-9: a job can carry more than one invoice — the money it is worth is the SUM of them, not
   // the newest one. Without this a $10,400 job with a paid $8,000 and a fresh $2,400 would read
   // as $2,400 on the Home list and in the metrics.
+  const creditByInv = new Map<string, number>();
+  (cred.data || []).forEach((c: any) => {
+    creditByInv.set(c.invoice_id, round2((creditByInv.get(c.invoice_id) || 0) + (Number(c.amount) || 0)));
+  });
   const invsByProj = new Map<string, any[]>();
   (inv.data || []).forEach((i: any) => {
     const list = invsByProj.get(i.project_id);
@@ -1078,7 +1138,7 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
   return (proj.data || []).map((p: any) => {
     const e = estByProj.get(p.id);
     const ivs = invsByProj.get(p.id) || [];
-    const invoicedTotal = round2(ivs.reduce((sum: number, i: any) => sum + (Number(i.total) || 0), 0));
+    const invoicedTotal = round2(ivs.reduce((sum: number, i: any) => sum + invoiceDue(Number(i.total) || 0, creditByInv.get(i.id) || 0), 0));
     const value = ivs.length ? invoicedTotal : Number(e?.total ?? e?.grand_total ?? 0) || 0;
     // stage/partial read the WHOLE set: all invoices paid = Paid, any money in with a balance
     // left = partial. `paid` here is the invoice STATUS (the ledger lives in fetchJobDetail).
@@ -1231,6 +1291,9 @@ export type JobInvoice = {
   depositAmount: number | null;
   schedule: ScheduleRow[];
   payments: PaymentRecord[];
+  // credits are NOT money received: they reduce what is owed and print their reason on the invoice
+  credits: CreditRecord[];
+  creditTotal: number;
   amountPaid: number;
 };
 
@@ -1310,8 +1373,9 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
   const invIds = invRows.map((r: any) => r.id);
   const schedByInv: Record<string, ScheduleRow[]> = {};
   const paysByInv: Record<string, PaymentRecord[]> = {};
+  const credByInv: Record<string, CreditRecord[]> = {};
   if (invIds.length) {
-    const [schRes, payRes] = await Promise.all([
+    const [schRes, payRes, credRes] = await Promise.all([
       supabase.from('invoice_schedule').select('invoice_id, id, label, amount, due_date, phase_id, sort').in('invoice_id', invIds).order('sort', { ascending: true }),
       // created_at tiebreaker: paid_at is date-only, and same-day payments must keep a stable
       // order. Note this is stable per SET of payments, not forever: recording a payment dated
@@ -1319,18 +1383,26 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
       // the balance as of that date — which is why the immediate receipt uses the same
       // chronological math (balanceAfterNewPayment) instead of "total − everything paid".
       supabase.from('invoice_payments').select('invoice_id, id, amount, paid_at, method, schedule_id, note').in('invoice_id', invIds).order('paid_at', { ascending: true }).order('created_at', { ascending: true }),
+      // credits (returned material / agreed reduction after billing) — no money moved, so they
+      // live apart from the ledger and only reduce what is owed
+      supabase.from('invoice_credits').select('invoice_id, id, amount, reason, created_at').in('invoice_id', invIds).order('created_at', { ascending: true }),
     ]);
     if (schRes.error) throw schRes.error;
     if (payRes.error) throw payRes.error;
+    if (credRes.error) throw credRes.error;
     (schRes.data || []).forEach((r: any) => {
       (schedByInv[r.invoice_id] ||= []).push({ id: r.id, label: r.label || '', amount: Number(r.amount) || 0, dueDate: r.due_date ?? null, phaseId: r.phase_id ?? null, sort: r.sort ?? 0 });
     });
     (payRes.data || []).forEach((r: any) => {
       (paysByInv[r.invoice_id] ||= []).push({ id: r.id, amount: Number(r.amount) || 0, paidAt: r.paid_at, method: r.method ?? null, scheduleId: r.schedule_id ?? null, note: r.note ?? null });
     });
+    (credRes.data || []).forEach((r: any) => {
+      (credByInv[r.invoice_id] ||= []).push({ id: r.id, amount: Number(r.amount) || 0, reason: r.reason ?? null, createdAt: r.created_at });
+    });
   }
   const invoices = invRows.map((row: any) => {
     const payments = paysByInv[row.id] || [];
+    const credits = credByInv[row.id] || [];
     return {
       id: row.id,
       number: row.invoice_number,
@@ -1348,6 +1420,8 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
       depositAmount: row.deposit_amount != null ? Number(row.deposit_amount) : null,
       schedule: schedByInv[row.id] || [],
       payments,
+      credits,
+      creditTotal: creditTotal(credits),
       // legacy rule: an invoice marked Paid before the ledger existed counts as fully paid
       amountPaid: payments.length ? paidTotal(payments) : String(row.status).toLowerCase() === 'paid' ? Number(row.total ?? 0) : 0,
     };

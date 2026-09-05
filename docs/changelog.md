@@ -4,6 +4,42 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-05 18:05] — feat: crédito na fatura — o espelho da fatura complementar
+**O caso real** (áudio + print do dono, 05/09): fatura de $580.55 da Jami Rahn por 3 smoke
+detectors, metade já paga por Zelle. No local só couberam 2, um voltou pro fornecedor. A fatura
+para de seguir o orçamento assim que recebe pagamento (decisão da F12: o cliente já agiu sobre
+aquele documento), então o valor devolvido virava um saldo que **ninguém ia pagar nunca** e o job
+não fechava. O dono escolheu o desenho: "a situação 2 é melhor e mais intuitiva" — ou seja, o mesmo
+cartão do "Cobre a diferença", só que no sentido inverso.
+
+- **Orçamento SOBE acima do faturado** → "Cobre a diferença" → 2ª fatura *(já existia, G-9)*
+- **Orçamento DESCE abaixo do faturado** → "Credite a diferença" → crédito, o saldo cai *(novo)*
+
+**Por que crédito e não "mudar o valor da fatura"**: o cliente já recebeu um PDF de $580.55. Baixar
+o número em silêncio apaga o rastro; o crédito mantém o que foi faturado, mostra a linha
+`Credit — returned material -$40` e o `Revised total` embaixo. É o *credit memo* que o cliente
+americano reconhece.
+
+- **Migration `20260905120000_invoice_credits`** (aplicada em prod): tabela `invoice_credits`
+  (amount > 0, reason ≤ 120), RLS espelhando `invoice_payments` — dono faz tudo nas próprias linhas,
+  membro **office** lê/insere/edita nas faturas do dono, **field não vê** (é dinheiro).
+- **Regra dura, no servidor**: o crédito é limitado ao **saldo em aberto** (`creditRoom`). Creditar
+  além disso significaria devolver dinheiro, e a app não tem reembolso nem desfaz pagamento. O teto
+  é recalculado no banco dentro de `addInvoiceCredit`, nunca a partir da tela.
+- **Crédito NÃO é pagamento**: fica em tabela própria, aparece em seção própria na fatura e não
+  entra em "Payments received" nem em "collected" — nenhum dinheiro entrou.
+- **Onde o número mudou**: saldo e status da fatura (`invoiceDue`), roll-up do job
+  (`invoiceRollup` agora aceita `creditTotal`), a lista/Home (`fetchJobs` desconta os créditos, senão
+  a Home seguiria contando dinheiro estornado), o PDF e o texto de envio.
+- **Arquivos**: `supabase/migrations/20260905120000_invoice_credits.sql`, `src/v2/data.ts`
+  (`creditTotal`/`invoiceDue`/`creditRoom`/`overbilled` + `CreditRecord`), `src/v2/lib/api.ts`
+  (`addInvoiceCredit`, leitura no `fetchJobDetail`/`fetchJobs`, status considerando crédito),
+  `src/v2/screens/Job.tsx` (cartão espelho, `CreditSheet`, totais e lista), `src/v2/lib/send.ts`
+  (linhas de crédito + `Revised total`), testes (+6 → **197**).
+- **Limite conhecido**: o plano de parcelas continua desenhado sobre o valor faturado — com crédito,
+  a soma das parcelas fica acima do que é devido. O saldo está certo; a lista de parcelas é que fica
+  "grande demais". Anotado para decidir com o dono.
+
 ### [2026-09-05 16:10] — fix: 3 revisores em cima de tudo — 1 BLOQUEANTE e 1 ALTO de dinheiro
 O dono mandou "coloca revisores para analisar tudo". Três agentes adversariais (dinheiro / busca e
 teclado / integração), cada um com escopo próprio. Acharam coisa que eu não tinha visto.

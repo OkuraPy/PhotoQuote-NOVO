@@ -226,6 +226,8 @@ export type ScheduleRow = { id?: string; label: string; amount: number; dueDate:
 // `note` (G-6) is the client-facing reference the owner types when recording the payment —
 // "Check #1234 · Chase". It prints on the receipt, so it is never a private remark.
 export type PaymentRecord = { id: string; amount: number; paidAt: string; method: string | null; scheduleId: string | null; note: string | null };
+// A reduction of what is owed with no money attached (returned material, agreed cut after billing).
+export type CreditRecord = { id: string; amount: number; reason: string | null; createdAt: string };
 // What the contractor picked in the payment-plan sheet (and what a stored invoice re-hydrates into).
 export type PaymentPlan = {
   mode: PaymentMode;
@@ -343,9 +345,11 @@ export const unallocated = (total: number, rows: { amount: number }[]) =>
 // work becomes a SECOND invoice. Every number the job header, the list and the metrics show is then
 // the roll-up of all of them — a $10,400 job must never read as $2,400 because that is the newest
 // invoice. `amountPaid` already accounts for the legacy 'Paid'-without-ledger case upstream.
-export type InvoiceLike = { total: number; amountPaid: number };
+export type InvoiceLike = { total: number; amountPaid: number; creditTotal?: number };
 export function invoiceRollup(list: InvoiceLike[]) {
-  const total = round2(list.reduce((s, i) => s + (Number(i.total) || 0), 0));
+  // credits come off the billed total: a returned smoke detector was never owed, so it must not
+  // sit in the balance, in "invoiced", or in the job's worth
+  const total = round2(list.reduce((s, i) => s + invoiceDue(i.total, i.creditTotal || 0), 0));
   const paid = round2(list.reduce((s, i) => s + (Number(i.amountPaid) || 0), 0));
   return {
     count: list.length,
@@ -357,11 +361,37 @@ export function invoiceRollup(list: InvoiceLike[]) {
   };
 }
 
+/* ---------------- Credits: the mirror of the complementary invoice ---------------- */
+// "teve que devolver um e teve que dar um descontinho aí no valor… recebido com desconto pra zerar
+// o invoice, não ficar com saldo" (dono, 05/09). The scope SHRANK after the invoice went out and
+// the client already paid part of it — the invoice stops following the quote at that point, so the
+// difference used to sit as a balance nobody would ever pay.
+//
+// A credit is NOT a payment: no money moved. It reduces what is owed, keeps the original amount on
+// the record, and prints its reason on the document so the client sees WHY the invoice changed.
+export const creditTotal = (credits: { amount: number }[]) =>
+  round2(credits.reduce((s, c) => s + (Number(c.amount) || 0), 0));
+
+// What the client actually owes on an invoice once credits are applied.
+export const invoiceDue = (total: number, credits: number) =>
+  round2(Math.max(0, (Number(total) || 0) - (Number(credits) || 0)));
+
+// How much credit still FITS. Capped at the open balance on purpose: crediting past what is owed
+// would mean money back to the client, and this app has no refund flow (nor a way to undo a
+// payment). The screen offers the capped number and says so.
+export const creditRoom = (total: number, credits: number, paid: number) =>
+  round2(Math.max(0, (Number(total) || 0) - (Number(credits) || 0) - (Number(paid) || 0)));
+
 // What the quote still has NOT put on any invoice — the amount a complementary invoice starts at.
 // Negative (the quote shrank below what was already billed) reads as zero: there is nothing new to
 // charge, and the app must never offer a negative invoice.
 export const uninvoiced = (quoteTotal: number, invoicedTotal: number) =>
   round2(Math.max(0, (Number(quoteTotal) || 0) - (Number(invoicedTotal) || 0)));
+
+// The mirror of `uninvoiced`: how far the quote fell BELOW what was already billed. That is the
+// credit the job is asking for — the same card, the other direction.
+export const overbilled = (quoteTotal: number, invoicedTotal: number) =>
+  round2(Math.max(0, (Number(invoicedTotal) || 0) - (Number(quoteTotal) || 0)));
 
 // Break a change-order amount (what the client owes MORE, tax included) into the same shape a
 // normal invoice has: a pre-tax subtotal, the taxable slice of it, and the tax at the quote's real

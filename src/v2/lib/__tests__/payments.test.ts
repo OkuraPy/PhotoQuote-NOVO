@@ -1,6 +1,12 @@
 import {
   addDaysISO,
   balanceAfterPayment,
+  creditRoom,
+  creditTotal,
+  invoiceDue,
+  invoiceRollup,
+  overbilled,
+  uninvoiced,
   daysFromToday,
   deriveStage,
   invoiceBalance,
@@ -293,5 +299,57 @@ describe('pagamento com data escolhida (cheque pré-datado / recebido ontem)', (
     // o cheque datado de 12/09 tem que continuar 12/09 na Flórida (UTC-4), não 11/09
     expect(toDateOnly(parseDateOnly('2026-09-12'))).toBe('2026-09-12');
     expect(parseDateOnly('2026-09-12').getDate()).toBe(12);
+  });
+});
+
+describe('créditos na fatura (devolveu material depois de faturado)', () => {
+  // caso real do dono (05/09): fatura de $580.55, 3 detectores. Só 2 couberam, 1 voltou (~$40),
+  // e o cliente já tinha pago metade ($290.27) por Zelle.
+  const TOTAL = 580.55;
+  const PAGO = 290.27;
+
+  it('o crédito reduz o que é devido, sem mexer no que foi faturado', () => {
+    expect(invoiceDue(TOTAL, 40)).toBe(540.55);
+    expect(invoiceBalance(invoiceDue(TOTAL, 40), PAGO)).toBe(250.28);
+  });
+
+  it('o crédito pode fechar a fatura sozinho quando o cliente já pagou o valor reduzido', () => {
+    const pago = 540.55;
+    expect(statusFromPayments(invoiceDue(TOTAL, 40), pago)).toBe('Paid');
+    // sem o crédito, a mesma fatura ficaria eternamente parcial
+    expect(statusFromPayments(TOTAL, pago)).toBe('Partially Paid');
+  });
+
+  it('creditRoom nunca deixa creditar além do saldo em aberto (não existe reembolso)', () => {
+    expect(creditRoom(TOTAL, 0, PAGO)).toBe(290.28);
+    expect(creditRoom(TOTAL, 40, PAGO)).toBe(250.28);
+    // cliente já pagou tudo: não cabe crédito nenhum
+    expect(creditRoom(TOTAL, 0, TOTAL)).toBe(0);
+    // e nunca fica negativo
+    expect(creditRoom(TOTAL, 600, PAGO)).toBe(0);
+  });
+
+  it('overbilled é o espelho de uninvoiced', () => {
+    // orçamento caiu para 540.55 e já havia 580.55 faturado → 40 de crédito
+    expect(overbilled(540.55, 580.55)).toBe(40);
+    expect(uninvoiced(540.55, 580.55)).toBe(0); // nada novo a cobrar
+    // e no sentido oposto, quem manda é o uninvoiced
+    expect(uninvoiced(700, 580.55)).toBe(119.45);
+    expect(overbilled(700, 580.55)).toBe(0);
+  });
+
+  it('creditTotal soma os créditos', () => {
+    expect(creditTotal([{ amount: 40 }, { amount: 10.5 }])).toBe(50.5);
+    expect(creditTotal([])).toBe(0);
+  });
+
+  it('o roll-up do job desconta os créditos (o job não vale o que foi estornado)', () => {
+    const r = invoiceRollup([
+      { total: TOTAL, amountPaid: PAGO, creditTotal: 40 },
+      { total: 200, amountPaid: 0 },
+    ]);
+    expect(r.total).toBe(740.55); // 540.55 + 200
+    expect(r.paid).toBe(PAGO);
+    expect(r.balance).toBe(450.28);
   });
 });

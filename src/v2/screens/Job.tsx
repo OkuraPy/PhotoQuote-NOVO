@@ -4,9 +4,9 @@ import { ActivityIndicator, Alert, Image, Linking, Pressable, Share, ScrollView,
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
-import { addDaysISO, applyMarkup, balanceAfterNewPayment, balanceAfterPayment, calcTotals, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, invoiceRollup, NO_DISCOUNT, resolveDiscount, splitChangeOrder, uninvoiced, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
+import { addDaysISO, applyMarkup, balanceAfterNewPayment, balanceAfterPayment, calcTotals, creditRoom, invoiceDue, overbilled, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, invoiceRollup, NO_DISCOUNT, resolveDiscount, splitChangeOrder, uninvoiced, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { addPhaseComment, addPhasePhotos, addProjectPhotos, agreementLink, assignMember, BEFORE_PHASE_NAME, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deletePhasePhoto, deleteProject, deleteProjectPhoto, deriveStage, ensureBookendPhases, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, FINAL_PHASE_NAME, JobDetail, progressLink, ProgressPhase, PhaseStatus, projectDeleteFacts, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
+import { addInvoiceCredit, addPhaseComment, addPhasePhotos, addProjectPhotos, agreementLink, assignMember, BEFORE_PHASE_NAME, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deletePhasePhoto, deleteProject, deleteProjectPhoto, deriveStage, ensureBookendPhases, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, FINAL_PHASE_NAME, JobDetail, progressLink, ProgressPhase, PhaseStatus, projectDeleteFacts, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { sendDoc, SendData } from '../lib/send';
 import { registerStrings, useT } from '../lib/i18n';
@@ -75,6 +75,34 @@ registerStrings({
   // G-9: more than one invoice on the same job
   'job.createExtraInvoice': { en: 'Create invoice', es: 'Crear factura', pt: 'Criar fatura' },
   'job.addInvoiceTitle': { en: 'Bill the difference', es: 'Facturar la diferencia', pt: 'Faturar a diferença' },
+  // the mirror of the complementary invoice: the scope shrank after billing (material returned)
+  'job.creditCardTitle': { en: 'Credit the difference', es: 'Acreditar la diferencia', pt: 'Creditar a diferença' },
+  'job.creditCardBody': {
+    en: 'The quote is {amount} below what is already invoiced. Apply it as a credit — the invoice keeps its history and the balance drops.',
+    es: 'La cotización está {amount} por debajo de lo ya facturado. Aplícalo como crédito — la factura conserva su historial y el saldo baja.',
+    pt: 'O orçamento está {amount} abaixo do que já foi faturado. Lance como crédito — a fatura mantém o histórico e o saldo cai.',
+  },
+  'job.applyCredit': { en: 'Apply credit', es: 'Aplicar crédito', pt: 'Lançar crédito' },
+  'job.creditsApplied': { en: 'Credits applied', es: 'Créditos aplicados', pt: 'Créditos lançados' },
+  'job.billedTotal': { en: 'Billed', es: 'Facturado', pt: 'Faturado' },
+  'job.creditTitle': { en: 'Apply a credit', es: 'Aplicar un crédito', pt: 'Lançar um crédito' },
+  'job.creditSub': {
+    en: 'Reduces what the client owes. No money changes hands.',
+    es: 'Reduce lo que el cliente debe. No hay dinero de por medio.',
+    pt: 'Reduz o que o cliente deve. Nenhum dinheiro troca de mãos.',
+  },
+  'job.creditAmount': { en: 'Credit amount', es: 'Monto del crédito', pt: 'Valor do crédito' },
+  'job.creditReason': { en: 'Reason', es: 'Motivo', pt: 'Motivo' },
+  // client-facing: it prints on the invoice, so the hint is English like every other printed string
+  'job.creditReasonHint': { en: 'Returned material — 1 smoke detector', es: 'Returned material — 1 smoke detector', pt: 'Returned material — 1 smoke detector' },
+  'job.creditMax': { en: 'At most {amount} — the balance still open.', es: 'Como máximo {amount} — el saldo abierto.', pt: 'No máximo {amount} — o saldo em aberto.' },
+  'job.creditNoRoom': {
+    en: 'This invoice has no open balance left to credit. Money already received cannot be given back from here.',
+    es: 'Esta factura no tiene saldo abierto para acreditar. El dinero ya recibido no se devuelve desde aquí.',
+    pt: 'Esta fatura não tem saldo em aberto para creditar. Dinheiro já recebido não é devolvido por aqui.',
+  },
+  'job.creditDone': { en: 'Credit applied', es: 'Crédito aplicado', pt: 'Crédito lançado' },
+  'job.couldNotCredit': { en: 'Could not apply the credit', es: 'No se pudo aplicar el crédito', pt: 'Não deu para lançar o crédito' },
   'job.addInvoiceBody': { en: 'The quote grew {amount} past what is already invoiced. Bill it as a second invoice — the one the client already paid stays as it is.', es: 'La cotización creció {amount} por encima de lo ya facturado. Factúralo como una segunda factura — la que el cliente ya pagó queda como está.', pt: 'O orçamento passou {amount} do que já foi faturado. Cobre como uma segunda fatura — a que o cliente já pagou fica como está.' },
   'job.invoicesCount': { en: 'Invoices · {n}', es: 'Facturas · {n}', pt: 'Faturas · {n}' },
   'job.jobTotalRoll': { en: 'Job total {total} · Paid {paid} · Balance {balance}', es: 'Total del trabajo {total} · Pagado {paid} · Saldo {balance}', pt: 'Total do trabalho {total} · Pago {paid} · Saldo {balance}' },
@@ -529,6 +557,8 @@ export function JobScreen({ go, back, params }: NavProp) {
   const [planSheet, setPlanSheet] = useState<null | 'generate' | 'edit' | 'extra'>(null); // 'extra' = G-9 complementary invoice
   const [savingPlan, setSavingPlan] = useState(false);
   const [paySheet, setPaySheet] = useState(false);
+  const [creditSheet, setCreditSheet] = useState(false);
+  const [savingCredit, setSavingCredit] = useState(false);
   const [savingPay, setSavingPay] = useState(false);
   const invoicePlan = inv ? planFromInvoice(inv) : null;
   // D6: the agreement is frozen against invoice #1. Showing the SELECTED invoice's plan under a
@@ -538,7 +568,8 @@ export function JobScreen({ go, back, params }: NavProp) {
   const contractTotals: Totals = contractInv
     ? { subtotal: contractInv.subtotal, taxableSubtotal: 0, tax: contractInv.tax, total: contractInv.total, taxRate: contractInv.taxRate, discount: contractInv.discount }
     : quoteTotals;
-  const balance = inv ? invoiceBalance(inv.total, inv.amountPaid) : 0;
+  // credits come off before the balance: what the client owes is the DUE amount, not the billed one
+  const balance = inv ? invoiceBalance(invoiceDue(inv.total, inv.creditTotal), inv.amountPaid) : 0;
 
   /* ----- document photos (G2): which job photos print on the quote PDF ----- */
   const docPhotos = detail?.docPhotoUrls || [];
@@ -736,6 +767,10 @@ export function JobScreen({ go, back, params }: NavProp) {
   // one keeps the money that already landed, untouched.
   const extraToInvoice = uninvoiced(quoteTotals.total, roll.total);
   const canAddInvoice = !closed && roll.count > 0 && extraToInvoice > 0.005 && !!est?.id && !!projectId;
+  // the mirror (05/09): the quote fell BELOW what was billed — material returned after the client
+  // already paid part. The invoice stopped following the quote then, so the gap becomes a credit.
+  const creditToApply = overbilled(quoteTotals.total, roll.total);
+  const canAddCredit = !closed && !!inv && creditToApply > 0.005 && creditRoom(inv.total, inv.creditTotal, inv.amountPaid) > 0.005;
   const openExtraInvoice = () => {
     if (!canAddInvoice) return;
     setPlanSheet('extra');
@@ -804,6 +839,21 @@ export function JobScreen({ go, back, params }: NavProp) {
   // "Mark paid" became "Record payment": money received goes to the ledger and the status
   // (Unpaid / Partially Paid / Paid) is derived server-side from Σ(payments) vs total.
   // After a successful record the contractor is offered a receipt for it (G3).
+  const confirmCredit = async (amount: number, reason: string) => {
+    if (!ownerId || !inv?.id) return;
+    setSavingCredit(true);
+    try {
+      await addInvoiceCredit(ownerId, inv.id, { amount, reason });
+      await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      setCreditSheet(false);
+      clearStage();
+    } catch (e: any) {
+      Alert.alert(t('job.couldNotCredit'), e?.message || t('job.alert.tryAgain'));
+    } finally {
+      setSavingCredit(false);
+    }
+  };
   const confirmPayment = async (amount: number, method: string | null, note: string, paidAt: string) => {
     if (!ownerId || !inv?.id) return;
     // a future date is allowed on purpose (the post-dated check the owner asked for), but it closes
@@ -1113,7 +1163,7 @@ export function JobScreen({ go, back, params }: NavProp) {
             onSend={est && projectId && !closed ? () => requireCompany(() => up({ sheet: true })) : undefined}
           />
         )}
-        {tab === 'invoice' && <InvoiceTab stage={stage} items={docItems} totals={invoiceTotals} client={realClient} jobSite={jobSite} company={company} invoice={inv} invoices={invoices} onSelectInvoice={setInvSel} roll={roll} extraToInvoice={extraToInvoice} onAddInvoice={canAddInvoice ? openExtraInvoice : undefined} quoteTotal={est?.total} genning={savingPlan} onGen={openGenerateInvoice} onRecordPayment={() => setPaySheet(true)} onEditPlan={() => setPlanSheet('edit')} onReceipt={onReceiptRow} receiptBusyId={receiptBusy} setSheet={(b: boolean) => (b ? requireCompany(() => up({ sheet: true })) : up({ sheet: false }))} />}
+        {tab === 'invoice' && <InvoiceTab stage={stage} items={docItems} totals={invoiceTotals} client={realClient} jobSite={jobSite} company={company} invoice={inv} invoices={invoices} onSelectInvoice={setInvSel} roll={roll} extraToInvoice={extraToInvoice} onAddInvoice={canAddInvoice ? openExtraInvoice : undefined} creditToApply={creditToApply} onAddCredit={canAddCredit ? () => setCreditSheet(true) : undefined} quoteTotal={est?.total} genning={savingPlan} onGen={openGenerateInvoice} onRecordPayment={() => setPaySheet(true)} onEditPlan={() => setPlanSheet('edit')} onReceipt={onReceiptRow} receiptBusyId={receiptBusy} setSheet={(b: boolean) => (b ? requireCompany(() => up({ sheet: true })) : up({ sheet: false }))} />}
         {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={contractTotals} plan={contractPlan} company={company} genning={genningContract} onGenerate={generateContract} onView={detail?.agreement ? viewContract : undefined} />}
         {tab === 'progress' && (
           <ProgressTab
@@ -1154,6 +1204,9 @@ export function JobScreen({ go, back, params }: NavProp) {
             photos: kind === 'quote' && docPhotos.length ? docPhotos : undefined, // curated photos (G2)
             items: kind === 'invoice' ? docItems : items,
             totals: tt,
+            // credits print under the total with their reason, and the revised total follows —
+            // the client already holds a document for the original amount
+            credits: kind === 'invoice' && inv?.credits.length ? inv.credits.map((c) => ({ amount: c.amount, reason: c.reason })) : undefined,
             // invoice PDF/text: the payment plan + what's already paid (English by design)
             payment:
               kind === 'invoice' && inv && invoicePlan
@@ -1194,6 +1247,14 @@ export function JobScreen({ go, back, params }: NavProp) {
         onConfirm={confirmPlan}
       />
       <RecordPaymentSheet open={paySheet} onClose={() => setPaySheet(false)} balance={balance} busy={savingPay} onConfirm={confirmPayment} />
+      <CreditSheet
+        open={creditSheet}
+        onClose={() => setCreditSheet(false)}
+        suggestion={creditToApply}
+        room={inv ? creditRoom(inv.total, inv.creditTotal, inv.amountPaid) : 0}
+        busy={savingCredit}
+        onConfirm={confirmCredit}
+      />
       <JobMenuSheet
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
@@ -1451,7 +1512,7 @@ const cmStamp = (iso: string) => {
 // shows them in the contractor's language
 const phaseLabel = (t: Tr, name: string) => (name === BEFORE_PHASE_NAME ? t('job.phase.beforeName') : name === FINAL_PHASE_NAME ? t('job.phase.finalName') : name);
 
-function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, invoices = [], onSelectInvoice, roll, extraToInvoice = 0, onAddInvoice, quoteTotal, genning, onGen, onRecordPayment, onEditPlan, onReceipt, receiptBusyId, setSheet }: { stage: Stage; items: LineItem[]; totals: Totals; client: JobDetail['client']; jobSite?: string; company?: any; invoice?: JobDetail['invoice']; invoices?: JobDetail['invoices']; onSelectInvoice?: (id: string) => void; roll?: { count: number; total: number; paid: number; balance: number }; extraToInvoice?: number; onAddInvoice?: () => void; quoteTotal?: number; genning: boolean; onGen: () => void; onRecordPayment: () => void; onEditPlan: () => void; onReceipt?: (p: PaymentRecord) => void; receiptBusyId?: string | null; setSheet: (b: boolean) => void }) {
+function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, invoices = [], onSelectInvoice, roll, extraToInvoice = 0, onAddInvoice, creditToApply = 0, onAddCredit, quoteTotal, genning, onGen, onRecordPayment, onEditPlan, onReceipt, receiptBusyId, setSheet }: { stage: Stage; items: LineItem[]; totals: Totals; client: JobDetail['client']; jobSite?: string; company?: any; invoice?: JobDetail['invoice']; invoices?: JobDetail['invoices']; onSelectInvoice?: (id: string) => void; roll?: { count: number; total: number; paid: number; balance: number }; extraToInvoice?: number; onAddInvoice?: () => void; creditToApply?: number; onAddCredit?: () => void; quoteTotal?: number; genning: boolean; onGen: () => void; onRecordPayment: () => void; onEditPlan: () => void; onReceipt?: (p: PaymentRecord) => void; receiptBusyId?: string | null; setSheet: (b: boolean) => void }) {
   const t = useT();
   const has = !!invoice || ['Invoiced', 'Paid'].includes(stage);
   const co = company || {};
@@ -1473,9 +1534,13 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, i
   }
   // plan rows + ledger-derived amounts (a legacy Paid invoice maps amountPaid = total upstream)
   const amountPaid = invoice?.amountPaid ?? 0;
-  const balance = invoice ? invoiceBalance(invoice.total, amountPaid) : totals.total;
+  // credits reduce what is owed without any money moving (returned material), so every number
+  // below reads off the DUE amount, not the billed one
+  const credited = invoice?.creditTotal ?? 0;
+  const dueTotal = invoice ? invoiceDue(invoice.total, credited) : totals.total;
+  const balance = invoice ? invoiceBalance(dueTotal, amountPaid) : totals.total;
   const rows = invoice ? planRows(planFromInvoice(invoice), invoice.total) : [];
-  const payStatus = invoice ? statusFromPayments(invoice.total, amountPaid) : 'Unpaid';
+  const payStatus = invoice ? statusFromPayments(dueTotal, amountPaid) : 'Unpaid';
   const paid = payStatus === 'Paid' || stage === 'Paid';
   const partial = !paid && payStatus === 'Partially Paid';
   const badge: [string, string, string] = paid
@@ -1489,6 +1554,9 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, i
   // When the difference is billable the "bill the difference" card below says it better anyway.
   const invoicedTotal = roll ? roll.total : invoice?.total ?? 0;
   const showsAddCard = !!onAddInvoice && extraToInvoice > 0.005;
+  // capped at the open balance: crediting past it would owe money back, and there is no refund flow
+  const creditSuggestion = Math.min(creditToApply, invoice ? creditRoom(invoice.total, credited, amountPaid) : 0);
+  const showsCreditCard = !!onAddCredit && creditSuggestion > 0.005;
   const outOfSync = quoteTotal != null && !!invoice && Math.abs(quoteTotal - invoicedTotal) > 0.005 && !showsAddCard;
   return (
     <View style={{ marginTop: 16 }}>
@@ -1582,8 +1650,16 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, i
           <TotRow label={t('job.tax', { rate: totals.taxRate, amount: fmt(totals.taxableSubtotal) })} value={fmt(totals.tax)} />
           <Between style={{ paddingTop: 11, marginTop: 7, borderTopWidth: 1.5, borderTopColor: colors.borderStrong }}>
             <Text style={{ fontFamily: fonts.extrabold, fontSize: 13, color: colors.ink }}>{t('job.totalDue')}</Text>
-            <Text style={{ fontFamily: fonts.num, fontSize: 24, color: colors.ink, letterSpacing: -0.5 }}>{fmt(totals.total)}</Text>
+            <Text style={{ fontFamily: fonts.num, fontSize: 24, color: colors.ink, letterSpacing: -0.5 }}>{fmt(credited > 0 ? invoiceDue(totals.total, credited) : totals.total)}</Text>
           </Between>
+          {/* the billed amount stays visible above the credit line: the client got a document for
+              it, and hiding it would look like the invoice was silently rewritten */}
+          {credited > 0 ? (
+            <View style={{ marginTop: 8 }}>
+              <TotRow label={t('job.billedTotal')} value={fmt(totals.total)} />
+              <TotRow label={t('job.creditsApplied')} value={`−${fmt(credited)}`} color={colors.info} />
+            </View>
+          ) : null}
           <View style={{ marginTop: 10 }}>
             {rows.length > 1
               ? rows.map((r, i) => <TotRow key={i} label={`${rowLabel(t, r.label)}${r.dueDate ? ` · ${mdDate(parseDateOnly(r.dueDate))}` : ''}`} value={fmt(r.amount)} />)
@@ -1618,6 +1694,20 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, i
             ))}
           </View>
         ) : null}
+        {/* credits, apart from the money ledger on purpose: nothing was received here */}
+        {invoice?.credits.length ? (
+          <View style={{ paddingHorizontal: 20, paddingVertical: 14, borderTopWidth: 1, borderTopColor: colors.border }}>
+            <DpLab text={t('job.creditsApplied')} />
+            {invoice.credits.map((c) => (
+              <Between key={c.id} style={{ marginTop: 8 }}>
+                <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>
+                  {mdDate(new Date(c.createdAt))}{c.reason ? ` · ${c.reason}` : ''}
+                </Text>
+                <Text style={{ fontFamily: fonts.num, fontSize: 13, color: colors.info }}>−{fmt(c.amount)}</Text>
+              </Between>
+            ))}
+          </View>
+        ) : null}
       </Card>
       {/* G-9: the quote grew past what is already billed — bill the difference apart instead of
           rewriting an invoice the client already paid against */}
@@ -1628,6 +1718,17 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, i
             {t('job.addInvoiceBody', { amount: fmt(extraToInvoice) })}
           </Text>
           <Btn sm icon="receipt" title={t('job.createExtraInvoice')} onPress={onAddInvoice} style={{ marginTop: 12 }} />
+        </Card>
+      ) : null}
+      {/* the mirror: the quote fell BELOW what was already billed (material returned, agreed cut).
+          Same card, other direction — instead of a second invoice, a credit that closes the gap. */}
+      {showsCreditCard ? (
+        <Card pad style={{ marginTop: 16, backgroundColor: colors.infoTint, borderColor: colors.infoTint }}>
+          <Text style={{ fontFamily: fonts.extrabold, fontSize: 14, color: colors.ink }}>{t('job.creditCardTitle')}</Text>
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.ink2, marginTop: 6, lineHeight: 18 }}>
+            {t('job.creditCardBody', { amount: fmt(creditSuggestion) })}
+          </Text>
+          <Btn sm icon="edit" title={t('job.applyCredit')} onPress={onAddCredit} style={{ marginTop: 12 }} />
         </Card>
       ) : null}
       {invoice && balance > 0.005 ? <Btn title={t('job.recordPayment')} icon="wallet" onPress={onRecordPayment} style={{ marginTop: 16 }} /> : null}
@@ -1973,6 +2074,37 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
             setRows((rs) => rs.map((x, xi) => (xi === dateFor ? { ...x, days } : x)));
           }
         }}
+      />
+    </Sheet>
+  );
+}
+
+/* ---------------- Credit sheet: reduces what is owed, no money involved ---------------- */
+function CreditSheet({ open, onClose, suggestion, room, busy, onConfirm }: { open: boolean; onClose: () => void; suggestion: number; room: number; busy: boolean; onConfirm: (amount: number, reason: string) => void }) {
+  const t = useT();
+  const [amount, setAmount] = useState(0);
+  const [reason, setReason] = useState('');
+  useEffect(() => {
+    if (open) { setAmount(round2(Math.min(suggestion, room))); setReason(''); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+  const overRoom = amount > room + 0.005;
+  return (
+    <Sheet open={open} onClose={onClose} title={t('job.creditTitle')} sub={t('job.creditSub')}>
+      <Field label={t('job.creditAmount')}><DecimalInput value={amount} onChangeValue={setAmount} /></Field>
+      <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: overRoom ? colors.error : colors.muted, marginTop: -6, marginBottom: 12 }}>
+        {room > 0.005 ? t('job.creditMax', { amount: fmt(room) }) : t('job.creditNoRoom')}
+      </Text>
+      {/* prints on the invoice — this is the line that tells the client WHY the amount changed */}
+      <Field label={t('job.creditReason')}>
+        <Input value={reason} onChangeText={setReason} placeholder={t('job.creditReasonHint')} maxLength={120} autoCapitalize="sentences" />
+      </Field>
+      <Btn
+        title={busy ? t('job.working') : t('job.applyCredit')}
+        icon={busy ? undefined : 'check'}
+        disabled={busy || !(amount > 0) || overRoom}
+        onPress={() => onConfirm(round2(amount), reason)}
+        style={{ marginTop: 16 }}
       />
     </Sheet>
   );
