@@ -4,6 +4,46 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-05 14:40] — fix: revisão profunda da busca e do teclado — 2 ALTOS reais, um deles o caso de uso do pedido
+O dono mandou "revisa profundamente". Dois revisores adversariais + uma varredura contra a base de
+produção inteira (101 jobs, 144 números, cada um digitado de 4 a 7 jeitos).
+
+**ALTO 1 — cheque de job fechado não achava nada** (`Tabs.tsx`): a busca rodava dentro do filtro, e
+`All` exclui `closed`. Em produção **5 faturas pertencem a projetos Lost** (`INV-2026-0009/0010/
+0018/0019` + legado) — e o cheque costuma chegar DEPOIS de o job sair do pipeline, que é o cenário
+exato do pedido. Agora, com termo digitado, a busca varre todos os jobs; o fechado aparece com seu
+ClosedChip e ordenado atrás dos abertos.
+
+**ALTO 2 — o toque comido não sumiu, mudou de lugar** (`Tabs.tsx`): o ScrollView horizontal dos
+chips ficou no default `'never'`, então com o teclado aberto o primeiro toque em "Lost" só fechava o
+teclado. Recebeu `keyboardShouldPersistTaps="handled"`.
+
+**O que a varredura na base real mostrou (e nenhum teste sintético pegaria):**
+- **Numeração de fatura e cotação é independente**: `40` é a `INV-2026-0040` de um job **e** a
+  `EST-040` de outro (acontece 20+ vezes em prod). Como o pedido nasceu de um cheque, e cheque cita
+  fatura, a fatura vence o empate; `est 40` continua achando a cotação.
+- **Dois formatos legado convivem**: `EST-2026-023` ao lado de `EST-023` (mesma sequência 23), e 6
+  faturas base36 (`INV-MPRE7CE0`). Quem digita o número inteiro ganha de quem só bate a sequência
+  (`MATCH_EXACT`), e o id base36 é achado por conteúdo.
+- `INV-MOLX1QGP` digitado inteiro casava `INV-2026-0001`, porque o "1" do id lia como sequência 1.
+  Documento numerado agora aceita no máximo UMA palavra (seu prefixo).
+
+**Demais achados corrigidos**: `EST-100` trazia EST-1001/1002/1003 (todos reais); `#40` casava
+`INV-2026-0140` por substring enquanto `inv 40` não achava nada; query só de pontuação (`#`) subia
+todo job com documento; `join(' ')` fazia "services 1017" casar atravessando dois campos; número
+comia o endereço no iPhone SE (agora `INV #0040`, via `shortDocLabel`); placeholder ES cortava;
+empate de `created_at` deixava `docLabel` indefinido; carimbo do comentário estourava com fonte de
+acessibilidade (`maxFontSizeMultiplier`); `SearchBar` ganhou botão de limpar (a busca sobrevivia à
+troca de aba); `keyboardDismissMode` virou `interactive` no iOS (a lista pulava sob o dedo).
+
+- **Arquivos**: `src/v2/data.ts`, `src/v2/screens/Tabs.tsx`, `src/v2/screens/Job.tsx`,
+  `src/v2/ui.tsx`, `src/v2/lib/api.ts`, `src/v2/lib/__tests__/data.test.ts`
+- **Limite conhecido e aceito**: `automaticallyAdjustKeyboardInsets` é iOS-only — no Android só o
+  `on-drag` funciona (com `edgeToEdgeEnabled` a janela não redimensiona). Colisões de sequência
+  entre formatos legado são inerentes aos dados: os dois aparecem, o exato primeiro.
+- **jest 180/180** no repo; a varredura com dados reais (não commitada, por conter nomes de
+  clientes) roda 186 e passa.
+
 ### [2026-09-05 13:55] — fix: o número buscado tem que ser o PRIMEIRO card, não o quinto
 - **Como apareceu**: o dono perguntou "tem certeza que resolveu?". Em vez de responder, montei um
   teste com os **12 jobs mais recentes de produção** (SQL direto no banco) e rodei a busca neles.

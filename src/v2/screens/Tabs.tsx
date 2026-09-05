@@ -1,11 +1,11 @@
 // PhotoQuote v2 — tab roots: Home, Jobs, Clients, Profile
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
-import { billingState, ClosedKind, fmt, fmt0, homeMetrics, initials, Job, searchJobs, split, STAGES, trialDaysLeft } from '../data';
+import { billingState, ClosedKind, fmt, fmt0, homeMetrics, initials, Job, searchJobs, shortDocLabel, split, STAGES, trialDaysLeft } from '../data';
 import { Avatar, Between, Btn, Card, Empty, NavBtn, Row, SearchBar, SectionTitle, StageChip, Switch, SwipeRow, useStore } from '../ui';
 import { useAuth } from '../lib/auth';
 import { deleteAccount, deleteProject, fetchClients, fetchCompanyProfile, fetchJobs, fetchOwnBilling, projectDeleteFacts } from '../lib/api';
@@ -77,11 +77,12 @@ registerStrings({
 
   // Jobs list
   'tabs.jobs': { en: 'Jobs', es: 'Trabajos', pt: 'Trabalhos' },
-  // the number is in the placeholder on purpose: nobody guesses a search field takes INV-2026-0040
+  // the number is in the placeholder on purpose: nobody guesses a search field takes INV-2026-0040.
+  // Kept short — the Spanish line was clipping at 320pt with "Buscar" in front.
   'tabs.searchClientOrAddress': {
-    en: 'Search client, address or #',
-    es: 'Buscar cliente, dirección o n.º',
-    pt: 'Buscar cliente, endereço ou nº',
+    en: 'Client, address or #',
+    es: 'Cliente, dirección o n.º',
+    pt: 'Cliente, endereço ou nº',
   },
   'tabs.filterAll': { en: 'All', es: 'Todos', pt: 'Todos' },
   // closed filters — labels match the ClosedChip the cards show (values stay English in the store)
@@ -304,7 +305,7 @@ export function JobCard({ j, i, onPress }: { j: Job; i: number; onPress: () => v
             <Icon name="mapPin" size={13} color={colors.faint} />
             <Text numberOfLines={1} style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, flex: 1 }}>{j.addr}</Text>
             {/* the number the client pays against — also what the search now answers by */}
-            {j.docLabel ? <Text numberOfLines={1} style={{ fontFamily: fonts.num, fontSize: 10.5, color: colors.faint }}>{j.docLabel}</Text> : null}
+            {j.docLabel ? <Text numberOfLines={1} style={{ fontFamily: fonts.num, fontSize: 10.5, color: colors.faint, flexShrink: 0, maxWidth: 96 }}>{shortDocLabel(j.docLabel)}</Text> : null}
           </Row>
           <Between style={{ marginTop: 9 }}>
             {showMoney ? (
@@ -460,14 +461,16 @@ export function JobsScreen({ go }: NavProp) {
   const q = store.jobQ || '';
   // 'All' and the stage filters show OPEN jobs only; Lost/Archived list just their own closed kind
   const filters = ['All', ...STAGES, 'Lost', 'Archived'];
-  let list = jobs.filter((j) =>
-    filter === 'Lost' ? j.closed === 'lost'
-    : filter === 'Archived' ? j.closed === 'archived'
-    : !j.closed && (filter === 'All' || j.stage === filter)
-  );
-  // name/address/title as before, plus the invoice/estimate number — and a number hit sorts to the
-  // top, so the job the check refers to is the FIRST card, not buried under ZIP-code matches
-  if (q) list = searchJobs(list, q);
+  // Searching looks at EVERY job, filter chip included: five production invoices belong to lost
+  // projects, so a check for one of them used to answer "No matches" under the default All chip.
+  // Number hits sort first, then text hits; closed jobs go last and keep their Lost/Archived chip.
+  const list = q
+    ? searchJobs(jobs, q)
+    : jobs.filter((j) =>
+        filter === 'Lost' ? j.closed === 'lost'
+        : filter === 'Archived' ? j.closed === 'archived'
+        : !j.closed && (filter === 'All' || j.stage === filter)
+      );
   return (
     <>
       <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>
@@ -475,8 +478,10 @@ export function JobsScreen({ go }: NavProp) {
       </View>
       <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
         <SearchBar placeholder={t('tabs.searchClientOrAddress')} value={q} onChangeText={(v) => up({ jobQ: v })} />
+        {/* the chips need keyboardShouldPersistTaps too: on the default 'never', with the keyboard
+            up, the first tap on "Lost" only closes it and the filter does not change */}
         {fieldMode ? null : (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }} style={{ marginTop: 12 }}>
+        <ScrollView horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }} style={{ marginTop: 12 }}>
           {filters.map((f) => (
             <Pressable
               key={f}
@@ -508,7 +513,10 @@ export function JobsScreen({ go }: NavProp) {
         // empty spot, which nobody guesses. Dragging the list now dismisses it, iOS insets the list
         // by the keyboard height so the last card is always reachable, and a tap on a card opens
         // the job straight away instead of being eaten as "close the keyboard".
-        keyboardDismissMode="on-drag"
+        // 'interactive' on iOS: the keyboard follows the finger, so the list doesn't jump when the
+        // inset collapses mid-drag. Android has no 'interactive' (nor keyboard insets) — 'on-drag'
+        // is what works there, and it is the only half of this that Android gets.
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
         ListEmptyComponent={
@@ -571,7 +579,7 @@ export function ClientsScreen({ go }: NavProp) {
         <SearchBar placeholder={t('tabs.searchClients')} value={q} onChangeText={(v) => up({ clientQ: v })} />
       </View>
       {/* same keyboard trap as the jobs list: drag closes it, iOS insets for it, taps still land */}
-      <ScrollView contentContainerStyle={[scroll, { paddingTop: 8 }]} showsVerticalScrollIndicator={false} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={[scroll, { paddingTop: 8 }]} showsVerticalScrollIndicator={false} keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         {isLoading ? (
           <View style={{ paddingTop: 60, alignItems: 'center' }}><ActivityIndicator color={colors.primary} /></View>
         ) : list.length === 0 ? (

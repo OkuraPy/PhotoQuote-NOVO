@@ -1086,8 +1086,16 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
     const anyMoneyIn = ivs.some((i: any) => ['paid', 'partially paid'].includes(String(i.status || '').toLowerCase()));
     const aggStatus = ivs.length ? (allPaid ? 'Paid' : 'Unpaid') : undefined;
     // invoices first: the check the contractor receives quotes the INVOICE number, so that is the
-    // one the card shows; a job still without an invoice falls back to its estimate number
-    const invNums = ivs.map((i: any) => i.invoice_number).filter(Boolean) as string[];
+    // one the card shows; a job still without an invoice falls back to its estimate number.
+    // created_at ties (an invoice and its change order minted in the same instant) would leave the
+    // label undefined, so the number itself breaks the tie — highest first.
+    const invNums = [...ivs]
+      .sort((a: any, b: any) =>
+        String(b.created_at || '').localeCompare(String(a.created_at || '')) ||
+        String(b.invoice_number || '').localeCompare(String(a.invoice_number || ''))
+      )
+      .map((i: any) => i.invoice_number)
+      .filter(Boolean) as string[];
     const estNums = estNumsByProj.get(p.id) || [];
     return {
       id: p.id,

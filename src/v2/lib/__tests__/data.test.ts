@@ -1,4 +1,4 @@
-import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobMatchesQuery, jobSiteLine, searchJobs, needsPhaseSync, NO_DISCOUNT, parseMoney, parsePercent, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitChangeOrder, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
+import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobMatchesQuery, jobSiteLine, MATCH_DOC, MATCH_EXACT, MATCH_INVOICE, MATCH_NONE, MATCH_TEXT, rankJobMatch, searchJobs, shortDocLabel, needsPhaseSync, NO_DISCOUNT, parseMoney, parsePercent, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitChangeOrder, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
 import type { ClosedKind, Job, LineItem, SyncPhase } from '../../data';
 import type { Stage } from '../../theme';
 
@@ -624,19 +624,16 @@ describe('parsePercent (percentual não é dinheiro)', () => {
   });
 });
 
-describe('jobMatchesQuery (achar o job pelo número do cheque)', () => {
+/* ---------------- busca da lista de jobs ----------------
+ * Os formatos abaixo são os QUATRO que existem no banco de produção (conferidos por SQL em
+ * 05/09/2026): INV-2026-0040 (38 faturas), EST-099 (87), EST-2026-023 (19 legado) e
+ * INV-MPRE7CE0 (6 legado base36, sem sequência no fim).
+ */
+describe('rankJobMatch / jobMatchesQuery', () => {
   const job = (over: Partial<Job> = {}): Job => ({
-    id: 'j1',
-    client: 'WL General Services',
-    addr: '1017 Hansen St West Palm Beach, fl 33405',
-    title: 'Drywall repair',
-    stage: 'Invoiced' as Stage,
-    value: 14947.01,
-    photos: 1,
-    date: 'Sep 3',
-    docNumbers: ['INV-2026-0040', 'EST-099'],
-    docLabel: 'INV-2026-0040',
-    ...over,
+    id: 'j1', client: 'WL General Services', addr: '1017 Hansen St West Palm Beach, fl 33405',
+    title: 'Drywall repair', stage: 'Invoiced' as Stage, value: 14947.01, photos: 1, date: 'Sep 3',
+    docNumbers: ['INV-2026-0040', 'EST-099'], docLabel: 'INV-2026-0040', ...over,
   });
 
   it('mantém a busca por nome, endereço e título', () => {
@@ -646,29 +643,88 @@ describe('jobMatchesQuery (achar o job pelo número do cheque)', () => {
     expect(jobMatchesQuery(job(), 'cornerstone')).toBe(false);
   });
 
-  it('acha pelo número puro da fatura, com ou sem os zeros', () => {
-    expect(jobMatchesQuery(job(), '40')).toBe(true);
-    expect(jobMatchesQuery(job(), '0040')).toBe(true);
+  it('não casa atravessando dois campos (o join escondia isso)', () => {
+    expect(jobMatchesQuery(job(), 'services 1017')).toBe(false);
+  });
+
+  it('número puro acha a fatura, com ou sem zeros, e vale mais que o texto', () => {
+    expect(rankJobMatch(job(), '40')).toBe(MATCH_INVOICE);
+    expect(rankJobMatch(job(), '0040')).toBe(MATCH_INVOICE);
+    expect(rankJobMatch(job(), '40')).toBeGreaterThan(MATCH_TEXT);
     expect(jobMatchesQuery(job(), '41')).toBe(false);
   });
 
-  it('acha pelo número da cotação', () => {
-    expect(jobMatchesQuery(job(), '99')).toBe(true);
+  it('a fatura ganha da cotação de mesmo número (o cheque é sempre de fatura)', () => {
+    // em produção "40" é INV-2026-0040 num job e EST-040 em OUTRO
+    const daFatura = job({ docNumbers: ['INV-2026-0040'], docLabel: 'INV-2026-0040', addr: 'x', client: 'y', title: 'z' });
+    const daCotacao = job({ id: 'j2', docNumbers: ['EST-040'], docLabel: 'EST-040', addr: 'x', client: 'y', title: 'z' });
+    expect(rankJobMatch(daFatura, '40')).toBeGreaterThan(rankJobMatch(daCotacao, '40'));
+    // mas quem quer a cotação digita o prefixo e a fatura sai de cena
+    expect(jobMatchesQuery(daFatura, 'est 40')).toBe(false);
+    expect(jobMatchesQuery(daCotacao, 'est 40')).toBe(true);
   });
 
-  it('NÃO casa com o ano de dentro do número — senão tudo apareceria', () => {
-    expect(jobMatchesQuery(job(), '2026')).toBe(false);
+  it('número digitado por inteiro ganha de quem só bate a sequência', () => {
+    // EST-011 e EST-2026-011 convivem em produção com a MESMA sequência
+    const novo = job({ docNumbers: ['EST-011'], docLabel: null, addr: 'x', client: 'y', title: 'z' });
+    const legado = job({ id: 'j2', docNumbers: ['EST-2026-011'], docLabel: null, addr: 'x', client: 'y', title: 'z' });
+    expect(rankJobMatch(legado, 'EST-2026-011')).toBe(MATCH_EXACT);
+    // o EST-011 ainda casa (a sequência 11 é a mesma), mas fica ATRÁS do número exato
+    expect(rankJobMatch(novo, 'EST-2026-011')).toBe(MATCH_DOC);
+    expect(searchJobs([novo, legado], 'EST-2026-011').map((j) => j.id)).toEqual(['j2', 'j1']);
   });
 
-  it('aceita o número escrito por extenso, do jeito que vem no cheque', () => {
-    expect(jobMatchesQuery(job(), 'INV-2026-0040')).toBe(true);
-    expect(jobMatchesQuery(job(), 'inv 2026 0040')).toBe(true);
-    expect(jobMatchesQuery(job(), 'est-099')).toBe(true);
-    expect(jobMatchesQuery(job(), 'INV-2026-0041')).toBe(false);
+  it('o "#" do cheque não vira busca por pedaço', () => {
+    expect(rankJobMatch(job(), '#40')).toBe(MATCH_INVOICE);
+    expect(jobMatchesQuery(job({ docNumbers: ['INV-2026-0140'], docLabel: null }), '#40')).toBe(false);
+    expect(jobMatchesQuery(job({ docNumbers: ['INV-2026-0400'], docLabel: null }), '#40')).toBe(false);
   });
 
-  it('o número da rua continua ganhando do número do documento', () => {
-    expect(jobMatchesQuery(job(), '1017')).toBe(true);
+  it('aceita o número escrito de todo jeito que dá pra escrever', () => {
+    for (const q of ['INV-2026-0040', 'inv 2026 0040', 'inv-40', 'INV 40', 'inv2026 0040']) {
+      expect([q, rankJobMatch(job(), q) >= MATCH_INVOICE]).toEqual([q, true]);
+    }
+  });
+
+  it('cotação: est99, EST-099 e 99 acham; est-100 NÃO acha EST-1001', () => {
+    expect(rankJobMatch(job(), 'est99')).toBeGreaterThanOrEqual(MATCH_DOC);
+    expect(rankJobMatch(job(), 'EST-099')).toBe(MATCH_EXACT);
+    expect(rankJobMatch(job(), '99')).toBeGreaterThanOrEqual(MATCH_DOC);
+    const mil = job({ docNumbers: ['EST-1001'], docLabel: 'EST-1001', addr: 'x', client: 'y', title: 'z' });
+    expect(jobMatchesQuery(mil, 'est-100')).toBe(false);
+    expect(jobMatchesQuery(mil, 'est-1001')).toBe(true);
+  });
+
+  it('prefixo errado não casa (fatura não responde por "est")', () => {
+    const inv = job({ docNumbers: ['INV-2026-0040'], docLabel: null, addr: 'x', client: 'y', title: 'z' });
+    expect(jobMatchesQuery(inv, 'est 40')).toBe(false);
+    expect(jobMatchesQuery(inv, 'inv 40')).toBe(true);
+  });
+
+  it('o ano de dentro do número não traz a lista inteira', () => {
+    expect(jobMatchesQuery(job({ addr: 'x', client: 'y', title: 'z' }), '2026')).toBe(false);
+  });
+
+  it('formato legado EST-2026-023 responde pelo número final', () => {
+    const legado = job({ docNumbers: ['EST-2026-023'], docLabel: 'EST-2026-023', addr: 'x', client: 'y', title: 'z' });
+    expect(jobMatchesQuery(legado, '23')).toBe(true);
+    expect(jobMatchesQuery(legado, 'est 23')).toBe(true);
+    expect(jobMatchesQuery(legado, 'est-2026-023')).toBe(true);
+    expect(jobMatchesQuery(legado, '2026')).toBe(false);
+  });
+
+  it('fatura legado base36 acha por pedaço, mas não responde a um dígito solto', () => {
+    const base36 = job({ docNumbers: ['INV-MP1K631K'], docLabel: 'INV-MP1K631K', addr: 'x', client: 'y', title: 'z' });
+    expect(jobMatchesQuery(base36, '631')).toBe(true);
+    expect(jobMatchesQuery(base36, 'INV-MP1K631K')).toBe(true);
+    expect(jobMatchesQuery(base36, 'mp1k')).toBe(true);
+    // "INV-MNUAANR1" terminava em 1: não pode ser achado digitando "1"
+    expect(jobMatchesQuery(job({ docNumbers: ['INV-MNUAANR1'], docLabel: null, addr: 'x', client: 'y', title: 'z' }), '1')).toBe(false);
+  });
+
+  it('busca só de pontuação não traz todo mundo que tem documento', () => {
+    expect(jobMatchesQuery(job({ addr: 'x', client: 'y', title: 'z' }), '#')).toBe(false);
+    expect(jobMatchesQuery(job({ addr: 'x', client: 'y', title: 'z' }), '-')).toBe(false);
   });
 
   it('job sem documento nenhum não quebra a busca por número', () => {
@@ -677,24 +733,17 @@ describe('jobMatchesQuery (achar o job pelo número do cheque)', () => {
     expect(jobMatchesQuery(draft, 'wl')).toBe(true);
   });
 
-  // comportamento ANTIGO preservado de propósito: o texto casa por pedaço, então "40" também traz
-  // quem tem 40 no CEP/endereço. É ruído conhecido — o número do documento agora aparece no card,
-  // que é o que deixa o contratante identificar o certo sem abrir um por um.
-  it('o texto continua casando por pedaço (sem regressão na busca antiga)', () => {
-    expect(jobMatchesQuery(job({ docNumbers: [], docLabel: null }), '40')).toBe(true); // 33405
-  });
-
   it('busca vazia devolve tudo', () => {
     expect(jobMatchesQuery(job(), '')).toBe(true);
     expect(jobMatchesQuery(job(), '   ')).toBe(true);
   });
 });
 
-describe('searchJobs (o documento buscado tem que ser o PRIMEIRO card)', () => {
-  const mk = (id: string, addr: string, nums: string[]): Job => ({
+describe('searchJobs (ordem: número > texto, e job fechado não some)', () => {
+  const mk = (id: string, addr: string, nums: string[], closed: ClosedKind | null = null): Job => ({
     id, client: 'WL General Services', addr, title: 'New quote',
     stage: 'Quoted' as Stage, value: 0, photos: 0, date: '',
-    docNumbers: nums, docLabel: nums[0] || null,
+    docNumbers: nums, docLabel: nums[0] || null, closed,
   });
   // recorte real de produção: os CEPs 33405/33428 casam "34" por pedaço de texto
   const jobs = [
@@ -712,10 +761,33 @@ describe('searchJobs (o documento buscado tem que ser o PRIMEIRO card)', () => {
   it('preserva a ordem original (mais novo primeiro) dentro de cada grupo', () => {
     expect(searchJobs(jobs, 'wl').map((j) => j.id)).toEqual(['a', 'b', 'c']);
   });
+  it('o cheque de um job PERDIDO acha o job (5 faturas assim em produção)', () => {
+    const perdidos = [...jobs, mk('lost', 'Old street', ['INV-2026-0018'], 'lost')];
+    expect(searchJobs(perdidos, '18').map((j) => j.id)).toEqual(['lost']);
+  });
+  it('job fechado fica atrás de um aberto de mesma força', () => {
+    const dois = [mk('fechado', 'x', ['INV-2026-0055'], 'archived'), mk('aberto', 'y', ['INV-2026-0055'])];
+    expect(searchJobs(dois, '55').map((j) => j.id)).toEqual(['aberto', 'fechado']);
+  });
   it('busca vazia devolve a lista intacta', () => {
     expect(searchJobs(jobs, '  ')).toBe(jobs);
   });
   it('sem resultado devolve lista vazia', () => {
     expect(searchJobs(jobs, 'zzz')).toEqual([]);
+  });
+});
+
+describe('shortDocLabel (o que cabe no card)', () => {
+  it('encurta o número atual', () => {
+    expect(shortDocLabel('INV-2026-0040')).toBe('INV #0040');
+    expect(shortDocLabel('EST-099')).toBe('EST #099');
+    expect(shortDocLabel('EST-2026-023')).toBe('EST #023');
+  });
+  it('id legado sem sequência aparece inteiro', () => {
+    expect(shortDocLabel('INV-MP1K631K')).toBe('INV-MP1K631K');
+  });
+  it('vazio é nulo', () => {
+    expect(shortDocLabel(null)).toBeNull();
+    expect(shortDocLabel('')).toBeNull();
   });
 });

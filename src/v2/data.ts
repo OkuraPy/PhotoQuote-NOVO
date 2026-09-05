@@ -584,15 +584,53 @@ export type Job = {
   docLabel?: string | null;
 };
 
-// The contractor gets paid by check quoting the INVOICE NUMBER, so the jobs list has to answer by
-// number as well as by name/address. Typing the bare sequence ("40") is the common case — that is
-// matched against the document's own sequence, never against the whole string, otherwise "2026"
-// (the year inside every invoice number) would match every job.
-const docSeq = (n: string) => {
-  const m = n.match(/(\d+)\s*$/);
-  return m ? m[1].replace(/^0+/, '') || '0' : null;
+// The contractor is paid by check quoting the INVOICE NUMBER, so the jobs list has to answer by
+// number as well as by name/address.
+//
+// Four number shapes live in this database (checked against production, 05/09/2026):
+//   INV-2026-0040   current invoices        EST-099        current estimates
+//   EST-2026-023    legacy estimates (19)   INV-MPRE7CE0   legacy invoices (6, base36, no sequence)
+//
+// A document is parsed into its delimiter-separated segments. The SEQUENCE is the last segment and
+// only when that whole segment is digits — "INV-MNUAANR1" must NOT answer to "1".
+type ParsedDoc = { alnum: string; alpha: string; seq: number | null };
+const parseDoc = (raw: string): ParsedDoc => {
+  const segs = String(raw).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const last = segs[segs.length - 1] || '';
+  return {
+    alnum: segs.join(''),
+    alpha: /^[a-z]+$/.test(segs[0] || '') ? segs[0] : '',
+    seq: /^\d+$/.test(last) ? Number(last) : null,
+  };
 };
-const alnum = (s: string) => s.replace(/[^a-z0-9]/g, '');
+// "inv 2026 0040", "INV-2026-0040", "#40", "est99" all tokenize the same way
+const queryTokens = (q: string) => q.toLowerCase().match(/[a-z]+|\d+/g) || [];
+
+const DOC_NO = 0;
+const DOC_SEQ = 1; // matched the document's sequence
+const DOC_EXACT = 2; // the whole number was typed out
+
+function docMatches(raw: string, tokens: string[]): 0 | 1 | 2 {
+  const d = parseDoc(raw);
+  const qc = tokens.join('');
+  if (qc && qc === d.alnum) return DOC_EXACT;
+  const nums = tokens.filter((tk) => /^\d+$/.test(tk));
+  const words = tokens.filter((tk) => /^[a-z]+$/.test(tk));
+  if (d.seq !== null) {
+    // a numbered document answers to at most ONE word (its prefix). Without this, typing the whole
+    // legacy id "INV-MOLX1QGP" matched INV-2026-0001, because the "1" inside it read as sequence 1.
+    if (words.length > 1) return DOC_NO;
+    // "est…" must not answer for an invoice, and vice versa
+    if (words.length && !(d.alpha && d.alpha.startsWith(words[0]))) return DOC_NO;
+    // the sequence is compared by VALUE, never by substring. Substring would make "EST-100" match
+    // EST-1001/1002/1003 (all real), and "#40" match INV-2026-0140.
+    if (!nums.length) return DOC_SEQ; // typing just "inv" lists the invoices
+    return Number(nums[nums.length - 1]) === d.seq ? DOC_SEQ : DOC_NO;
+  }
+  // legacy id with no numeric tail ("INV-MPRE7CE0"): containment is the only thing that can work.
+  // The 3-char floor keeps a lone "1" from dragging every legacy invoice to the top.
+  return qc.length >= 3 && d.alnum.includes(qc) ? DOC_SEQ : DOC_NO;
+}
 
 // Ranked on purpose. Checked against real production data: searching "34" also matches the ZIPs
 // 33428/33405 inside addresses, so a plain boolean filter buried INV-2026-0034 under four street
@@ -600,36 +638,59 @@ const alnum = (s: string) => s.replace(/[^a-z0-9]/g, '');
 // deliberate hit, so it sorts first; text hits stay in the list, just below.
 export const MATCH_NONE = 0;
 export const MATCH_TEXT = 1;
-export const MATCH_DOC = 2;
+export const MATCH_DOC = 2; // estimate (or any non-invoice document), matched by sequence
+export const MATCH_INVOICE = 3; // invoice matched by sequence
+export const MATCH_EXACT = 4; // the whole number was typed — nothing outranks that
 
-export function rankJobMatch(j: Job, query: string): 0 | 1 | 2 {
+export function rankJobMatch(j: Job, query: string): 0 | 1 | 2 | 3 | 4 {
   const q = query.trim().toLowerCase();
   if (!q) return MATCH_TEXT;
-  const nums = j.docNumbers || [];
-  const byDoc = nums.length
-    ? /^\d+$/.test(q)
-      // a bare number is compared against the document's own sequence, never the whole string:
-      // "2026" lives inside every invoice number and would otherwise match every job
-      ? nums.some((raw) => docSeq(String(raw).toLowerCase()) === (q.replace(/^0+/, '') || '0'))
-      // typed with the prefix ("INV-2026-0040", "inv 2026 0040", "est99"): letters+digits only
-      : nums.some((raw) => alnum(String(raw).toLowerCase()).includes(alnum(q)))
-    : false;
-  if (byDoc) return MATCH_DOC;
-  // name/address/title — unchanged behaviour, and it keeps "1017" finding the street number
-  return [j.client || 'no client', j.addr, j.title].join(' ').toLowerCase().includes(q) ? MATCH_TEXT : MATCH_NONE;
+  const tokens = queryTokens(q);
+  // tokens can be empty for a punctuation-only query ("#"), which must not match every document
+  if (tokens.length) {
+    // Invoice and estimate numbering run independently, so "40" is BOTH INV-2026-0040 and EST-040 —
+    // on different jobs (checked in production: it happens 20+ times). The request that started
+    // this is a check in hand, and a check always quotes the invoice, so the invoice wins the tie.
+    // Typing "est 40" still lands on the estimate: the prefix filters the invoice out entirely.
+    // And whoever types the number in full gets that exact document, whatever kind it is — the
+    // legacy "EST-2026-023" would otherwise lose to the newer EST-023, which shares sequence 23.
+    let best: 0 | 2 | 3 = MATCH_NONE;
+    for (const raw of j.docNumbers || []) {
+      const m = docMatches(raw, tokens);
+      if (!m) continue;
+      if (m === DOC_EXACT) return MATCH_EXACT;
+      if (/^\s*inv/i.test(String(raw))) best = MATCH_INVOICE;
+      else if (!best) best = MATCH_DOC;
+    }
+    if (best) return best;
+  }
+  // name/address/title, each on its own: joining them let "services 1017" match across two fields
+  return [j.client || 'no client', j.addr, j.title].some((f) => f.toLowerCase().includes(q)) ? MATCH_TEXT : MATCH_NONE;
+}
+
+// Card label: "INV #0040" reads at a glance and leaves room for the address, where the full
+// "INV-2026-0040" ate ~80pt on a small iPhone. A legacy id has no sequence, so it shows whole.
+export function shortDocLabel(raw?: string | null): string | null {
+  if (!raw) return null;
+  const segs = String(raw).split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const last = segs[segs.length - 1] || '';
+  const head = segs[0] || '';
+  return /^\d+$/.test(last) && /^[A-Za-z]+$/.test(head) ? `${head.toUpperCase()} #${last}` : String(raw);
 }
 
 export function jobMatchesQuery(j: Job, query: string): boolean {
   return rankJobMatch(j, query) !== MATCH_NONE;
 }
 
-// Filter + rank in one pass, keeping the original (newest-first) order inside each group.
+// Filter + rank in one pass, keeping the original (newest-first) order inside each group. Closed
+// jobs sort last but are NOT dropped: five production invoices belong to lost projects, and a check
+// for one of them (INV-2026-0018) has to find its job — "No matches" was the whole complaint.
 export function searchJobs<T extends Job>(jobs: T[], query: string): T[] {
   if (!query.trim()) return jobs;
   return jobs
     .map((j, i) => ({ j, i, r: rankJobMatch(j, query) }))
     .filter((x) => x.r !== MATCH_NONE)
-    .sort((a, b) => b.r - a.r || a.i - b.i)
+    .sort((a, b) => b.r - a.r || Number(!!a.j.closed) - Number(!!b.j.closed) || a.i - b.i)
     .map((x) => x.j);
 }
 

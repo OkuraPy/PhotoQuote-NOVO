@@ -2349,9 +2349,11 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName, jobPhot
                 <Between style={{ gap: 6, marginBottom: 4 }}>
                   <Row style={{ gap: 6, flexShrink: 1 }}>
                     <Text numberOfLines={1} style={{ fontFamily: fonts.extrabold, fontSize: 12.5, color: c.authorType === 'client' ? colors.ink : colors.primary, flexShrink: 1 }}>{c.authorName}</Text>
-                    <Text style={{ fontFamily: fonts.bold, fontSize: 10, letterSpacing: 0.5, color: colors.faint }}>{c.authorType === 'client' ? t('job.commentClient') : t('job.commentYou')}</Text>
+                    {/* capped: at the largest accessibility text size these two would push the
+                        stamp out of the bubble and shrink the name to an ellipsis */}
+                    <Text maxFontSizeMultiplier={1.3} style={{ fontFamily: fonts.bold, fontSize: 10, letterSpacing: 0.5, color: colors.faint }}>{c.authorType === 'client' ? t('job.commentClient') : t('job.commentYou')}</Text>
                   </Row>
-                  <Text numberOfLines={1} style={{ fontFamily: fonts.num, fontSize: 10.5, color: colors.faint }}>{cmStamp(c.createdAt)}</Text>
+                  <Text numberOfLines={1} maxFontSizeMultiplier={1.3} style={{ fontFamily: fonts.num, fontSize: 10.5, color: colors.faint }}>{cmStamp(c.createdAt)}</Text>
                 </Between>
                 <Text style={{ fontFamily: fonts.semibold, fontSize: 13.5, color: colors.ink, lineHeight: 19 }}>{c.content}</Text>
               </View>

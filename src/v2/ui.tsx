@@ -402,6 +402,13 @@ export function SearchBar({ placeholder, value, onChangeText }: { placeholder: s
         onChangeText={onChangeText}
         style={{ flex: 1, fontSize: 15, fontFamily: fonts.semibold, color: colors.ink }}
       />
+      {/* the query survives leaving the tab (it lives in the store), so a list can come back still
+          filtered by a number typed minutes ago with no keyboard on screen to explain it */}
+      {value ? (
+        <Pressable onPress={() => onChangeText('')} hitSlop={10} accessibilityLabel="Clear search">
+          <Icon name="x" size={16} color={colors.faint} />
+        </Pressable>
+      ) : null}
     </View>
   );
 }
