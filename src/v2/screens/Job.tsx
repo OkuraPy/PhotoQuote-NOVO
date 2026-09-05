@@ -4,7 +4,7 @@ import { ActivityIndicator, Alert, Image, Linking, Pressable, Share, ScrollView,
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
-import { addDaysISO, applyCreditToRows, applyMarkup, fold, balanceAfterNewPayment, balanceAfterPayment, calcTotals, creditRoom, creditTotalUpTo, invoiceDue, overbilled, pickCreditTarget, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, invoiceRollup, NO_DISCOUNT, resolveDiscount, splitChangeOrder, uninvoiced, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
+import { addDaysISO, applyCreditToRows, applyMarkup, fold, jobDiff, balanceAfterNewPayment, balanceAfterPayment, calcTotals, creditRoom, creditTotalUpTo, invoiceDue, overbilled, pickCreditTarget, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, invoiceRollup, NO_DISCOUNT, resolveDiscount, splitChangeOrder, uninvoiced, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { setProjectClient, createClient, fetchClients, deleteInvoiceCredit, addInvoiceCredit, addPhaseComment, addPhasePhotos, addProjectPhotos, agreementLink, assignMember, BEFORE_PHASE_NAME, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deletePhasePhoto, deleteProject, deleteProjectPhoto, deriveStage, ensureBookendPhases, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, FINAL_PHASE_NAME, JobDetail, progressLink, ProgressPhase, PhaseStatus, projectDeleteFacts, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -829,13 +829,13 @@ export function JobScreen({ go, back, params }: NavProp) {
   // G-9: the quote grew past what is already invoiced (typically after the client paid a deposit
   // and the work expanded). The difference becomes a SECOND invoice with its own plan — the first
   // one keeps the money that already landed, untouched.
-  // contra o BRUTO faturado, nunca contra o líquido: senão perdoar um saldo faz o app pedir para
-  // cobrá-lo de novo, num laço (achado da verificação de fluxo, com job real de produção)
-  const extraToInvoice = uninvoiced(quoteTotals.total, roll.billed);
+  // as duas pontas saem da MESMA função pura (jobDiff), que é onde os testes batem
+  const diff = jobDiff(quoteTotals.total, roll);
+  const extraToInvoice = diff.toBill;
   const canAddInvoice = !closed && role !== 'field' && roll.count > 0 && extraToInvoice > 0.005 && !!est?.id && !!projectId;
   // the mirror (05/09): the quote fell BELOW what was billed — material returned after the client
   // already paid part. The invoice stopped following the quote then, so the gap becomes a credit.
-  const creditToApply = overbilled(quoteTotals.total, roll.total);
+  const creditToApply = diff.toTakeOff;
   // ...e ele tem que sair de uma fatura que AINDA tenha saldo. As duas metades do par precisam olhar
   // a mesma coisa: "cobrar" nasce do job inteiro, então "tirar" também — escolhendo a fatura que
   // consegue absorver o valor, senão num job com 2 faturas (a #1 quitada) o cartão oferecia $0.
@@ -1765,7 +1765,7 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, i
   // capped at the open balance: crediting past it would owe money back, and there is no refund flow
   const creditSuggestion = Math.min(creditToApply, creditRoomTarget);
   const showsCreditCard = !!onAddCredit && creditSuggestion > 0.005;
-  const outOfSync = quoteTotal != null && !!invoice && Math.abs(quoteTotal - invoicedTotal) > 0.005 && !showsAddCard && !showsCreditCard;
+  const outOfSync = quoteTotal != null && !!invoice && (extraToInvoice > 0.005 || creditToApply > 0.005) && !showsAddCard && !showsCreditCard;
   return (
     <View style={{ marginTop: 16 }}>
       {/* G-9: with a single invoice this whole block is absent and the tab is exactly what it has

@@ -9,6 +9,7 @@ import {
   creditTotal,
   invoiceDue,
   invoiceRollup,
+  jobDiff,
   overbilled,
   pickCreditTarget,
   uninvoiced,
@@ -461,12 +462,12 @@ describe('pickCreditTarget (de qual fatura sai o abatimento)', () => {
 });
 
 describe('o par cobrar/tirar tem que ZERAR depois de cada ação (bases diferentes de propósito)', () => {
-  // A fiação de verdade, não literais: um verificador mostrou que testar com números soltos deixava
-  // o defeito passar — trocar a base na tela mantinha tudo verde. Aqui o roll-up é calculado, e é
-  // dele que saem os dois lados, exatamente como em Job.tsx.
+  // Chama a MESMA função que a tela chama (jobDiff), não uma cópia da regra: a versão anterior
+  // deste teste reimplementava a fiação, então trocar a base em Job.tsx continuava verde — foi
+  // apontado por um revisor e é o motivo de jobDiff existir.
   const lados = (quote: number, invoices: { total: number; amountPaid: number; creditTotal?: number }[]) => {
-    const roll = invoiceRollup(invoices);
-    return { cobrar: uninvoiced(quote, roll.billed), tirar: overbilled(quote, roll.total) };
+    const d = jobDiff(quote, invoiceRollup(invoices));
+    return { cobrar: d.toBill, tirar: d.toTakeOff };
   };
 
   it('perdoar saldo (sem mexer no orçamento) não vira "o trabalho aumentou"', () => {

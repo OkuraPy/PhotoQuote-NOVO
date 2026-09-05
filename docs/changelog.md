@@ -4,6 +4,37 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-06 00:20] — fix: o revisor da última leva achou erro no meu próprio back-fill
+Revisão das duas levas que ninguém tinha olhado (`8c8a56a` e `891befa`).
+
+**CONFIRMADO pelo revisor, com prova em produção (transação + rollback):** a policy nova de
+`invoice_payments` fecha o furo e **não quebra ninguém** — estranho tem SELECT 0 / UPDATE 0 /
+DELETE 0 e INSERT recusado com 42501; o dono insere, lê (36) e faz o UPDATE do `ensureReceiptNumber`;
+um membro office simulado insere, lê e atualiza. Em produção, 35 pagamentos, **nenhum** com
+`user_id` diferente do dono da fatura, nenhum órfão — ou seja, a regra nova não invalida dado real.
+
+🔴 **ALTO — meu back-fill congelou o número ERRADO em 2 contratos, um deles ASSINADO.** Eu escrevi
+na migration que "`invoices.total` ainda era o número congelado em cada corpo". É falso quando a
+FATURA foi editada depois de o contrato existir: o corpo guarda o valor de então e a fatura segue em
+frente. INV-2026-0020 (Sarah Lazarus, assinado em 27/07) tem **$949.94 no corpo** e eu gravei
+**$1.347,67** — $397,73 de diferença no único documento com assinatura. Corrigido extraindo o valor
+do próprio `contract_html` (migration `20260905200000`): 29 contratos com valor no corpo,
+**0 divergentes**.
+
+**MÉDIO — o banner tinha trocado de bug, não perdido o bug.** Depois de aceitar o abatimento que o
+próprio app sugeriu, "o orçamento mudou depois desta fatura" ficava aceso para sempre — sem cartão
+nenhum para resolver. Agora ele só acende enquanto existe algo a fazer (`extraToInvoice` ou
+`creditToApply` > 0).
+
+**MÉDIO — o comentário do meu teste mentia**: ele dizia testar "a fiação, não literais", mas
+reimplementava a regra, então trocar a base em `Job.tsx` continuava verde. Extraí `jobDiff` (pura)
+para `data.ts`, a tela passou a chamá-la, o teste chama a MESMA função — **e verifiquei: quebrar a
+base dentro dela derruba o teste**.
+
+- **Anotado, sem caso hoje**: se a fatura encolher depois de um contrato ASSINADO com parcelas,
+  `contractCredited` clampa em 0 e as parcelas somam menos que o total exibido (0 ocorrências).
+- jest **219/219**, tsc limpo.
+
 ### [2026-09-05 23:55] — fix: "você pode colocar o cliente depois" virou verdade
 Dois prints + áudio do dono, testando o app ao vivo: *"quando você faz aquele rápido que não coloca
 o nome do cliente… ele fala 'você pode colocar o cliente depois', mas daí você não consegue colocar

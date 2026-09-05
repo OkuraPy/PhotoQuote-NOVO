@@ -431,6 +431,17 @@ export const creditRoom = (total: number, credits: number, paid: number) =>
 export const uninvoiced = (quoteTotal: number, invoicedTotal: number) =>
   round2(Math.max(0, (Number(quoteTotal) || 0) - (Number(invoicedTotal) || 0)));
 
+// Os dois lados do par, calculados no MESMO lugar em que são testados. Antes isto vivia solto na
+// tela e o teste reimplementava a regra — trocar a base em Job.tsx mantinha tudo verde.
+export function jobDiff(quoteTotal: number, roll: { total: number; billed: number }) {
+  return {
+    // cobrar olha o BRUTO: um abatimento não é escopo esperando fatura
+    toBill: uninvoiced(quoteTotal, roll.billed),
+    // tirar olha o LÍQUIDO: depois de tirado, a diferença está fechada
+    toTakeOff: overbilled(quoteTotal, roll.total),
+  };
+}
+
 // Which invoice absorbs an abatement. Both halves of the pair have to look at the same thing: the
 // "bill more" card is computed over the WHOLE job, so "take off" cannot be tied to whatever invoice
 // happens to be selected — on a job with two invoices whose first is settled, that offered $0.
