@@ -1,4 +1,4 @@
-import { applyMarkup, balanceAfterNewPayment, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobMatchesQuery, jobSiteLine, MATCH_DOC, MATCH_EXACT, MATCH_INVOICE, MATCH_NONE, MATCH_TEXT, rankJobMatch, searchJobs, shortDocLabel, needsPhaseSync, NO_DISCOUNT, parseMoney, parsePercent, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitChangeOrder, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
+import { applyMarkup, balanceAfterNewPayment, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobMatchesQuery, jobValueFromInvoices, jobSiteLine, MATCH_DOC, MATCH_EXACT, MATCH_INVOICE, MATCH_NONE, MATCH_TEXT, rankJobMatch, searchJobs, shortDocLabel, needsPhaseSync, NO_DISCOUNT, parseMoney, parsePercent, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitChangeOrder, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
 import type { ClosedKind, Job, LineItem, SyncPhase } from '../../data';
 import type { Stage } from '../../theme';
 
@@ -854,5 +854,37 @@ describe('balanceAfterNewPayment (o recibo imediato e a 2ª via têm que bater)'
 
   it('primeiro pagamento do ledger', () => {
     expect(balanceAfterNewPayment(1000, [], { id: 'a', amount: 250, paidAt: '2026-09-05' })).toBe(750);
+  });
+});
+
+describe('fechamento da empresa × crédito (o material devolvido não é receita)', () => {
+  // pergunta do dono: "no fechamento geral da empresa esse valor entra como recebido?
+  // pq ele removeu isso não pode contabilizar"
+  const JOB = (over: Partial<Job> = {}): Job => ({
+    id: 'j', client: 'Jami Rahn', addr: 'x', title: 'y',
+    stage: 'Paid' as Stage, value: 0, photos: 0, date: '', ...over,
+  });
+
+  it('o valor do job já sai líquido do crédito', () => {
+    // fatura 580.55 com 40 de crédito (detector devolvido)
+    expect(jobValueFromInvoices([{ total: 580.55, credit: 40 }], 0)).toBe(540.55);
+    // sem crédito, nada muda
+    expect(jobValueFromInvoices([{ total: 580.55 }], 0)).toBe(580.55);
+    // sem fatura, vale o orçamento
+    expect(jobValueFromInvoices([], 900)).toBe(900);
+    // duas faturas, cada uma com seu crédito
+    expect(jobValueFromInvoices([{ total: 580.55, credit: 40 }, { total: 200, credit: 0 }], 0)).toBe(740.55);
+  });
+
+  it('"Recebido" na tela inicial NÃO conta o valor creditado', () => {
+    const semCredito = homeMetrics([JOB({ value: jobValueFromInvoices([{ total: 580.55 }], 0) })]);
+    const comCredito = homeMetrics([JOB({ value: jobValueFromInvoices([{ total: 580.55, credit: 40 }], 0) })]);
+    expect(semCredito.collected).toBe(580.55);
+    expect(comCredito.collected).toBe(540.55); // os $40 devolvidos ficam de fora
+  });
+
+  it('idem para "Faturado" quando o job ainda não fechou', () => {
+    const job = JOB({ stage: 'Invoiced' as Stage, value: jobValueFromInvoices([{ total: 580.55, credit: 40 }], 0) });
+    expect(homeMetrics([job]).invoiced).toBe(540.55);
   });
 });

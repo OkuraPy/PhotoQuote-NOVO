@@ -5,7 +5,7 @@ import * as Crypto from 'expo-crypto';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from './supabase';
 import { readErrorBody } from './ai';
-import { Client, ClosedKind, closedFromStatus, CreditRecord, creditRoom, creditTotal, deriveBase, deriveStage, Discount, DOC_PHOTO_CAP, fmt, invoiceDue, Job, LineItem, MemberRole, paidTotal, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, Photo, planFromInvoice, planRows, rescaleSchedule, round2, ScheduleRow, seedPhasePlan, statusFromPayments, syncPhasePlan, toDateOnly } from '../data';
+import { Client, ClosedKind, closedFromStatus, CreditRecord, creditRoom, creditTotal, jobValueFromInvoices, deriveBase, deriveStage, Discount, DOC_PHOTO_CAP, fmt, invoiceDue, Job, LineItem, MemberRole, paidTotal, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, Photo, planFromInvoice, planRows, rescaleSchedule, round2, ScheduleRow, seedPhasePlan, statusFromPayments, syncPhasePlan, toDateOnly } from '../data';
 export { deriveStage }; // re-exported for screens (lives in ../data so it's unit-testable)
 
 /* ---------------- Location: real ZIP (Zippopotam, keyless) + GPS (expo-location) ---------------- */
@@ -1169,8 +1169,12 @@ export async function fetchJobs(userId: string): Promise<RealJob[]> {
   return (proj.data || []).map((p: any) => {
     const e = estByProj.get(p.id);
     const ivs = invsByProj.get(p.id) || [];
-    const invoicedTotal = round2(ivs.reduce((sum: number, i: any) => sum + invoiceDue(Number(i.total) || 0, creditByInv.get(i.id) || 0), 0));
-    const value = ivs.length ? invoicedTotal : Number(e?.total ?? e?.grand_total ?? 0) || 0;
+    // net of credits, via the pure helper the Home totals are tested against
+    const value = jobValueFromInvoices(
+      ivs.map((i: any) => ({ total: Number(i.total) || 0, credit: creditByInv.get(i.id) || 0 })),
+      Number(e?.total ?? e?.grand_total ?? 0) || 0
+    );
+    const invoicedTotal = value;
     // stage/partial read the WHOLE set: all invoices paid = Paid, any money in with a balance
     // left = partial. `paid` here is the invoice STATUS (the ledger lives in fetchJobDetail).
     const allPaid = ivs.length > 0 && ivs.every((i: any) => String(i.status || '').toLowerCase() === 'paid');

@@ -397,6 +397,17 @@ export function creditTotalUpTo(credits: { amount: number; createdAt: string }[]
   );
 }
 
+// What a job is WORTH for the company's numbers: every invoice net of its credits, falling back to
+// the quote while nothing has been billed. Pure and tested because it feeds the Home totals —
+// returned material must never show up as money the company made.
+export function jobValueFromInvoices(
+  invoices: { total: number; credit?: number }[],
+  quoteTotal: number
+): number {
+  if (!invoices.length) return round2(Number(quoteTotal) || 0);
+  return round2(invoices.reduce((s, i) => s + invoiceDue(i.total, i.credit || 0), 0));
+}
+
 // What the client actually owes on an invoice once credits are applied.
 export const invoiceDue = (total: number, credits: number) =>
   round2(Math.max(0, (Number(total) || 0) - (Number(credits) || 0)));
