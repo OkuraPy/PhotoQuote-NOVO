@@ -4,6 +4,19 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-05 19:58] — fix: o crédito não pode virar receita no fechamento (de6f66b)
+Pergunta do dono: *"no fechamento geral da empresa esse valor entra como recebido? pq ele removeu
+isso não pode contabilizar."*
+- **Resposta: não entra** — o desconto já saía do valor do job desde `27e9071`, mas a conta vivia
+  dentro do `fetchJobs`, sem teste algum. Extraí `jobValueFromInvoices` (pura) e travei com 3 testes
+  que verificam exatamente a pergunta: `Recebido` e `Faturado` da Home ficam em **$540.55** para a
+  fatura de $580.55 com $40 creditados.
+- **Arquivos**: `src/v2/data.ts`, `src/v2/lib/api.ts`, `src/v2/lib/__tests__/data.test.ts` (**211**)
+- **Limite ANTIGO que eu levantei para ele por causa dessa pergunta** (não é do crédito): o
+  "Recebido" da Home é a soma dos jobs **quitados**, não do dinheiro que entrou — um job de $10.000
+  com $8.000 pagos aparece como zero em Recebido, e não há corte por mês/ano. Para fechar caixa por
+  período seria preciso uma tela nova somando `invoice_payments` por data. Ofertado, aguardando ele.
+
 ### [2026-09-05 19:45] — feat: as 3 pontas soltas do crédito, resolvidas pelo caminho mais simples
 "Qual é o melhor mais simples e intuitivo pq o povo é burro" (dono). Então em vez de devolver as
 três perguntas, decidi cada uma pelo caminho de menor explicação:
