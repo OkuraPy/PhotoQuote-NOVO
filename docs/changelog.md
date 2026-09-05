@@ -4,6 +4,19 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-05 12:20] — feat: comentário agora mostra data e hora (pedido do dono, áudio 04/09)
+- **O que mudou**: no painel de Comentários de cada fase (app), cada mensagem passou a exibir
+  quando foi escrita — "Sep 4 · 4:03 PM" —, alinhada à direita do nome do autor. O ano só aparece
+  quando não é o ano corrente, pra linha não estourar. Formato segue o idioma do contratante
+  (`localeTag()`), como o resto das datas da tela.
+- **Arquivos**: `src/v2/screens/Job.tsx` (helper `cmStamp` + cabeçalho do comentário virou `Between`)
+- **Decisão técnica**: o dado **já existia** — `PhaseComment.createdAt` vem do banco desde sempre
+  (`api.ts:1406` já lê `created_at` e ordena por ele); era só um campo que a UI não desenhava.
+  Nenhuma migration, nenhuma mudança de contrato. O nome do autor ganhou `numberOfLines={1}` +
+  `flexShrink` pra que um nome longo encolha em vez de empurrar o horário pra fora da tela.
+- **Ainda em aberto**: o portal do cliente mostra tempo relativo ("2 days ago", `CommentList.tsx:95`)
+  em vez de data/hora absoluta — aguardando o dono dizer se quer o mesmo lá.
+
 ### [2026-08-26 01:50] — fix: o revisor derrubou meu diagnóstico — o "não pegou" era OUTRA coisa
 - **CORREÇÃO DE ROTA, e importante**: eu tinha diagnosticado o "digitei o total e não salvou" como
   uma corrida entre o blur e o press do botão Salvar. O revisor provou que **isso não acontece no

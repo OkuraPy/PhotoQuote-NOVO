@@ -1400,6 +1400,15 @@ const methodLabel = (t: (k: string) => string, m: string) => (METHOD_KEY[m] ? t(
 // app-side date chip ("Aug 5" / "5 de ago"): follows the CONTRACTOR's language. The documents
 // keep their own English formatting in send.ts / createAgreement — those are the client's.
 const mdDate = (d: Date) => d.toLocaleDateString(localeTag(), { month: 'short', day: 'numeric' });
+// comment stamp ("Sep 4 · 12:03 PM"): the year only shows up when it isn't the current one, so the
+// common case stays short next to the author's name
+const cmStamp = (iso: string) => {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  const date = d.toLocaleDateString(localeTag(), sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+  return `${date} · ${d.toLocaleTimeString(localeTag(), { hour: 'numeric', minute: '2-digit' })}`;
+};
 // phase names are stored in English (the client portal reads them straight from the DB); the app
 // shows them in the contractor's language
 const phaseLabel = (t: Tr, name: string) => (name === BEFORE_PHASE_NAME ? t('job.phase.beforeName') : name === FINAL_PHASE_NAME ? t('job.phase.finalName') : name);
@@ -2337,10 +2346,13 @@ function ProgressTab({ projectId, estimateId, userId, items, authorName, jobPhot
           {cmPhase && cmPhase.comments.length ? (
             cmPhase.comments.map((c) => (
               <View key={c.id} style={{ backgroundColor: c.authorType === 'client' ? colors.bg : colors.primaryTint, borderRadius: 12, padding: 12 }}>
-                <Row style={{ gap: 6, marginBottom: 4 }}>
-                  <Text style={{ fontFamily: fonts.extrabold, fontSize: 12.5, color: c.authorType === 'client' ? colors.ink : colors.primary }}>{c.authorName}</Text>
-                  <Text style={{ fontFamily: fonts.bold, fontSize: 10, letterSpacing: 0.5, color: colors.faint }}>{c.authorType === 'client' ? t('job.commentClient') : t('job.commentYou')}</Text>
-                </Row>
+                <Between style={{ gap: 6, marginBottom: 4 }}>
+                  <Row style={{ gap: 6, flexShrink: 1 }}>
+                    <Text numberOfLines={1} style={{ fontFamily: fonts.extrabold, fontSize: 12.5, color: c.authorType === 'client' ? colors.ink : colors.primary, flexShrink: 1 }}>{c.authorName}</Text>
+                    <Text style={{ fontFamily: fonts.bold, fontSize: 10, letterSpacing: 0.5, color: colors.faint }}>{c.authorType === 'client' ? t('job.commentClient') : t('job.commentYou')}</Text>
+                  </Row>
+                  <Text numberOfLines={1} style={{ fontFamily: fonts.num, fontSize: 10.5, color: colors.faint }}>{cmStamp(c.createdAt)}</Text>
+                </Between>
                 <Text style={{ fontFamily: fonts.semibold, fontSize: 13.5, color: colors.ink, lineHeight: 19 }}>{c.content}</Text>
               </View>
             ))
