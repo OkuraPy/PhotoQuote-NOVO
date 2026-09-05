@@ -88,6 +88,9 @@ export type V2Store = {
   stageOverride: Record<string, Stage>;
   jobFilter: string;
   jobQ: string;
+  // "já perguntei sobre esta diferença": mora no store porque sair do job desmonta a tela — num ref
+  // o aviso voltava a cada abertura do job, virando ruído em vez de ajuda
+  diffAsked: string;
   clientQ: string;
 };
 type Ctx = { store: V2Store; up: (patch: Partial<V2Store> | ((s: V2Store) => Partial<V2Store>)) => void };

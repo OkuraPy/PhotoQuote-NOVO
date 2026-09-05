@@ -1055,7 +1055,8 @@ export async function createAgreement(userId: string, projectId: string, invoice
   // credits already applied come off the amount the client is asked to sign for: the contract is
   // generated fresh after a credit (addInvoiceCredit voids the unsigned ones), and signing for the
   // pre-credit amount would be a legal document for money that is no longer owed
-  const total = invoiceDue(Number(inv.total) || 0, await creditsFor(invoiceId));
+  const credits = await creditsFor(invoiceId);
+  const total = invoiceDue(Number(inv.total) || 0, credits);
   // the invoice's stored plan → English document rows (v2 template's {{payment_schedule_table}});
   // invoice & contract always match because both read the same snapshot
   // as parcelas do contrato seguem o mesmo abatimento do total (applyCreditToRows abaixo): sem isso
@@ -1072,7 +1073,7 @@ export async function createAgreement(userId: string, projectId: string, invoice
     Number(inv.total) || 0
   );
   // o abatimento sai das últimas parcelas, exatamente como a tela mostra
-  const rows = applyCreditToRows(rowsGross, round2((Number(inv.total) || 0) - total));
+  const rows = applyCreditToRows(rowsGross, credits);
   // legacy-template compat ({{deposit_percent}}/{{deposit_amount}}/{{balance_amount}}): the first
   // row plays the "deposit" part when the plan has an up-front payment; a full plan yields 0/total.
   const firstAmt = rows.length > 1 ? rows[0].amount : 0;
@@ -1098,7 +1099,9 @@ export async function createAgreement(userId: string, projectId: string, invoice
     // G-1: without this the contract would print "Subtotal X | Tax Y" next to a Total that is
     // neither — a signed legal document whose own numbers don't add up. fillTemplate blanks the
     // placeholder on any template that predates it, so old templates keep working untouched.
-    discount_line: Number(inv.discount_amount) > 0 ? ` &nbsp;|&nbsp; Discount: -$${money2(Number(inv.discount_amount))}` : '',
+    discount_line: `${Number(inv.discount_amount) > 0 ? ` &nbsp;|&nbsp; Discount: -$${money2(Number(inv.discount_amount))}` : ''}${
+      credits > 0 ? ` &nbsp;|&nbsp; Credit: -$${money2(credits)}` : ''
+    }`,
     tax_rate: String(Number(inv.tax_rate) || 0),
     tax_amount: money2(Number(inv.tax_amount) || 0),
     payment_schedule_table: paymentScheduleTableHtml(rows),
@@ -1116,7 +1119,9 @@ export async function createAgreement(userId: string, projectId: string, invoice
   const token = `agr_${Crypto.randomUUID().replace(/-/g, '')}`;
   const { data: agr, error } = await supabase
     .from('agreements')
-    .insert({ user_id: userId, invoice_id: invoiceId, project_id: projectId, client_id: proj.client_id, state, contract_html: html, token, status: 'sent', sent_at: new Date().toISOString(), sent_method: 'link' })
+    // total_amount é o RETRATO: o cabeçalho da página de assinatura lê daqui, então abater (ou
+    // desfazer um abatimento) depois não muda o número exibido acima de um contrato já assinado
+    .insert({ user_id: userId, invoice_id: invoiceId, project_id: projectId, client_id: proj.client_id, state, contract_html: html, token, status: 'sent', sent_at: new Date().toISOString(), sent_method: 'link', total_amount: total })
     .select('id, token')
     .single();
   if (error) throw error;
@@ -1429,7 +1434,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
       // EARLIER than existing ones re-orders the ledger, so a receipt re-issued afterwards prints
       // the balance as of that date — which is why the immediate receipt uses the same
       // chronological math (balanceAfterNewPayment) instead of "total − everything paid".
-      supabase.from('invoice_payments').select('invoice_id, id, amount, paid_at, method, schedule_id, note').in('invoice_id', invIds).order('paid_at', { ascending: true }).order('created_at', { ascending: true }),
+      supabase.from('invoice_payments').select('invoice_id, id, amount, paid_at, method, schedule_id, note, receipt_number, balance_after').in('invoice_id', invIds).order('paid_at', { ascending: true }).order('created_at', { ascending: true }),
       // credits (returned material / agreed reduction after billing) — no money moved, so they
       // live apart from the ledger and only reduce what is owed
       supabase.from('invoice_credits').select('invoice_id, id, amount, reason, created_at').in('invoice_id', invIds).order('created_at', { ascending: true }),
@@ -1441,7 +1446,7 @@ export async function fetchJobDetail(projectId: string): Promise<JobDetail> {
       (schedByInv[r.invoice_id] ||= []).push({ id: r.id, label: r.label || '', amount: Number(r.amount) || 0, dueDate: r.due_date ?? null, phaseId: r.phase_id ?? null, sort: r.sort ?? 0 });
     });
     (payRes.data || []).forEach((r: any) => {
-      (paysByInv[r.invoice_id] ||= []).push({ id: r.id, amount: Number(r.amount) || 0, paidAt: r.paid_at, method: r.method ?? null, scheduleId: r.schedule_id ?? null, note: r.note ?? null });
+      (paysByInv[r.invoice_id] ||= []).push({ id: r.id, amount: Number(r.amount) || 0, paidAt: r.paid_at, method: r.method ?? null, scheduleId: r.schedule_id ?? null, note: r.note ?? null, receiptNumber: r.receipt_number ?? null, balanceAfter: r.balance_after != null ? Number(r.balance_after) : null });
     });
     (credRes.data || []).forEach((r: any) => {
       (credByInv[r.invoice_id] ||= []).push({ id: r.id, amount: Number(r.amount) || 0, reason: r.reason ?? null, createdAt: r.created_at });

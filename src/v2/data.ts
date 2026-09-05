@@ -225,7 +225,9 @@ export type ScheduleRow = { id?: string; label: string; amount: number; dueDate:
 // One received payment (invoice_payments ledger row).
 // `note` (G-6) is the client-facing reference the owner types when recording the payment —
 // "Check #1234 · Chase". It prints on the receipt, so it is never a private remark.
-export type PaymentRecord = { id: string; amount: number; paidAt: string; method: string | null; scheduleId: string | null; note: string | null };
+// `receiptNumber`/`balanceAfter` dizem se este pagamento JÁ virou papel na mão do cliente, e com
+// que saldo — o que decide se o número pode ser recalculado ou tem que ser respeitado.
+export type PaymentRecord = { id: string; amount: number; paidAt: string; method: string | null; scheduleId: string | null; note: string | null; receiptNumber?: string | null; balanceAfter?: number | null };
 // A reduction of what is owed with no money attached (returned material, agreed cut after billing).
 export type CreditRecord = { id: string; amount: number; reason: string | null; createdAt: string };
 // What the contractor picked in the payment-plan sheet (and what a stored invoice re-hydrates into).
@@ -371,6 +373,11 @@ export function invoiceRollup(list: InvoiceLike[]) {
   return {
     count: list.length,
     total,
+    // What was BILLED, before any abatement. The quote must be compared against this, never against
+    // `total`: forgiving a $290.27 balance drops the net below the quote, and the app then announced
+    // "the job grew $290.27 — bill more", asking him to re-bill what he had just written off. The
+    // abatement changes what is OWED; it does not un-bill the document the client received.
+    billed: round2(list.reduce((s, i) => s + (Number(i.total) || 0), 0)),
     paid,
     balance: invoiceBalance(total, paid),
     // no invoice at all is NOT "Unpaid" money — the caller distinguishes with count
@@ -431,8 +438,13 @@ export function pickCreditTarget<T extends { total: number; creditTotal: number;
   return invoices.find((i) => creditRoom(i.total, i.creditTotal, i.amountPaid) > 0.005);
 }
 
-// The mirror of `uninvoiced`: how far the quote fell BELOW what was already billed. That is the
-// credit the job is asking for — the same card, the other direction.
+// The mirror of `uninvoiced`: how far the quote fell BELOW what is still billed. NOTE the pair uses
+// DIFFERENT bases on purpose, and it took a production counter-example to see why:
+//   · `uninvoiced` compares against the GROSS billed — an abatement is not scope waiting to be
+//     billed, so forgiving a balance must not read as "the job grew, bill it again";
+//   · `overbilled` compares against the NET — once the abatement is recorded the gap is closed, and
+//     comparing against the gross would keep asking to take the same money off forever.
+// With these two bases the pair goes quiet after either action, in both directions.
 export const overbilled = (quoteTotal: number, invoicedTotal: number) =>
   round2(Math.max(0, (Number(invoicedTotal) || 0) - (Number(quoteTotal) || 0)));
 

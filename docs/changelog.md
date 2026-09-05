@@ -4,6 +4,56 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-05 22:30] — fix: os 3 verificadores — 1 bloqueante que eu criei e 4 altos de dinheiro
+Fase de verificação do time (mecânico / dinheiro / fluxo, em paralelo). Todos os três acharam coisa.
+
+🔴 **BLOQUEANTE (achado pelos dois verificadores, com job real de produção) — o app pedia para
+cobrar de volta o que acabara de ser perdoado.** Eu fiz `invoiceRollup.total` ficar líquido de
+abatimentos; e `uninvoiced(orçamento, roll.total)` passou a enxergar a diferença como "escopo por
+faturar". Perdoar $290.27 de um cliente que sumiu fazia o app anunciar "O trabalho aumentou
+$290.27 · Cobrar mais $290.27", e o cartão ficava lá para sempre.
+**A correção é o par usar bases DIFERENTES, de propósito**: `uninvoiced` compara com o BRUTO
+faturado (abatimento não é escopo a faturar), `overbilled` compara com o LÍQUIDO (senão pediria
+para tirar de novo o que já foi tirado). Com isso o par se cala depois de qualquer das duas ações,
+nos dois sentidos — travado com 3 testes.
+
+🔴 **ALTO — recibo emitido depois do abatimento congelava o saldo errado, para sempre.** A regra
+"crédito só até a data do pagamento" (boa para não reescrever papel entregue) estava sendo usada
+também na PRIMEIRA emissão: um pagamento de 20/08 recebendo recibo em 06/09 imprimia
+"Remaining balance $290.28" quando o real era $250.28 — e `balance_after` gravava esse número.
+Agora: recibo já numerado sem retrato = regra por data; recibo novo = estado de agora.
+
+🔴 **ALTO — RLS: qualquer autenticado podia zerar a fatura de qualquer um.** A policy só provava que
+a LINHA era do usuário, nunca que a FATURA era. Provado em produção (com rollback): um estranho
+inseriu $1.167,64 de abatimento numa fatura alheia — e o dono nem veria a linha, porque o SELECT
+também filtra por `user_id`. Migration `20260905170000`; **re-testado depois: barrado**.
+(O mesmo padrão existe em `invoice_payments` — anotado para uma rodada própria.)
+
+🔴 **ALTO — contrato assinável com Subtotal + Tax ≠ Total.** Os placeholders vinham brutos e o total
+líquido. Reusei a `discount_line`, criada para este mesmo problema no desconto (G-1): agora imprime
+`| Credit: -$40.00` e as três linhas fecham.
+
+🔴 **ALTO — abater depois de assinado mudava o valor no cabeçalho da página de assinatura**, porque
+a RPC calculava ao vivo. `agreements.total_amount` passa a congelar o total na geração
+(migration `20260905180000`); contrato antigo (NULL) cai na conta de antes.
+
+**Do verificador mecânico**: o comentário do aviso prometia "pergunto uma vez" enquanto o `useRef`
+morria ao sair do job (voltava a cada abertura) — a chave foi para o store; o aviso oferecia "tirar"
+numa fatura sem saldo (beco que o próprio app abria); e o aviso anunciava um valor sem teto enquanto
+a folha abria com o valor limitado ($200 × $40).
+
+**Do verificador de fluxo**: a fatura complementar nascia e nunca saía (só o abatimento oferecia
+enviar) — agora os dois confirmam e oferecem mandar; "Faturado" virou "Cobrado do cliente";
+"Tirado da fatura" (lista) virou "Descontos"; os campos que o cliente lê agora dizem isso no rótulo
+("Motivo (o cliente vê)"); e o cartão parou de prometer que "o cliente vê o motivo" num campo
+opcional.
+
+- **Ainda em aberto, anotado**: o trigger do teto não cobre `UPDATE invoices.total` nem DELETE de
+  pagamento; `invoiceRollup` deixa o sobrepagamento de uma fatura cobrir o saldo de outra
+  (pré-existente); o portal com 2 faturas mostra só o contrato mais novo (pré-existente); a folha do
+  plano não rola em tela pequena.
+- jest **218/218**, tsc limpo. `coverage/` (gerado por um verificador) foi para o .gitignore.
+
 ### [2026-09-05 21:00] — feat: os dois lados da fatura, espelhados (time completo: 3 mapas + 2 críticas)
 O dono pediu para "estruturar muito bem tanto o remover quanto o adicionar… tem que ficar muito bem
 intuitivo", e autorizou um time. Rodaram 3 mapeadores (fluxo de cobrar, fluxo de abater, jornada

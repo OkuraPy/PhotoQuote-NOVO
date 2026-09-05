@@ -80,15 +80,15 @@ registerStrings({
   // the mirror of the complementary invoice: the scope shrank after billing (material returned)
   'job.creditCardTitle': { en: 'The job shrank {amount}', es: 'El trabajo bajó {amount}', pt: 'O trabalho diminuiu {amount}' },
   'job.creditCardBody': {
-    en: 'The balance drops and the client sees why. The invoice keeps what was billed.',
-    es: 'El saldo baja y el cliente ve por qué. La factura conserva lo que se facturó.',
-    pt: 'O saldo cai e o cliente vê o motivo. A fatura mantém o que foi cobrado.',
+    en: 'The balance drops. The invoice keeps what was billed, with the discount shown.',
+    es: 'El saldo baja. La factura conserva lo facturado, con el descuento a la vista.',
+    pt: 'O saldo cai. A fatura mantém o que foi cobrado, com o desconto à vista.',
   },
   'job.applyCredit': { en: 'Take {amount} off the invoice', es: 'Quitar {amount} de la factura', pt: 'Tirar {amount} da fatura' },
   // sem valor: o link permanente do rodapé, que existe mesmo sem diferença no orçamento
   'job.applyCreditPlain': { en: 'Take money off the invoice', es: 'Quitar de la factura', pt: 'Tirar da fatura' },
-  'job.creditsApplied': { en: 'Taken off', es: 'Descontado', pt: 'Tirado da fatura' },
-  'job.billedTotal': { en: 'Billed', es: 'Facturado', pt: 'Faturado' },
+  'job.creditsApplied': { en: 'Discounts', es: 'Descuentos', pt: 'Descontos' },
+  'job.billedTotal': { en: 'Billed to client', es: 'Cobrado al cliente', pt: 'Cobrado do cliente' },
   'job.creditTitle': { en: 'Take money off the invoice', es: 'Quitar de la factura', pt: 'Tirar da fatura' },
   'job.creditSub': {
     en: 'Reduces what the client owes. No money changes hands.',
@@ -96,7 +96,7 @@ registerStrings({
     pt: 'Reduz o que o cliente deve. Nenhum dinheiro troca de mãos.',
   },
   'job.creditAmount': { en: 'How much to take off', es: 'Cuánto quitar', pt: 'Quanto tirar' },
-  'job.creditReason': { en: 'Reason', es: 'Motivo', pt: 'Motivo' },
+  'job.creditReason': { en: 'Reason (client sees this)', es: 'Motivo (lo ve el cliente)', pt: 'Motivo (o cliente vê)' },
   // client-facing: it prints on the invoice, so the hint is English like every other printed string
   'job.creditReasonHint': { en: 'Returned material — 1 smoke detector', es: 'Returned material — 1 smoke detector', pt: 'Returned material — 1 smoke detector' },
   'job.creditMax': { en: 'At most {amount} — the balance still open.', es: 'Como máximo {amount} — el saldo abierto.', pt: 'No máximo {amount} — o saldo em aberto.' },
@@ -107,8 +107,14 @@ registerStrings({
     pt: 'Não há o que creditar — esta fatura está paga. Se você tem que devolver dinheiro ao cliente, a devolução acontece fora do app.',
   },
   // client-facing: o texto vai IMPRESSO na fatura, então o exemplo é em inglês como o resto do doc
-  'job.whatChanged': { en: 'What is the extra?', es: '¿Qué es el extra?', pt: 'O que é o extra?' },
+  'job.whatChanged': { en: 'What is the extra? (client sees this)', es: '¿Qué es el extra? (lo ve el cliente)', pt: 'O que é o extra? (o cliente vê)' },
   'job.whatChangedHint': { en: 'Extra drywall patch and paint', es: 'Extra drywall patch and paint', pt: 'Extra drywall patch and paint' },
+  'job.extraInvoiceDone': { en: 'Invoice created', es: 'Factura creada', pt: 'Fatura criada' },
+  'job.extraInvoiceDoneBody': {
+    en: 'A new invoice for {amount} is ready. Send it to the client?',
+    es: 'La factura nueva de {amount} está lista. ¿Enviarla al cliente?',
+    pt: 'A fatura nova de {amount} está pronta. Mandar pro cliente?',
+  },
   'job.creditDone': { en: 'Taken off the invoice', es: 'Quitado de la factura', pt: 'Tirado da fatura' },
   'job.creditDoneBody': {
     en: 'The balance is now {balance}. Send the client the updated invoice?',
@@ -807,7 +813,9 @@ export function JobScreen({ go, back, params }: NavProp) {
   // G-9: the quote grew past what is already invoiced (typically after the client paid a deposit
   // and the work expanded). The difference becomes a SECOND invoice with its own plan — the first
   // one keeps the money that already landed, untouched.
-  const extraToInvoice = uninvoiced(quoteTotals.total, roll.total);
+  // contra o BRUTO faturado, nunca contra o líquido: senão perdoar um saldo faz o app pedir para
+  // cobrá-lo de novo, num laço (achado da verificação de fluxo, com job real de produção)
+  const extraToInvoice = uninvoiced(quoteTotals.total, roll.billed);
   const canAddInvoice = !closed && role !== 'field' && roll.count > 0 && extraToInvoice > 0.005 && !!est?.id && !!projectId;
   // the mirror (05/09): the quote fell BELOW what was billed — material returned after the client
   // already paid part. The invoice stopped following the quote then, so the gap becomes a credit.
@@ -825,16 +833,19 @@ export function JobScreen({ go, back, params }: NavProp) {
   // pagamento". O recurso inteiro dependia de o contratante trocar de aba por conta própria, sem
   // motivo nenhum para isso. Agora o app fala primeiro. Uma vez por job e por valor: se ele disser
   // "agora não", só volta a perguntar se a diferença mudar.
-  const diffAsked = useRef('');
   useEffect(() => {
     if (closed || !projectId || !roll.count || role === 'field') return;
     const grew = extraToInvoice > 0.005 && canAddInvoice;
-    const shrank = creditToApply > 0.005 && canAddCredit;
+    // só oferece TIRAR se alguma fatura consegue absorver: numa fatura já quitada o aviso levava a
+    // uma folha que respondia "não há o que tirar" — beco sem saída oferecido pelo próprio app
+    const room = creditTarget ? creditRoom(creditTarget.total, creditTarget.creditTotal, creditTarget.amountPaid) : 0;
+    const shrank = creditToApply > 0.005 && canAddCredit && room > 0.005;
     if (!grew && !shrank) return;
-    const amount = grew ? extraToInvoice : creditToApply;
+    // o valor anunciado é o mesmo que a folha vai abrir — o aviso dizia "$200" e a folha abria "$40"
+    const amount = grew ? extraToInvoice : Math.min(creditToApply, room);
     const key = `${projectId}:${grew ? 'up' : 'down'}:${amount.toFixed(2)}`;
-    if (diffAsked.current === key) return;
-    diffAsked.current = key;
+    if (store.diffAsked === key) return;
+    up({ diffAsked: key });
     Alert.alert(
       grew ? t('job.addInvoiceTitle', { amount: fmt(amount) }) : t('job.creditCardTitle', { amount: fmt(amount) }),
       grew ? t('job.addInvoiceBody') : t('job.creditCardBody'),
@@ -851,7 +862,7 @@ export function JobScreen({ go, back, params }: NavProp) {
       ]
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, extraToInvoice, creditToApply, roll.count, closed, canAddInvoice, canAddCredit, role]);
+  }, [projectId, extraToInvoice, creditToApply, roll.count, closed, canAddInvoice, canAddCredit, role, creditTarget, store.diffAsked]);
   const openExtraInvoice = () => {
     if (!canAddInvoice) return;
     setPlanSheet('extra');
@@ -884,6 +895,14 @@ export function JobScreen({ go, back, params }: NavProp) {
       // the schedule insert failed and the plan fell back to a single payment — say so, never silently
       // (380ms: an Alert presented while the sheet Modal is still dismissing dies with it on iOS)
       if (downgraded) setTimeout(() => Alert.alert(t('job.planDowngradedTitle'), t('job.planDowngradedBody')), 380);
+      else if (planSheet === 'extra') {
+        // a complementar nascia e nunca saía: o botão gordo da aba é "Registrar pagamento" e o
+        // "PRÓXIMO PASSO" também aponta para lá, então o documento do extra ficava parado
+        setTimeout(() => Alert.alert(t('job.extraInvoiceDone'), t('job.extraInvoiceDoneBody', { amount: fmt(extraToInvoice) }), [
+          { text: t('job.notNow'), style: 'cancel' },
+          { text: t('job.sendInvoice'), onPress: () => requireCompany(() => up({ sheet: true, jobTab: 'invoice' })) },
+        ]), 380);
+      }
       else if (!editing && estId && pid && nItems > 0) {
         // G4: fresh invoice = the work is about to start — offer to seed the progress phases.
         // Best-effort and only when there are none yet; a failure just leaves the tab's button.
@@ -1069,9 +1088,13 @@ export function JobScreen({ go, back, params }: NavProp) {
   // invoice printed "Remaining balance $40" while the app showed it as Paid.
   const onReceiptRow = (p: PaymentRecord) => {
     if (!inv) return;
-    // recibo antigo (sem retrato congelado) cai na regra por data: um abatimento posterior não pode
-    // reescrever um papel já entregue. A partir de agora o retrato em `balance_after` decide.
-    const dueThen = invoiceDue(inv.total, creditTotalUpTo(inv.credits, p.paidAt));
+    // Recibo JÁ numerado sem retrato guardado = papel antigo: vale a regra por data, para não
+    // reescrever o que o cliente tem na mão. Recibo ainda não emitido: o retrato é o estado de
+    // AGORA — congelar o saldo de uma data velha deixaria o papel novo nascendo errado.
+    const jaEmitido = !!p.receiptNumber && p.balanceAfter == null;
+    const dueThen = jaEmitido
+      ? invoiceDue(inv.total, creditTotalUpTo(inv.credits, p.paidAt))
+      : invoiceDue(inv.total, inv.creditTotal);
     requireCompany(() => { void sendReceipt(p.id, { amount: p.amount, method: p.method, note: p.note, date: p.paidAt, balanceAfter: balanceAfterPayment(dueThen, inv.payments, p.id) }, inv.number); });
   };
 
@@ -2276,7 +2299,7 @@ function CreditSheet({ open, onClose, suggestion, room, taxRate = 0, busy, onCon
         <Input value={reason} onChangeText={setReason} placeholder={t('job.creditReasonHint')} maxLength={120} autoCapitalize="sentences" />
       </Field>
       <Btn
-        title={busy ? t('job.working') : t('job.applyCreditPlain')}
+        title={busy ? t('job.working') : t('job.applyCredit', { amount: fmt(round2(amount)) })}
         icon={busy ? undefined : 'check'}
         disabled={busy || !(amount > 0) || overRoom}
         onPress={() => onConfirm(round2(amount), reason)}

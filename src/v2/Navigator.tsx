@@ -52,6 +52,7 @@ const initStore = (): V2Store => ({
   stageOverride: {},
   jobFilter: 'All',
   jobQ: '',
+  diffAsked: '',
   clientQ: '',
 });
 

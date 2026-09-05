@@ -459,3 +459,28 @@ describe('pickCreditTarget (de qual fatura sai o abatimento)', () => {
     expect(pickCreditTarget([inv('a', 100, 60, 40)])).toBeUndefined();
   });
 });
+
+describe('o par cobrar/tirar tem que ZERAR depois de cada ação (bases diferentes de propósito)', () => {
+  // provado com contra-exemplo de produção: com as duas comparações no mesmo total, o app pedia
+  // para cobrar de volta o saldo que o dono acabara de perdoar
+  const quote = 580.55;
+
+  it('perdoar saldo (sem mexer no orçamento) não vira "o trabalho aumentou"', () => {
+    const grossBilled = 580.55; // a fatura continua sendo de 580.55
+    const netBilled = 540.55; // 40 tirados
+    expect(uninvoiced(quote, grossBilled)).toBe(0); // nada novo a cobrar
+    expect(overbilled(quote, netBilled)).toBe(0); // e nada mais a tirar
+  });
+
+  it('material devolvido: sugere tirar uma vez, e some depois de tirado', () => {
+    const quoteMenor = 540.55; // o orçamento encolheu
+    expect(overbilled(quoteMenor, 580.55)).toBe(40); // antes: tirar 40
+    expect(overbilled(quoteMenor, 540.55)).toBe(0); // depois: nada
+    expect(uninvoiced(quoteMenor, 580.55)).toBe(0); // e nunca sugere cobrar
+  });
+
+  it('obra cresceu: sugere cobrar, e nada a tirar', () => {
+    expect(uninvoiced(700, 580.55)).toBe(119.45);
+    expect(overbilled(700, 580.55)).toBe(0);
+  });
+});

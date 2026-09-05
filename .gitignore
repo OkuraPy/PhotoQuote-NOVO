@@ -6,3 +6,4 @@ dist/
 .claude/
 %USERPROFILE%/
 .design_tmp/
+coverage/
