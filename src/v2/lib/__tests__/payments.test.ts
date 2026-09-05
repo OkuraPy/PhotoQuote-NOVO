@@ -1,5 +1,7 @@
 import {
   addDaysISO,
+  applyCreditToRows,
+  round2,
   balanceAfterNewPayment,
   creditTotalUpTo,
   balanceAfterPayment,
@@ -394,5 +396,42 @@ describe('creditTotalUpTo (recibo antigo não pode ser reescrito por crédito no
     const ledger = [{ id: 'p1', amount: 290.27, paidAt: '2026-09-03' }];
     const dueNaEpoca = invoiceDue(580.55, creditTotalUpTo(credits, '2026-09-03'));
     expect(balanceAfterPayment(dueNaEpoca, ledger, 'p1')).toBe(290.28);
+  });
+});
+
+describe('applyCreditToRows (o crédito tem que caber nas parcelas)', () => {
+  const rows = () => [
+    { label: 'Deposit', amount: 290.27, dueDate: '2026-09-05' },
+    { label: 'Balance', amount: 290.28, dueDate: null },
+  ];
+
+  it('abate da ÚLTIMA parcela: o que falta é que diminui', () => {
+    const out = applyCreditToRows(rows(), 40);
+    expect(out.map((r) => r.amount)).toEqual([290.27, 250.28]);
+  });
+
+  it('a soma das parcelas passa a bater com o que é devido', () => {
+    const credito = 40;
+    const out = applyCreditToRows(rows(), credito);
+    const soma = out.reduce((s, r) => s + r.amount, 0);
+    expect(round2(soma)).toBe(invoiceDue(580.55, credito));
+  });
+
+  it('crédito maior que a última parcela vai comendo para trás', () => {
+    const out = applyCreditToRows(rows(), 400);
+    expect(out.map((r) => r.amount)).toEqual([180.55]); // a última zerou e sumiu
+  });
+
+  it('crédito igual ao total não deixa parcela nenhuma', () => {
+    expect(applyCreditToRows(rows(), 580.55)).toEqual([]);
+  });
+
+  it('sem crédito, o plano é o mesmo objeto de antes', () => {
+    const r = rows();
+    expect(applyCreditToRows(r, 0)).toBe(r);
+  });
+
+  it('não inventa parcela negativa', () => {
+    expect(applyCreditToRows(rows(), 9999).length).toBe(0);
   });
 });

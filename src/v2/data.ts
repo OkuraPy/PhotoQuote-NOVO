@@ -297,6 +297,23 @@ export function planRows(plan: PaymentPlan, total: number): { label: string; amo
   return [{ label: 'Full payment', amount: t, dueDate: plan.dueDate }];
 }
 
+// A credit has to land somewhere in the agreed instalments, or the plan keeps adding up to more
+// than what is owed (two balances on one page). It comes off the LAST rows first: the early ones
+// are usually already paid or already promised, and "what is still to come got smaller" is the
+// sentence the contractor can say to the client without doing any arithmetic.
+export function applyCreditToRows<T extends { amount: number }>(rows: T[], credit: number): T[] {
+  let left = round2(Math.max(0, credit));
+  if (!left) return rows;
+  const out = rows.map((r) => ({ ...r }));
+  for (let i = out.length - 1; i >= 0 && left > 0.005; i--) {
+    const take = Math.min(round2(out[i].amount), left);
+    out[i].amount = round2(out[i].amount - take);
+    left = round2(left - take);
+  }
+  // a row that got fully absorbed is not a payment the client still owes
+  return out.filter((r) => r.amount > 0.005) as T[];
+}
+
 export const paidTotal = (payments: { amount: number }[]) =>
   round2(payments.reduce((s, p) => s + (Number(p.amount) || 0), 0));
 

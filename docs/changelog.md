@@ -4,6 +4,32 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-05 19:45] — feat: as 3 pontas soltas do crédito, resolvidas pelo caminho mais simples
+"Qual é o melhor mais simples e intuitivo pq o povo é burro" (dono). Então em vez de devolver as
+três perguntas, decidi cada uma pelo caminho de menor explicação:
+
+**1. Parcelas — o crédito sai das ÚLTIMAS** (`applyCreditToRows`, pura, 6 testes). Antes o plano
+seguia somando o valor cheio e eu tinha escondido a lista do PDF; esconder é pior que consertar.
+Agora "Deposit $290.27 / Balance $250.28" fecha exatamente com o "Revised total", na tela e no papel.
+Sai do fim para o começo porque as primeiras parcelas costumam já estar pagas ou prometidas, e a
+frase que ele diz ao cliente vira "o que falta ficou menor" — sem ninguém somar nada. Uma parcela
+totalmente absorvida some da lista.
+
+**2. Imposto — o valor digitado é o crédito, ponto.** 30 das 38 faturas em produção não têm imposto
+(conferido por SQL), então rateá-lo por padrão complicaria a maioria por causa da minoria. O
+documento fecha linha a linha de qualquer jeito (Subtotal + Tax = Total; Total − Credit = Revised
+total). Nas faturas COM imposto a folha agora avisa: "Esta fatura tem {rate}% de imposto. Se o item
+devolvido era tributado, inclua o imposto no valor" — ele resolve com um número, não com um
+conceito.
+
+**3. Cliente já pagou tudo e devolve — continua bloqueado, mas a mensagem passou a ensinar**: "Não
+há o que creditar — esta fatura está paga. Se você tem que devolver dinheiro ao cliente, a devolução
+acontece fora do app." Um fluxo de reembolso dentro do app significaria estado novo ("devo ao
+cliente") na tela de todo mundo, por um caso que o dono nunca confirmou que acontece.
+
+- **Arquivos**: `src/v2/data.ts` (`applyCreditToRows`), `src/v2/screens/Job.tsx` (plano abatido na
+  tela e no payload do PDF, dica de imposto, mensagem do beco), testes (+6 → **208**).
+
 ### [2026-09-05 19:10] — fix: 2 revisores no crédito — 1 BLOQUEANTE e o dinheiro vazando para 3 documentos
 O dono perguntou "está tudo certo? é a prática certa? está intuitivo?". Um revisor olhou **prática
 contábil/de mercado**, outro **usabilidade + correção**. Veredito do primeiro: o desenho (crédito

@@ -4,7 +4,7 @@ import { ActivityIndicator, Alert, Image, Linking, Pressable, Share, ScrollView,
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
-import { addDaysISO, applyMarkup, balanceAfterNewPayment, balanceAfterPayment, calcTotals, creditRoom, creditTotalUpTo, invoiceDue, overbilled, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, invoiceRollup, NO_DISCOUNT, resolveDiscount, splitChangeOrder, uninvoiced, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
+import { addDaysISO, applyCreditToRows, applyMarkup, balanceAfterNewPayment, balanceAfterPayment, calcTotals, creditRoom, creditTotalUpTo, invoiceDue, overbilled, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, invoiceRollup, NO_DISCOUNT, resolveDiscount, splitChangeOrder, uninvoiced, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { deleteInvoiceCredit, addInvoiceCredit, addPhaseComment, addPhasePhotos, addProjectPhotos, agreementLink, assignMember, BEFORE_PHASE_NAME, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deletePhasePhoto, deleteProject, deleteProjectPhoto, deriveStage, ensureBookendPhases, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, FINAL_PHASE_NAME, JobDetail, progressLink, ProgressPhase, PhaseStatus, projectDeleteFacts, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -96,10 +96,11 @@ registerStrings({
   // client-facing: it prints on the invoice, so the hint is English like every other printed string
   'job.creditReasonHint': { en: 'Returned material — 1 smoke detector', es: 'Returned material — 1 smoke detector', pt: 'Returned material — 1 smoke detector' },
   'job.creditMax': { en: 'At most {amount} — the balance still open.', es: 'Como máximo {amount} — el saldo abierto.', pt: 'No máximo {amount} — o saldo em aberto.' },
+  // dead-end message the owner WILL hit: says why, and what to do instead
   'job.creditNoRoom': {
-    en: 'This invoice has no open balance left to credit. Money already received cannot be given back from here.',
-    es: 'Esta factura no tiene saldo abierto para acreditar. El dinero ya recibido no se devuelve desde aquí.',
-    pt: 'Esta fatura não tem saldo em aberto para creditar. Dinheiro já recebido não é devolvido por aqui.',
+    en: 'Nothing left to credit — this invoice is fully paid. If you owe the client money back, refund it outside the app.',
+    es: 'No queda nada por acreditar: esta factura está pagada. Si le debes dinero al cliente, devuélvelo fuera de la app.',
+    pt: 'Não há o que creditar — esta fatura está paga. Se você tem que devolver dinheiro ao cliente, a devolução acontece fora do app.',
   },
   'job.creditDone': { en: 'Credit applied', es: 'Crédito aplicado', pt: 'Crédito lançado' },
   'job.couldNotCredit': { en: 'Could not apply the credit', es: 'No se pudo aplicar el crédito', pt: 'Não deu para lançar o crédito' },
@@ -110,10 +111,10 @@ registerStrings({
     pt: 'Os {amount} voltam para o saldo. Use para corrigir um crédito digitado errado.',
   },
   'job.removeCredit': { en: 'Remove', es: 'Quitar', pt: 'Tirar' },
-  'job.planBeforeCredit': {
-    en: 'Instalments as agreed, before the credit',
-    es: 'Cuotas como se acordaron, antes del crédito',
-    pt: 'Parcelas como combinadas, antes do crédito',
+  'job.creditTaxHint': {
+    en: 'This invoice has {rate}% tax. If the returned item was taxed, include its tax in the amount.',
+    es: 'Esta factura tiene {rate}% de impuesto. Si el artículo devuelto pagaba impuesto, inclúyelo en el monto.',
+    pt: 'Esta fatura tem {rate}% de imposto. Se o item devolvido era tributado, inclua o imposto no valor.',
   },
   'job.addInvoiceBody': { en: 'The quote grew {amount} past what is already invoiced. Bill it as a second invoice — the one the client already paid stays as it is.', es: 'La cotización creció {amount} por encima de lo ya facturado. Factúralo como una segunda factura — la que el cliente ya pagó queda como está.', pt: 'O orçamento passou {amount} do que já foi faturado. Cobre como uma segunda fatura — a que o cliente já pagou fica como está.' },
   'job.invoicesCount': { en: 'Invoices · {n}', es: 'Facturas · {n}', pt: 'Faturas · {n}' },
@@ -1260,9 +1261,9 @@ export function JobScreen({ go, back, params }: NavProp) {
             payment:
               kind === 'invoice' && inv && invoicePlan
                 ? {
-                    // with a credit the agreed instalments no longer add up to what is owed, and two
-                    // conflicting balances on one page is worse than no schedule at all
-                    rows: inv.creditTotal > 0 ? [] : planRows(invoicePlan, inv.total).map((r) => ({ label: r.label, amount: r.amount, due: r.dueDate })),
+                    // the credit is taken off the last instalments so the schedule and the revised
+                    // total tell the same story (a client cannot be asked to add two numbers up)
+                    rows: applyCreditToRows(planRows(invoicePlan, inv.total), inv.creditTotal).map((r) => ({ label: r.label, amount: r.amount, due: r.dueDate })),
                     paid: inv.amountPaid,
                     balance,
                     // itemized ledger (field feedback 07/07): the doc should show WHAT was received
@@ -1303,6 +1304,7 @@ export function JobScreen({ go, back, params }: NavProp) {
         onClose={() => setCreditSheet(false)}
         suggestion={creditToApply}
         room={inv ? creditRoom(inv.total, inv.creditTotal, inv.amountPaid) : 0}
+        taxRate={inv?.taxRate || 0}
         busy={savingCredit}
         onConfirm={confirmCredit}
       />
@@ -1590,7 +1592,9 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, i
   const credited = invoice?.creditTotal ?? 0;
   const dueTotal = invoice ? invoiceDue(invoice.total, credited) : totals.total;
   const balance = invoice ? invoiceBalance(dueTotal, amountPaid) : totals.total;
-  const rows = invoice ? planRows(planFromInvoice(invoice), invoice.total) : [];
+  // the credit comes off the last instalments, so the plan on screen adds up to what is really
+  // owed — showing the agreed plan next to a smaller balance was two answers to the same question
+  const rows = invoice ? applyCreditToRows(planRows(planFromInvoice(invoice), invoice.total), credited) : [];
   const payStatus = invoice ? statusFromPayments(dueTotal, amountPaid) : 'Unpaid';
   const paid = payStatus === 'Paid' || stage === 'Paid';
   const partial = !paid && payStatus === 'Partially Paid';
@@ -1712,14 +1716,9 @@ function InvoiceTab({ stage, items, totals, client, jobSite, company, invoice, i
             </View>
           ) : null}
           <View style={{ marginTop: 10 }}>
-            {rows.length > 1 ? (
-              <>
-                {/* the plan was agreed on the billed amount; a credit changes what is owed, not the
-                    instalments already agreed — saying so beats showing two totals with no story */}
-                {credited > 0 ? <Text style={{ fontFamily: fonts.semibold, fontSize: 11.5, color: colors.faint, marginBottom: 4 }}>{t('job.planBeforeCredit')}</Text> : null}
-                {rows.map((r, i) => <TotRow key={i} label={`${rowLabel(t, r.label)}${r.dueDate ? ` · ${mdDate(parseDateOnly(r.dueDate))}` : ''}`} value={fmt(r.amount)} />)}
-              </>
-            ) : null}
+            {rows.length > 1
+              ? rows.map((r, i) => <TotRow key={i} label={`${rowLabel(t, r.label)}${r.dueDate ? ` · ${mdDate(parseDateOnly(r.dueDate))}` : ''}`} value={fmt(r.amount)} />)
+              : null}
             {amountPaid > 0 ? <TotRow label={t('job.paid')} value={fmt(amountPaid)} color={colors.success} /> : null}
             <TotRow label={t('job.balanceDue')} value={fmt(balance)} color={paid ? colors.success : colors.ink} />
           </View>
@@ -2147,7 +2146,7 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
 }
 
 /* ---------------- Credit sheet: reduces what is owed, no money involved ---------------- */
-function CreditSheet({ open, onClose, suggestion, room, busy, onConfirm }: { open: boolean; onClose: () => void; suggestion: number; room: number; busy: boolean; onConfirm: (amount: number, reason: string) => void }) {
+function CreditSheet({ open, onClose, suggestion, room, taxRate = 0, busy, onConfirm }: { open: boolean; onClose: () => void; suggestion: number; room: number; taxRate?: number; busy: boolean; onConfirm: (amount: number, reason: string) => void }) {
   const t = useT();
   const [amount, setAmount] = useState(0);
   const [reason, setReason] = useState('');
@@ -2159,6 +2158,11 @@ function CreditSheet({ open, onClose, suggestion, room, busy, onConfirm }: { ope
   return (
     <Sheet open={open} onClose={onClose} title={t('job.creditTitle')} sub={t('job.creditSub')}>
       <Field label={t('job.creditAmount')}><DecimalInput value={amount} onChangeValue={setAmount} /></Field>
+      {/* 8 of the 38 invoices in production carry tax. On those, a returned taxable item gives back
+          its tax too — the app cannot know if the item was taxable, so it says so instead */}
+      {taxRate > 0 ? (
+        <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: -6, marginBottom: 12, lineHeight: 17 }}>{t('job.creditTaxHint', { rate: taxRate })}</Text>
+      ) : null}
       <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: overRoom ? colors.error : colors.muted, marginTop: -6, marginBottom: 12 }}>
         {room > 0.005 ? t('job.creditMax', { amount: fmt(room) }) : t('job.creditNoRoom')}
       </Text>
