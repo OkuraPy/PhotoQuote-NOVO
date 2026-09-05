@@ -594,20 +594,43 @@ const docSeq = (n: string) => {
 };
 const alnum = (s: string) => s.replace(/[^a-z0-9]/g, '');
 
-export function jobMatchesQuery(j: Job, query: string): boolean {
+// Ranked on purpose. Checked against real production data: searching "34" also matches the ZIPs
+// 33428/33405 inside addresses, so a plain boolean filter buried INV-2026-0034 under four street
+// matches — exactly the "open one by one" the search was meant to end. A document-number hit is a
+// deliberate hit, so it sorts first; text hits stay in the list, just below.
+export const MATCH_NONE = 0;
+export const MATCH_TEXT = 1;
+export const MATCH_DOC = 2;
+
+export function rankJobMatch(j: Job, query: string): 0 | 1 | 2 {
   const q = query.trim().toLowerCase();
-  if (!q) return true;
-  // name/address/title first — unchanged behaviour, and it keeps "1017" finding the street number
-  if ([j.client || 'no client', j.addr, j.title].join(' ').toLowerCase().includes(q)) return true;
+  if (!q) return MATCH_TEXT;
   const nums = j.docNumbers || [];
-  if (!nums.length) return false;
-  if (/^\d+$/.test(q)) {
-    const seq = q.replace(/^0+/, '') || '0';
-    return nums.some((raw) => docSeq(String(raw).toLowerCase()) === seq);
-  }
-  // typed with the prefix ("INV-2026-0040", "inv 2026 0040", "est99"): compare letters+digits only
-  const qc = alnum(q);
-  return nums.some((raw) => alnum(String(raw).toLowerCase()).includes(qc));
+  const byDoc = nums.length
+    ? /^\d+$/.test(q)
+      // a bare number is compared against the document's own sequence, never the whole string:
+      // "2026" lives inside every invoice number and would otherwise match every job
+      ? nums.some((raw) => docSeq(String(raw).toLowerCase()) === (q.replace(/^0+/, '') || '0'))
+      // typed with the prefix ("INV-2026-0040", "inv 2026 0040", "est99"): letters+digits only
+      : nums.some((raw) => alnum(String(raw).toLowerCase()).includes(alnum(q)))
+    : false;
+  if (byDoc) return MATCH_DOC;
+  // name/address/title — unchanged behaviour, and it keeps "1017" finding the street number
+  return [j.client || 'no client', j.addr, j.title].join(' ').toLowerCase().includes(q) ? MATCH_TEXT : MATCH_NONE;
+}
+
+export function jobMatchesQuery(j: Job, query: string): boolean {
+  return rankJobMatch(j, query) !== MATCH_NONE;
+}
+
+// Filter + rank in one pass, keeping the original (newest-first) order inside each group.
+export function searchJobs<T extends Job>(jobs: T[], query: string): T[] {
+  if (!query.trim()) return jobs;
+  return jobs
+    .map((j, i) => ({ j, i, r: rankJobMatch(j, query) }))
+    .filter((x) => x.r !== MATCH_NONE)
+    .sort((a, b) => b.r - a.r || a.i - b.i)
+    .map((x) => x.j);
 }
 
 export const JOBS: Job[] = [

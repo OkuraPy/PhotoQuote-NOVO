@@ -1,4 +1,4 @@
-import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobMatchesQuery, jobSiteLine, needsPhaseSync, NO_DISCOUNT, parseMoney, parsePercent, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitChangeOrder, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
+import { applyMarkup, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobMatchesQuery, jobSiteLine, searchJobs, needsPhaseSync, NO_DISCOUNT, parseMoney, parsePercent, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitChangeOrder, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
 import type { ClosedKind, Job, LineItem, SyncPhase } from '../../data';
 import type { Stage } from '../../theme';
 
@@ -687,5 +687,35 @@ describe('jobMatchesQuery (achar o job pelo número do cheque)', () => {
   it('busca vazia devolve tudo', () => {
     expect(jobMatchesQuery(job(), '')).toBe(true);
     expect(jobMatchesQuery(job(), '   ')).toBe(true);
+  });
+});
+
+describe('searchJobs (o documento buscado tem que ser o PRIMEIRO card)', () => {
+  const mk = (id: string, addr: string, nums: string[]): Job => ({
+    id, client: 'WL General Services', addr, title: 'New quote',
+    stage: 'Quoted' as Stage, value: 0, photos: 0, date: '',
+    docNumbers: nums, docLabel: nums[0] || null,
+  });
+  // recorte real de produção: os CEPs 33405/33428 casam "34" por pedaço de texto
+  const jobs = [
+    mk('a', '1017 Hansen St West Palm Beach, fl 33405', ['EST-091']),
+    mk('b', 'Tire Kingdom 23193 Sandlefoot, FL 33428', ['EST-096']),
+    mk('c', 'Boca Raton, FL', ['INV-2026-0034', 'EST-088']),
+  ];
+
+  it('põe o hit por número na frente do hit por texto', () => {
+    expect(searchJobs(jobs, '34').map((j) => j.id)).toEqual(['c', 'a', 'b']);
+  });
+  it('não esconde os hits por texto — só reordena', () => {
+    expect(searchJobs(jobs, '34')).toHaveLength(3);
+  });
+  it('preserva a ordem original (mais novo primeiro) dentro de cada grupo', () => {
+    expect(searchJobs(jobs, 'wl').map((j) => j.id)).toEqual(['a', 'b', 'c']);
+  });
+  it('busca vazia devolve a lista intacta', () => {
+    expect(searchJobs(jobs, '  ')).toBe(jobs);
+  });
+  it('sem resultado devolve lista vazia', () => {
+    expect(searchJobs(jobs, 'zzz')).toEqual([]);
   });
 });

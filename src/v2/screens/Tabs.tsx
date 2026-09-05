@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
-import { billingState, ClosedKind, fmt, fmt0, homeMetrics, initials, Job, jobMatchesQuery, split, STAGES, trialDaysLeft } from '../data';
+import { billingState, ClosedKind, fmt, fmt0, homeMetrics, initials, Job, searchJobs, split, STAGES, trialDaysLeft } from '../data';
 import { Avatar, Between, Btn, Card, Empty, NavBtn, Row, SearchBar, SectionTitle, StageChip, Switch, SwipeRow, useStore } from '../ui';
 import { useAuth } from '../lib/auth';
 import { deleteAccount, deleteProject, fetchClients, fetchCompanyProfile, fetchJobs, fetchOwnBilling, projectDeleteFacts } from '../lib/api';
@@ -465,8 +465,9 @@ export function JobsScreen({ go }: NavProp) {
     : filter === 'Archived' ? j.closed === 'archived'
     : !j.closed && (filter === 'All' || j.stage === filter)
   );
-  // name/address/title as before, plus the invoice/estimate number (jobMatchesQuery, unit-tested)
-  if (q) list = list.filter((j) => jobMatchesQuery(j, q));
+  // name/address/title as before, plus the invoice/estimate number — and a number hit sorts to the
+  // top, so the job the check refers to is the FIRST card, not buried under ZIP-code matches
+  if (q) list = searchJobs(list, q);
   return (
     <>
       <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>

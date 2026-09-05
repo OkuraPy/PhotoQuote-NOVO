@@ -4,6 +4,23 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-05 13:55] — fix: o número buscado tem que ser o PRIMEIRO card, não o quinto
+- **Como apareceu**: o dono perguntou "tem certeza que resolveu?". Em vez de responder, montei um
+  teste com os **12 jobs mais recentes de produção** (SQL direto no banco) e rodei a busca neles.
+  Meus testes sintéticos passavam e o caso real falhava.
+- **Bug de verdade**: `34` casa os CEPs **33428** e **33405** de quatro endereços por substring, e o
+  filtro booleano devolvia a lista na ordem de data — a `INV-2026-0034` saía **em último**. O pedido
+  do Gladson ("não ter que abrir um por um") continuava de pé.
+- **O que mudou**: `rankJobMatch` (2 = casou o número do documento, 1 = casou o texto) e
+  `searchJobs`, que filtra e ordena numa passada só, mantendo a ordem por data dentro de cada grupo.
+  Nada é escondido — quem busca `1017` (número da rua) continua vendo o mesmo de antes.
+- **Arquivos**: `src/v2/data.ts`, `src/v2/screens/Tabs.tsx`, `src/v2/lib/__tests__/data.test.ts` (+5)
+- **Decisão técnica**: reordenar em vez de filtrar só pelo número. Filtrar esconderia resultados que
+  o contratante espera ver (o caso do número da rua), e o benefício — achar o documento — já é obtido
+  pondo o hit certo no topo. jest 175/175.
+- **Lição**: teste sintético não substitui dado real. O fixture de produção (nomes de clientes) foi
+  usado para verificar e **não** foi commitado.
+
 ### [2026-09-05 13:10] — feat: busca por nº de fatura/cotação + o teclado parou de tapar a lista
 - **O que mudou** (2 áudios do Gladson de 03/09, com print da tela Jobs):
   1. **Buscar pelo número**: o cheque do contractor vem com o número do invoice, e para dar baixa
