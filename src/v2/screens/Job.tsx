@@ -4,9 +4,9 @@ import { ActivityIndicator, Alert, Image, Linking, Pressable, Share, ScrollView,
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
-import { addDaysISO, applyCreditToRows, applyMarkup, balanceAfterNewPayment, balanceAfterPayment, calcTotals, creditRoom, creditTotalUpTo, invoiceDue, overbilled, pickCreditTarget, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, invoiceRollup, NO_DISCOUNT, resolveDiscount, splitChangeOrder, uninvoiced, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
+import { addDaysISO, applyCreditToRows, applyMarkup, fold, balanceAfterNewPayment, balanceAfterPayment, calcTotals, creditRoom, creditTotalUpTo, invoiceDue, overbilled, pickCreditTarget, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, invoiceRollup, NO_DISCOUNT, resolveDiscount, splitChangeOrder, uninvoiced, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { deleteInvoiceCredit, addInvoiceCredit, addPhaseComment, addPhasePhotos, addProjectPhotos, agreementLink, assignMember, BEFORE_PHASE_NAME, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deletePhasePhoto, deleteProject, deleteProjectPhoto, deriveStage, ensureBookendPhases, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, FINAL_PHASE_NAME, JobDetail, progressLink, ProgressPhase, PhaseStatus, projectDeleteFacts, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
+import { setProjectClient, createClient, fetchClients, deleteInvoiceCredit, addInvoiceCredit, addPhaseComment, addPhasePhotos, addProjectPhotos, agreementLink, assignMember, BEFORE_PHASE_NAME, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deletePhasePhoto, deleteProject, deleteProjectPhoto, deriveStage, ensureBookendPhases, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, FINAL_PHASE_NAME, JobDetail, progressLink, ProgressPhase, PhaseStatus, projectDeleteFacts, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { sendDoc, SendData } from '../lib/send';
 import { registerStrings, useT } from '../lib/i18n';
@@ -399,6 +399,18 @@ registerStrings({
   },
   // team assignment (Onda B) — the owner picks which members see this job
   'job.menu.assignTeam': { en: 'Assign team', es: 'Asignar equipo', pt: 'Atribuir equipe' },
+  'job.menu.addClient': { en: 'Add client', es: 'Agregar cliente', pt: 'Colocar o cliente' },
+  'job.menu.changeClient': { en: 'Change client', es: 'Cambiar cliente', pt: 'Trocar o cliente' },
+  'job.clientSheetTitle': { en: 'Who is this job for?', es: '¿Para quién es este trabajo?', pt: 'Esse trabalho é pra quem?' },
+  'job.clientSheetSub': {
+    en: 'Pick from your clients or type a new name.',
+    es: 'Elige entre tus clientes o escribe un nombre nuevo.',
+    pt: 'Escolha um cliente seu ou escreva um nome novo.',
+  },
+  'job.clientSearch': { en: 'Search or type a new name', es: 'Busca o escribe un nombre', pt: 'Busque ou escreva um nome' },
+  'job.clientCreate': { en: 'Add "{name}"', es: 'Agregar "{name}"', pt: 'Adicionar "{name}"' },
+  'job.clientNoneYet': { en: 'No clients yet — type a name above.', es: 'Aún no hay clientes: escribe un nombre arriba.', pt: 'Nenhum cliente ainda — escreva um nome acima.' },
+  'job.couldNotSetClient': { en: 'Could not set the client', es: 'No se pudo asignar el cliente', pt: 'Não deu para colocar o cliente' },
   'job.assign.title': { en: 'Assign team', es: 'Asignar equipo', pt: 'Atribuir equipe' },
   'job.assign.sub': {
     en: 'Members only see the jobs assigned to them.',
@@ -973,6 +985,25 @@ export function JobScreen({ go, back, params }: NavProp) {
       setSavingCredit(false);
     }
   };
+  const [clientSheet, setClientSheet] = useState(false);
+  const [savingClient, setSavingClient] = useState(false);
+  const pickClient = async (clientId: string | null, name: string) => {
+    if (!ownerId || !projectId) return;
+    setSavingClient(true);
+    try {
+      // nome novo = cria o cliente na hora, com o nome só (o "rápido" que ele queria e não tinha)
+      const id = clientId || (await createClient(ownerId, { name })).id;
+      await setProjectClient(projectId, id);
+      await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      await queryClient.invalidateQueries({ queryKey: ['clients', ownerId] });
+      setClientSheet(false);
+    } catch (e: any) {
+      Alert.alert(t('job.couldNotSetClient'), e?.message || t('job.alert.tryAgain'));
+    } finally {
+      setSavingClient(false);
+    }
+  };
   const removeCredit = (c: { id: string; amount: number }) => {
     if (!inv?.id) return;
     Alert.alert(t('job.removeCreditTitle'), t('job.removeCreditBody', { amount: fmt(c.amount) }), [
@@ -1416,6 +1447,14 @@ export function JobScreen({ go, back, params }: NavProp) {
         busy={savingCredit}
         onConfirm={confirmCredit}
       />
+      <ClientPickSheet
+        open={clientSheet}
+        onClose={() => setClientSheet(false)}
+        ownerId={ownerId}
+        currentId={null}
+        busy={savingClient}
+        onPick={pickClient}
+      />
       <JobMenuSheet
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
@@ -1426,6 +1465,9 @@ export function JobScreen({ go, back, params }: NavProp) {
         // deleting is the owner's alone: projects has no office DELETE policy, so the office
         // button would report success on 0 rows and the job would come right back
         canDelete={role === 'owner' && !!projectId}
+        canSetClient={role !== 'field' && !closed && !!projectId}
+        hasClient={!!realClient}
+        onSetClient={() => { setMenuOpen(false); setClientSheet(true); }}
         onAssign={openAssign}
         onApprove={() => { setMenuOpen(false); void setEstimateStatus('Approved', 'Approved'); }}
         onMarkLost={confirmMarkLost}
@@ -1443,7 +1485,7 @@ export function JobScreen({ go, back, params }: NavProp) {
 /* ---------------- Job menu sheet: assign team / mark lost / archive / reopen (+ approve) ---------------- */
 // Same local-state pattern as the payment sheets. "Closed" is projects.status — the underlying
 // quote/invoice keep their statuses, so reopening restores the exact pipeline stage.
-function JobMenuSheet({ open, onClose, closed, busy, canApprove, canAssign, canDelete, onAssign, onApprove, onMarkLost, onArchive, onReopen, onDelete }: { open: boolean; onClose: () => void; closed: ClosedKind | null; busy: boolean; canApprove: boolean; canAssign: boolean; canDelete: boolean; onAssign: () => void; onApprove: () => void; onMarkLost: () => void; onArchive: () => void; onReopen: () => void; onDelete: () => void }) {
+function JobMenuSheet({ open, onClose, closed, busy, canApprove, canAssign, canDelete, canSetClient, hasClient, onSetClient, onAssign, onApprove, onMarkLost, onArchive, onReopen, onDelete }: { open: boolean; onClose: () => void; closed: ClosedKind | null; busy: boolean; canApprove: boolean; canAssign: boolean; canDelete: boolean; canSetClient?: boolean; hasClient?: boolean; onSetClient?: () => void; onAssign: () => void; onApprove: () => void; onMarkLost: () => void; onArchive: () => void; onReopen: () => void; onDelete: () => void }) {
   const t = useT();
   // delete sits LAST and stays available on a closed job too — "I made one just to try it and
   // want it gone" is exactly the case the owner reported, and those end up archived first
@@ -1451,6 +1493,9 @@ function JobMenuSheet({ open, onClose, closed, busy, canApprove, canAssign, canD
   const rows: { key: string; ico: string; col: string; bg: string; label: string; onPress: () => void }[] = closed
     ? [{ key: 'reopen', ico: 'trend', col: colors.primary, bg: colors.primaryTint, label: t('job.menu.reopen'), onPress: onReopen }, ...deleteRow]
     : [
+        // "Optional — you can do this later" na criação só era verdade com isto aqui: sem nenhum
+        // caminho para pôr o cliente depois, o job travava no contrato e no envio, sem saída
+        ...(canSetClient && onSetClient ? [{ key: 'client', ico: 'user', col: colors.primary, bg: colors.primaryTint, label: hasClient ? t('job.menu.changeClient') : t('job.menu.addClient'), onPress: onSetClient }] : []),
         ...(canAssign ? [{ key: 'assign', ico: 'users', col: colors.primary, bg: colors.primaryTint, label: t('job.menu.assignTeam'), onPress: onAssign }] : []),
         ...(canApprove ? [{ key: 'approve', ico: 'check', col: colors.success, bg: colors.successTint, label: t('job.approveDirectly'), onPress: onApprove }] : []),
         { key: 'lost', ico: 'flag', col: colors.error, bg: colors.errorTint, label: t('job.menu.markLost'), onPress: onMarkLost },
@@ -2265,6 +2310,48 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
           }
         }}
       />
+    </Sheet>
+  );
+}
+
+/* ---------------- Client sheet: põe (ou troca) o cliente de um job já salvo ---------------- */
+function ClientPickSheet({ open, onClose, ownerId, currentId, busy, onPick }: { open: boolean; onClose: () => void; ownerId?: string | null; currentId?: string | null; busy: boolean; onPick: (clientId: string | null, name: string) => void }) {
+  const t = useT();
+  const [q, setQ] = useState('');
+  useEffect(() => {
+    if (open) setQ('');
+  }, [open]);
+  const { data: clients = [] } = useQuery({
+    queryKey: ['clients', ownerId],
+    queryFn: () => fetchClients(ownerId!),
+    enabled: !!ownerId && open,
+  });
+  const termo = q.trim();
+  const lista = termo ? clients.filter((c: any) => fold(c.name).includes(fold(termo))) : clients;
+  // nome digitado que não existe = criar na hora, com uma linha só (é o "rápido" que ele pediu)
+  const podeCriar = !!termo && !clients.some((c: any) => fold(c.name) === fold(termo));
+  return (
+    <Sheet open={open} onClose={onClose} title={t('job.clientSheetTitle')} sub={t('job.clientSheetSub')}>
+      <Input value={q} onChangeText={setQ} placeholder={t('job.clientSearch')} autoCapitalize="words" />
+      {podeCriar ? (
+        <Btn sm icon="plus" title={t('job.clientCreate', { name: termo })} disabled={busy} onPress={() => onPick(null, termo)} style={{ marginTop: 12 }} />
+      ) : null}
+      <ScrollView style={{ maxHeight: 280, marginTop: 12 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+        {lista.length ? (
+          lista.map((c: any) => (
+            <Pressable key={c.id} disabled={busy} onPress={() => onPick(c.id, c.name)} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border, opacity: busy ? 0.6 : 1 }}>
+              <Avatar text={initials(c.name)} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text numberOfLines={1} style={{ fontFamily: fonts.extrabold, fontSize: 14.5, color: colors.ink }}>{c.name}</Text>
+                {c.phone || c.city ? <Text numberOfLines={1} style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 2 }}>{[c.phone, c.city].filter(Boolean).join(' · ')}</Text> : null}
+              </View>
+              {c.id === currentId ? <Icon name="check" size={16} color={colors.primary} /> : null}
+            </Pressable>
+          ))
+        ) : (
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.muted, textAlign: 'center', paddingVertical: 14 }}>{t('job.clientNoneYet')}</Text>
+        )}
+      </ScrollView>
     </Sheet>
   );
 }

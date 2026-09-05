@@ -4,6 +4,31 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-05 23:55] — fix: "você pode colocar o cliente depois" virou verdade
+Dois prints + áudio do dono, testando o app ao vivo: *"quando você faz aquele rápido que não coloca
+o nome do cliente… ele fala 'você pode colocar o cliente depois', mas daí você não consegue colocar
+mais o cliente. Não consigo. E quando eu clico em novo cliente, ele não deixa colocar o nome do
+cliente rápido, pra depois completar."*
+
+**1. A promessa era falsa.** A tela de criação diz "Optional — you can do this later", e não existia
+**nenhum** caminho no app para pôr cliente num job já salvo: o menu do job tinha atribuir equipe,
+aprovar, perder, arquivar e excluir — nada de cliente. O job seguia até o orçamento e travava no
+contrato (`Add a client to this job before creating a contract`) e no envio, sem saída.
+→ `setProjectClient` (api.ts) + item "Colocar o cliente"/"Trocar o cliente" no menu, abrindo uma
+folha que busca entre os clientes dele **ou cria na hora** com o nome digitado.
+
+**2. O "rápido" não deixava digitar o nome.** Com a busca vazia, o botão de adição rápida criava um
+cliente chamado literalmente "New client" — e não havia onde escrever o nome depois. (Em produção há
+4 clientes assim.) → o botão passa a exigir o nome, e o card do cliente rápido virou **editável**:
+ele digita ali e completa o cadastro quando quiser.
+
+- **Arquivos**: `src/v2/lib/api.ts` (`setProjectClient`), `src/v2/screens/Job.tsx` (`ClientPickSheet`
+  + item no menu), `src/v2/screens/Flow.tsx` (nome editável, botão que exige nome)
+- **De brinde, observado nos mesmos prints**: 18 dos jobs em produção não têm endereço de rua — o
+  campo fica vazio enquanto o GPS já mostra a cidade logo abaixo, e esse texto imprime no orçamento,
+  na fatura e no contrato. Oferecido ao dono preencher com o que o GPS achou; aguardando.
+- jest **219/219**, tsc limpo.
+
 ### [2026-09-05 23:10] — fix: passada final — o bloqueante do portal continuava vivo nos 17 assinados
 Verificação de fechamento (6ª fase). Veredito: laço, recibo e RLS **confirmados fechados** com
 contra-exemplo numérico; sobrou o rabo do bloqueante do portal e meio laço num banner.

@@ -211,6 +211,15 @@ export async function createClient(userId: string, c: ClientInput) {
   return data;
 }
 
+// Vincular (ou trocar) o cliente de um job que já existe. A tela de criação diz "Optional — you can
+// do this later", e até hoje esse "depois" não existia: nenhum caminho no app punha cliente num job
+// salvo sem ele. O job então travava mais adiante, no contrato ("Add a client to this job") e no
+// envio, sem ter como sair do buraco.
+export async function setProjectClient(projectId: string, clientId: string | null): Promise<void> {
+  const { error } = await supabase.from('projects').update({ client_id: clientId }).eq('id', projectId);
+  if (error) throw error;
+}
+
 export async function updateClient(id: string, c: ClientInput) {
   const { error } = await supabase.from('clients').update(clientRow(c)).eq('id', id);
   if (error) throw error;

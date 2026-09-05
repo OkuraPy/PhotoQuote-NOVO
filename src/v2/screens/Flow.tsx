@@ -125,6 +125,7 @@ registerStrings({
   'flow.notSignedInTitle': { en: 'Not signed in', es: 'No has iniciado sesión', pt: 'Não conectado' },
   'flow.notSignedInBody': { en: 'Please sign in again.', es: 'Inicia sesión de nuevo.', pt: 'Faça login novamente.' },
   'flow.newClient': { en: 'New client', es: 'Nuevo cliente', pt: 'Novo cliente' },
+  'flow.clientNamePlaceholder': { en: "Client's name", es: 'Nombre del cliente', pt: 'Nome do cliente' },
   'flow.couldNotSave': { en: 'Could not save', es: 'No se pudo guardar', pt: 'Não foi possível salvar' },
   'flow.skip': { en: 'Save without client', es: 'Guardar sin cliente', pt: 'Salvar sem cliente' },
   // photos are best-effort, but a photo that didn't upload must never be lost in silence
@@ -1174,7 +1175,9 @@ export function AttachScreen({ go, back }: NavProp) {
               </Card>
             ) : (
               <Row style={{ gap: 10, marginTop: 12 }}>
-                <Btn variant="soft" sm icon="zap" title={t('flow.addQuick')} onPress={() => up({ aSel: { name: t('flow.newClient'), quick: true } })} style={{ flex: 1 }} />
+                {/* sem nome digitado o rápido criava um cliente chamado literalmente "New client",
+                    e não havia onde escrever o nome depois — agora ele pede o nome no campo acima */}
+                <Btn variant="soft" sm icon="zap" title={t('flow.addQuick')} disabled onPress={() => {}} style={{ flex: 1 }} />
                 <Btn variant="ghost" sm icon="user" title={t('flow.fullForm')} onPress={() => go('clientEdit', { from: 'attach' })} style={{ flex: 1 }} />
               </Row>
             )}
@@ -1184,9 +1187,19 @@ export function AttachScreen({ go, back }: NavProp) {
             <Between>
               <Row style={{ gap: 12 }}>
                 <Avatar text={sel.name.split(' ').map((w: string) => w[0]).slice(0, 2).join('')} />
-                <View>
-                  <Text style={{ fontFamily: fonts.extrabold, fontSize: 16, color: colors.ink }}>{sel.name}</Text>
-                  <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted }}>{sel.quick ? t('flow.quickAddNameOnly') : `${sel.phone} · ${sel.email}`}</Text>
+                <View style={{ flex: 1 }}>
+                  {sel.quick ? (
+                    // editável: "coloca o nome rápido pra depois completar" — o dono, 05/09
+                    <Input
+                      value={sel.name}
+                      onChangeText={(v: string) => up({ aSel: { ...sel, name: v } })}
+                      placeholder={t('flow.clientNamePlaceholder')}
+                      style={{ paddingVertical: 8 }}
+                    />
+                  ) : (
+                    <Text style={{ fontFamily: fonts.extrabold, fontSize: 16, color: colors.ink }}>{sel.name}</Text>
+                  )}
+                  <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.muted, marginTop: sel.quick ? 6 : 0 }}>{sel.quick ? t('flow.quickAddNameOnly') : `${sel.phone} · ${sel.email}`}</Text>
                 </View>
               </Row>
               <NavBtn icon="x" size={17} onPress={() => up({ aSel: null })} />
