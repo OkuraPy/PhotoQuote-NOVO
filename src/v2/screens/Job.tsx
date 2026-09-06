@@ -6,7 +6,7 @@ import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow, Stage } from '../theme';
 import { addDaysISO, applyCreditToRows, applyMarkup, fold, jobDiff, balanceAfterNewPayment, balanceAfterPayment, calcTotals, creditRoom, creditTotalUpTo, invoiceDue, overbilled, pickCreditTarget, ClosedKind, daysFromToday, DOC_PHOTO_CAP, fmt, invoiceRollup, NO_DISCOUNT, resolveDiscount, splitChangeOrder, uninvoiced, initials, invoiceBalance, jobSiteLine, LineItem, needsPhaseSync, parseDateOnly, PaymentMode, PaymentPlan, PaymentRecord, planFromInvoice, planRows, resizeDraftRows, round2, split, splitInstallments, STAGES, statusFromPayments, toDateOnly, toggleDocPhoto, unallocated } from '../data';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { setProjectClient, createClient, fetchClients, deleteInvoiceCredit, addInvoiceCredit, addPhaseComment, addPhasePhotos, addProjectPhotos, agreementLink, assignMember, BEFORE_PHASE_NAME, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deletePhasePhoto, deleteProject, deleteProjectPhoto, deriveStage, ensureBookendPhases, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, FINAL_PHASE_NAME, JobDetail, progressLink, ProgressPhase, PhaseStatus, projectDeleteFacts, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
+import { updateJobSite, setProjectClient, createClient, fetchClients, deleteInvoiceCredit, addInvoiceCredit, addPhaseComment, addPhasePhotos, addProjectPhotos, agreementLink, assignMember, BEFORE_PHASE_NAME, countProjectPhases, createAgreement, createInvoice, createPhase, deletePhase, deletePhasePhoto, deleteProject, deleteProjectPhoto, deriveStage, ensureBookendPhases, ensureReceiptNumber, ensureShareToken, fetchCompanyProfile, fetchJobDetail, fetchPhases, fetchProjectAssignments, fetchTeam, FINAL_PHASE_NAME, JobDetail, progressLink, ProgressPhase, PhaseStatus, projectDeleteFacts, recordInvoicePayment, seedPhasesFromEstimate, syncPhasesWithEstimate, TeamMember, unassignMember, updateDocPhotos, updateEstimateStatus, updateInvoicePlan, updateInvoiceStatus, updatePhase, updateProjectStatus } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { sendDoc, SendData } from '../lib/send';
 import { registerStrings, useT } from '../lib/i18n';
@@ -399,6 +399,25 @@ registerStrings({
   },
   // team assignment (Onda B) — the owner picks which members see this job
   'job.menu.assignTeam': { en: 'Assign team', es: 'Asignar equipo', pt: 'Atribuir equipe' },
+  'job.menu.jobSite': { en: 'Job site address', es: 'Dirección de la obra', pt: 'Endereço da obra' },
+  'job.siteSheetTitle': { en: 'Where is the work?', es: '¿Dónde es el trabajo?', pt: 'Onde é o trabalho?' },
+  'job.siteSheetSub': {
+    en: 'Prints on the quote, invoice and contract.',
+    es: 'Se imprime en la cotización, la factura y el contrato.',
+    pt: 'Sai impresso no orçamento, na fatura e no contrato.',
+  },
+  'job.siteStreet': { en: 'Street address', es: 'Dirección', pt: 'Rua e número' },
+  'job.siteCity': { en: 'City', es: 'Ciudad', pt: 'Cidade' },
+  'job.siteZip': { en: 'ZIP', es: 'CP', pt: 'CEP' },
+  'job.couldNotSaveSite': { en: 'Could not save the address', es: 'No se pudo guardar la dirección', pt: 'Não deu para salvar o endereço' },
+  'job.noSiteTitle': { en: 'No job-site address', es: 'Sin dirección de obra', pt: 'Sem endereço da obra' },
+  'job.noSiteBody': {
+    en: 'This document will go out without the address of the work. Add it now?',
+    es: 'Este documento saldrá sin la dirección del trabajo. ¿Agregarla ahora?',
+    pt: 'Esse documento vai sair sem o endereço da obra. Colocar agora?',
+  },
+  'job.noSiteAdd': { en: 'Add address', es: 'Agregar dirección', pt: 'Colocar endereço' },
+  'job.noSiteSend': { en: 'Send without it', es: 'Enviar sin ella', pt: 'Mandar assim' },
   'job.menu.addClient': { en: 'Add client', es: 'Agregar cliente', pt: 'Colocar o cliente' },
   'job.menu.changeClient': { en: 'Change client', es: 'Cambiar cliente', pt: 'Trocar o cliente' },
   'job.clientSheetTitle': { en: 'Who is this job for?', es: '¿Para quién es este trabajo?', pt: 'Esse trabalho é pra quem?' },
@@ -985,6 +1004,31 @@ export function JobScreen({ go, back, params }: NavProp) {
       setSavingCredit(false);
     }
   };
+  const [siteSheet, setSiteSheet] = useState(false);
+  const [savingSite, setSavingSite] = useState(false);
+  const saveJobSite = async (site: { address: string; city: string; zip: string }) => {
+    if (!projectId) return;
+    setSavingSite(true);
+    try {
+      await updateJobSite(projectId, { address: site.address || null, city: site.city || null, zip: site.zip || null });
+      await queryClient.invalidateQueries({ queryKey: ['jobDetail', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      setSiteSheet(false);
+    } catch (e: any) {
+      Alert.alert(t('job.couldNotSaveSite'), e?.message || t('job.alert.tryAgain'));
+    } finally {
+      setSavingSite(false);
+    }
+  };
+  // O endereço da obra imprime nos três documentos. Sem ele o cliente recebe um papel sem dizer
+  // ONDE é o serviço — e em produção 18 jobs estão assim. Avisa antes de sair, com a saída pronta.
+  const requireJobSite = (next: () => void) => {
+    if (jobSite || role === 'field') { next(); return; }
+    Alert.alert(t('job.noSiteTitle'), t('job.noSiteBody'), [
+      { text: t('job.noSiteAdd'), onPress: () => setSiteSheet(true) },
+      { text: t('job.noSiteSend'), style: 'cancel', onPress: next },
+    ]);
+  };
   const [clientSheet, setClientSheet] = useState(false);
   const [savingClient, setSavingClient] = useState(false);
   const pickClient = async (clientId: string | null, name: string) => {
@@ -1347,10 +1391,10 @@ export function JobScreen({ go, back, params }: NavProp) {
                   }
                 : undefined
             }
-            onSend={est && projectId && !closed ? () => requireCompany(() => up({ sheet: true })) : undefined}
+            onSend={est && projectId && !closed ? () => requireCompany(() => requireJobSite(() => up({ sheet: true }))) : undefined}
           />
         )}
-        {tab === 'invoice' && <InvoiceTab stage={stage} items={docItems} totals={invoiceTotals} client={realClient} jobSite={jobSite} company={company} invoice={inv} invoices={invoices} onSelectInvoice={setInvSel} roll={roll} extraToInvoice={extraToInvoice} onAddInvoice={canAddInvoice ? openExtraInvoice : undefined} creditToApply={creditToApply} creditRoomTarget={creditTarget ? creditRoom(creditTarget.total, creditTarget.creditTotal, creditTarget.amountPaid) : 0} onAddCredit={canAddCredit ? () => setCreditSheet(true) : undefined} onRemoveCredit={!closed && role !== 'field' ? removeCredit : undefined} quoteTotal={est?.total} genning={savingPlan} onGen={openGenerateInvoice} onRecordPayment={() => setPaySheet(true)} onEditPlan={() => setPlanSheet('edit')} onReceipt={onReceiptRow} receiptBusyId={receiptBusy} setSheet={(b: boolean) => (b ? requireCompany(() => up({ sheet: true })) : up({ sheet: false }))} />}
+        {tab === 'invoice' && <InvoiceTab stage={stage} items={docItems} totals={invoiceTotals} client={realClient} jobSite={jobSite} company={company} invoice={inv} invoices={invoices} onSelectInvoice={setInvSel} roll={roll} extraToInvoice={extraToInvoice} onAddInvoice={canAddInvoice ? openExtraInvoice : undefined} creditToApply={creditToApply} creditRoomTarget={creditTarget ? creditRoom(creditTarget.total, creditTarget.creditTotal, creditTarget.amountPaid) : 0} onAddCredit={canAddCredit ? () => setCreditSheet(true) : undefined} onRemoveCredit={!closed && role !== 'field' ? removeCredit : undefined} quoteTotal={est?.total} genning={savingPlan} onGen={openGenerateInvoice} onRecordPayment={() => setPaySheet(true)} onEditPlan={() => setPlanSheet('edit')} onReceipt={onReceiptRow} receiptBusyId={receiptBusy} setSheet={(b: boolean) => (b ? requireCompany(() => requireJobSite(() => up({ sheet: true }))) : up({ sheet: false }))} />}
         {tab === 'contract' && <ContractTab agreement={detail?.agreement || null} hasInvoice={!!inv} totals={contractTotals} plan={contractPlan} credited={contractCredited} company={company} genning={genningContract} onGenerate={generateContract} onView={detail?.agreement ? viewContract : undefined} />}
         {tab === 'progress' && (
           <ProgressTab
@@ -1447,6 +1491,13 @@ export function JobScreen({ go, back, params }: NavProp) {
         busy={savingCredit}
         onConfirm={confirmCredit}
       />
+      <JobSiteSheet
+        open={siteSheet}
+        onClose={() => setSiteSheet(false)}
+        initial={detail?.jobSite || {}}
+        busy={savingSite}
+        onSave={saveJobSite}
+      />
       <ClientPickSheet
         open={clientSheet}
         onClose={() => setClientSheet(false)}
@@ -1468,6 +1519,7 @@ export function JobScreen({ go, back, params }: NavProp) {
         canSetClient={role !== 'field' && !closed && !!projectId}
         hasClient={!!realClient}
         onSetClient={() => { setMenuOpen(false); setClientSheet(true); }}
+        onSetSite={() => { setMenuOpen(false); setSiteSheet(true); }}
         onAssign={openAssign}
         onApprove={() => { setMenuOpen(false); void setEstimateStatus('Approved', 'Approved'); }}
         onMarkLost={confirmMarkLost}
@@ -1485,7 +1537,7 @@ export function JobScreen({ go, back, params }: NavProp) {
 /* ---------------- Job menu sheet: assign team / mark lost / archive / reopen (+ approve) ---------------- */
 // Same local-state pattern as the payment sheets. "Closed" is projects.status — the underlying
 // quote/invoice keep their statuses, so reopening restores the exact pipeline stage.
-function JobMenuSheet({ open, onClose, closed, busy, canApprove, canAssign, canDelete, canSetClient, hasClient, onSetClient, onAssign, onApprove, onMarkLost, onArchive, onReopen, onDelete }: { open: boolean; onClose: () => void; closed: ClosedKind | null; busy: boolean; canApprove: boolean; canAssign: boolean; canDelete: boolean; canSetClient?: boolean; hasClient?: boolean; onSetClient?: () => void; onAssign: () => void; onApprove: () => void; onMarkLost: () => void; onArchive: () => void; onReopen: () => void; onDelete: () => void }) {
+function JobMenuSheet({ open, onClose, closed, busy, canApprove, canAssign, canDelete, canSetClient, hasClient, onSetClient, onSetSite, onAssign, onApprove, onMarkLost, onArchive, onReopen, onDelete }: { open: boolean; onClose: () => void; closed: ClosedKind | null; busy: boolean; canApprove: boolean; canAssign: boolean; canDelete: boolean; canSetClient?: boolean; hasClient?: boolean; onSetClient?: () => void; onSetSite?: () => void; onAssign: () => void; onApprove: () => void; onMarkLost: () => void; onArchive: () => void; onReopen: () => void; onDelete: () => void }) {
   const t = useT();
   // delete sits LAST and stays available on a closed job too — "I made one just to try it and
   // want it gone" is exactly the case the owner reported, and those end up archived first
@@ -1496,6 +1548,9 @@ function JobMenuSheet({ open, onClose, closed, busy, canApprove, canAssign, canD
         // "Optional — you can do this later" na criação só era verdade com isto aqui: sem nenhum
         // caminho para pôr o cliente depois, o job travava no contrato e no envio, sem saída
         ...(canSetClient && onSetClient ? [{ key: 'client', ico: 'user', col: colors.primary, bg: colors.primaryTint, label: hasClient ? t('job.menu.changeClient') : t('job.menu.addClient'), onPress: onSetClient }] : []),
+        // o endereço da obra IMPRIME nos três documentos, e não havia onde editá-lo depois de criado
+        // (a API updateJobSite existia desde a G5 e ninguém chamava)
+        ...(canSetClient && onSetSite ? [{ key: 'site', ico: 'mapPin', col: colors.primary, bg: colors.primaryTint, label: t('job.menu.jobSite'), onPress: onSetSite }] : []),
         ...(canAssign ? [{ key: 'assign', ico: 'users', col: colors.primary, bg: colors.primaryTint, label: t('job.menu.assignTeam'), onPress: onAssign }] : []),
         ...(canApprove ? [{ key: 'approve', ico: 'check', col: colors.success, bg: colors.successTint, label: t('job.approveDirectly'), onPress: onApprove }] : []),
         { key: 'lost', ico: 'flag', col: colors.error, bg: colors.errorTint, label: t('job.menu.markLost'), onPress: onMarkLost },
@@ -2310,6 +2365,38 @@ function PaymentPlanSheet({ open, onClose, total, initial, hasPayments, busy, co
           }
         }}
       />
+    </Sheet>
+  );
+}
+
+/* ---------------- Job-site sheet: o endereço que IMPRIME nos documentos ---------------- */
+function JobSiteSheet({ open, onClose, initial, busy, onSave }: { open: boolean; onClose: () => void; initial: { address?: string | null; city?: string | null; zip?: string | null }; busy: boolean; onSave: (site: { address: string; city: string; zip: string }) => void }) {
+  const t = useT();
+  const [address, setAddress] = useState('');
+  const [city, setCity] = useState('');
+  const [zip, setZip] = useState('');
+  useEffect(() => {
+    if (open) {
+      setAddress(initial.address || '');
+      setCity(initial.city || '');
+      setZip(initial.zip || '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+  return (
+    <Sheet open={open} onClose={onClose} title={t('job.siteSheetTitle')} sub={t('job.siteSheetSub')}>
+      <Field label={t('job.siteStreet')}>
+        <Input value={address} onChangeText={setAddress} placeholder={t('flow.jobSitePlaceholder')} autoCapitalize="words" />
+      </Field>
+      <Row style={{ gap: 10 }}>
+        <View style={{ flex: 2 }}>
+          <Field label={t('job.siteCity')}><Input value={city} onChangeText={setCity} autoCapitalize="words" /></Field>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Field label={t('job.siteZip')}><Input value={zip} onChangeText={(v: string) => setZip(v.replace(/\D/g, '').slice(0, 5))} keyboardType="number-pad" /></Field>
+        </View>
+      </Row>
+      <Btn title={busy ? t('job.working') : t('job.savePlan')} icon={busy ? undefined : 'check'} disabled={busy} onPress={() => onSave({ address: address.trim(), city: city.trim(), zip: zip.trim() })} style={{ marginTop: 4 }} />
     </Sheet>
   );
 }

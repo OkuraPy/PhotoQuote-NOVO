@@ -4,6 +4,23 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-06 05:00] — feat: endereço da obra editável + aviso antes de mandar sem ele
+O dono perguntou o que eu recomendava para o endereço. Fui verificar antes de responder e mudei a
+resposta: **o app já preenche a rua sozinha quando o GPS a devolve** (`getMyLocation` traz `street`
+e o fluxo grava em `jobStreet`). No print dele o campo estava vazio porque o reverse geocode não
+achou rua naquele ponto — preencher com a cidade seria inventar endereço errado no documento.
+
+O que faltava era outra coisa, e é o mesmo padrão do cliente: **`updateJobSite` existe na API desde
+a G5 e nunca foi chamada por ninguém**. Ou seja, endereço errado ou vazio não tinha conserto depois
+que o job era criado.
+- Item "Endereço da obra" no menu do job → folha com rua, cidade e CEP, já preenchidos com o que
+  houver.
+- E, antes de enviar orçamento/fatura/contrato **sem** endereço, o app pergunta: "Esse documento vai
+  sair sem o endereço da obra. Colocar agora?" com [Colocar endereço] / [Mandar assim]. Sem
+  bloquear nada — quem quer mandar assim, manda.
+- **Arquivos**: `src/v2/screens/Job.tsx` (`JobSiteSheet`, item no menu, `requireJobSite`)
+- jest **219/219**, tsc limpo.
+
 ### [2026-09-06 00:20] — fix: o revisor da última leva achou erro no meu próprio back-fill
 Revisão das duas levas que ninguém tinha olhado (`8c8a56a` e `891befa`).
 
