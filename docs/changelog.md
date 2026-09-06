@@ -4,6 +4,20 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-06 05:20] — build: BUILD 36 ENTREGUE À APPLE (GO do dono, "quero testar no TestFlight")
+- **Build ID** `c03370fd-f2c4-41c8-8ac6-a5f967849eae` · **submission** `02c5579f` · version 2.0.0
+  **buildNumber 36** · a partir de **f11cb83** (17 commits desde a build 35, que era o que o dono
+  tinha no aparelho).
+- Disparada do **repositório principal, não do worktree `pq-build24`**: ele estava com 22 arquivos
+  sujos, segurando a versão ANTIGA dos arquivos de hoje — buildar dali entregaria um TestFlight sem
+  nada do dia. Conferir o worktree antes de buildar entra no procedimento.
+- `autoIncrement` do EAS gravou 35 → 36 no `app.json`; commitado aqui.
+- Vai na build: data/hora nos comentários · busca por nº de fatura/cotação · teclado que não tapa a
+  lista · data do pagamento + Zelle · os dois lados da fatura (cobrar/tirar) com aviso automático ·
+  cliente em job já criado · endereço da obra editável + aviso antes do envio · 2 furos de RLS
+  fechados · valor do contrato assinado corrigido.
+- **O que só o TestFlight prova**: teclado na busca, os cartões novos e as telas de cliente/endereço.
+
 ### [2026-09-06 05:00] — feat: endereço da obra editável + aviso antes de mandar sem ele
 O dono perguntou o que eu recomendava para o endereço. Fui verificar antes de responder e mudei a
 resposta: **o app já preenche a rua sozinha quando o GPS a devolve** (`getMyLocation` traz `street`
