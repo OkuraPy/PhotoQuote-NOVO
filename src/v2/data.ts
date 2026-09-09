@@ -89,6 +89,21 @@ export function toggleDocPhoto(selected: string[], all: string[], url: string, c
   return all.filter((u) => sel.has(u));
 }
 
+// O título do job — que é CLIENT-FACING: aparece no contrato ("Project:") e no topo da página de
+// acompanhamento que o cliente abre. Quando o contratante não escolhe serviço, o app gravava
+// "New quote", e foi isso que o cliente leu no portal (achado do uso real, 09/09). O endereço da
+// obra identifica muito melhor, e serve para o cliente e para o contratante.
+// Inglês por decisão de projeto: o que o cliente lê nunca é traduzido.
+export function jobTitleFrom(p: { service?: string | null; street?: string | null; client?: string | null }): string {
+  const svc = (p.service || '').trim();
+  if (svc) return `${svc} job`;
+  const street = (p.street || '').trim();
+  if (street) return street;
+  const client = (p.client || '').trim();
+  if (client) return client;
+  return 'New quote';
+}
+
 // One-line job-site address for documents (G5) — same field order the contract template's
 // {{service_address}} uses ([address, city, zip]), so every document says the same thing.
 export function jobSiteLine(site?: { address?: string | null; city?: string | null; zip?: string | null } | null): string {

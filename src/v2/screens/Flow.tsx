@@ -9,7 +9,7 @@ import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } fr
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { applyMarkup, buildStarterEstimate, calcTotals, deriveBase, discountFromTarget, fmt, LineItem, NO_DISCOUNT, parseMoney, parsePercent, resolveDiscount, round2, SERVICE_TYPES, split } from '../data';
+import { jobTitleFrom, applyMarkup, buildStarterEstimate, calcTotals, deriveBase, discountFromTarget, fmt, LineItem, NO_DISCOUNT, parseMoney, parsePercent, resolveDiscount, round2, SERVICE_TYPES, split } from '../data';
 import { MAX_AI_PHOTOS, requestEstimate, transcribeAudio, translateNote } from '../lib/ai';
 import { createClient, createJob, fetchClients, fetchCompanyProfile, getMyLocation, lookupZip, Region, updateEstimateItems } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -1106,7 +1106,11 @@ export function AttachScreen({ go, back }: NavProp) {
       const client = skipClient ? null : sel; // city fallback only — the address is the JOB SITE's
       // PERSISTED title is client-facing (contract "Project:", portal header) — locked rule:
       // everything the client sees is English. Screens translate for display on their own.
-      const jobTitle = store.svcs[0] ? `${store.svcs[0]} job` : 'New quote';
+      const jobTitle = jobTitleFrom({
+        service: store.svcs[0],
+        street: (store.jobStreet || '').trim() || client?.addr,
+        client: client?.name,
+      });
       const { projectId, photosFailed } = await createJob({
         userId: ownerId,
         clientId,

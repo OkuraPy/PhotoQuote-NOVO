@@ -4,6 +4,27 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-09 10:40] — fix: o cliente abria o link e lia "New quote"
+Print + áudio do dono, do portal aberto no celular: *"nessa tela que o cliente visualiza tá escrito
+New quote… acho que não seria essa mensagem, seria o nome da pessoa, do projeto"*.
+
+**A raiz**: ao salvar o job, o título só ficava bom quando o contratante escolhia um serviço
+(`"Flooring job"`); sem serviço, gravava o literal **"New quote"** — e é isso que o cliente lê no
+topo da página de acompanhamento e no contrato ("Project:"). Em produção, quase todos os jobs estão
+com esse nome.
+
+**Dois consertos, porque um só não bastava:**
+- **Daqui pra frente** (`jobTitleFrom`, pura, 5 testes): serviço → endereço da obra → cliente →
+  "New quote" como último recurso. O endereço identifica a obra para os dois lados, e continua em
+  inglês, como todo texto que chega ao cliente.
+- **Para os jobs que já existem** (portal, `projectTitle`): quando o nome ainda é o padrão, o topo
+  mostra o **nome do cliente** — que foi exatamente o que o dono sugeriu. Um nome escrito de verdade
+  pelo contratante sempre vence. Sem migration: resolve na leitura, então os 100+ jobs antigos já
+  aparecem certos.
+
+- **Arquivos**: `src/v2/data.ts`, `src/v2/screens/Flow.tsx`, `src/v2/lib/__tests__/data.test.ts`
+  (**224**); no portal, `src/lib/utils.ts` e `src/app/p/[token]/page.tsx`.
+
 ### [2026-09-06 05:20] — build: BUILD 36 ENTREGUE À APPLE (GO do dono, "quero testar no TestFlight")
 - **Build ID** `c03370fd-f2c4-41c8-8ac6-a5f967849eae` · **submission** `02c5579f` · version 2.0.0
   **buildNumber 36** · a partir de **f11cb83** (17 commits desde a build 35, que era o que o dono

@@ -1,4 +1,4 @@
-import { applyMarkup, balanceAfterNewPayment, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobMatchesQuery, jobValueFromInvoices, jobSiteLine, MATCH_DOC, MATCH_EXACT, MATCH_INVOICE, MATCH_NONE, MATCH_TEXT, rankJobMatch, searchJobs, shortDocLabel, needsPhaseSync, NO_DISCOUNT, parseMoney, parsePercent, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitChangeOrder, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
+import { applyMarkup, balanceAfterNewPayment, balanceAfterPayment, buildStarterEstimate, calcTotals, closedFromStatus, deriveBase, deriveStage, discountFromTarget, homeMetrics, invoiceRollup, jobMatchesQuery, jobTitleFrom, jobValueFromInvoices, jobSiteLine, MATCH_DOC, MATCH_EXACT, MATCH_INVOICE, MATCH_NONE, MATCH_TEXT, rankJobMatch, searchJobs, shortDocLabel, needsPhaseSync, NO_DISCOUNT, parseMoney, parsePercent, phaseNameFromItem, resolveDiscount, round2, seedPhasePlan, splitChangeOrder, syncPhasePlan, toggleDocPhoto, uninvoiced } from '../../data';
 import type { ClosedKind, Job, LineItem, SyncPhase } from '../../data';
 import type { Stage } from '../../theme';
 
@@ -886,5 +886,26 @@ describe('fechamento da empresa × crédito (o material devolvido não é receit
   it('idem para "Faturado" quando o job ainda não fechou', () => {
     const job = JOB({ stage: 'Invoiced' as Stage, value: jobValueFromInvoices([{ total: 580.55, credit: 40 }], 0) });
     expect(homeMetrics([job]).invoiced).toBe(540.55);
+  });
+});
+
+describe('jobTitleFrom (o título que o CLIENTE lê no portal e no contrato)', () => {
+  it('serviço escolhido vira "<serviço> job"', () => {
+    expect(jobTitleFrom({ service: 'Flooring' })).toBe('Flooring job');
+  });
+  it('sem serviço, usa o endereço da obra — que identifica a obra para os dois lados', () => {
+    // era aqui que saía "New quote", e foi isso que o cliente leu no portal
+    expect(jobTitleFrom({ street: '1420 Oak Ridge Dr' })).toBe('1420 Oak Ridge Dr');
+  });
+  it('sem serviço e sem endereço, usa o cliente', () => {
+    expect(jobTitleFrom({ client: 'Miller Residence' })).toBe('Miller Residence');
+  });
+  it('sem nada, mantém o padrão antigo', () => {
+    expect(jobTitleFrom({})).toBe('New quote');
+    expect(jobTitleFrom({ service: '  ', street: '', client: null })).toBe('New quote');
+  });
+  it('a ordem é serviço > endereço > cliente', () => {
+    expect(jobTitleFrom({ service: 'Tile', street: '1420 Oak', client: 'Miller' })).toBe('Tile job');
+    expect(jobTitleFrom({ street: '1420 Oak', client: 'Miller' })).toBe('1420 Oak');
   });
 });
