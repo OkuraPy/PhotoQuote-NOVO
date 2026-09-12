@@ -4,6 +4,20 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-12 23:05] — fix: o campo da Apple tem limite de 4.000 caracteres (portal `6e246db`)
+Print do dono, do próprio Resolution Center: *"Tem de ter menos de 4000 caracteres. **-6050**"*.
+
+- **O que mudou**: a resposta única passou de **10.050 → 3.930 caracteres**, mantendo os 6 itens na
+  ordem da carta, o vídeo como item 1, as credenciais, o conteúdo do usuário e a 3.1.1. Pior caso,
+  com um link de YouTube longo no lugar do marcador: **3.946**. Cortei a cortesia de abertura e a
+  gordura das frases — nenhum item da carta ficou sem resposta. Os dois `CopyBox` principais agora
+  mostram a contagem (`limit={4000}`).
+- **Descoberta que vale guardar**: o teto de 4.000 vale para os **dois** campos — o *Reply* do
+  Resolution Center e o *App Review Information → Notes*. A versão de 10 mil foi para dentro do
+  `<details>`, com o destino certo: o botão **"Anexar ficheiro"**, não o campo.
+- **Arquivos** (repo do portal): `src/app/appstore/review21.json` (chave `reply`),
+  `src/app/appstore/review/page.tsx`.
+
 ### [2026-09-12 22:20] — feat: a resposta à Apple virou um bloco só (portal `f88c368`)
 O dono, gravando o vídeo do item 1: *"não é melhor criar uma resposta só e mandar tudo de uma vez?"*
 
