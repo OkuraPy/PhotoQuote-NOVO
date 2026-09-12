@@ -4,6 +4,33 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-12 22:20] — feat: a resposta à Apple virou um bloco só (portal `f88c368`)
+O dono, gravando o vídeo do item 1: *"não é melhor criar uma resposta só e mandar tudo de uma vez?"*
+
+- **O que mudou**: os 6 itens da carta (Guideline 2.1 — Information Needed) viraram **um texto
+  único**, numerado na ordem exata deles, com o vídeo como item 1 e `[PASTE THE VIDEO LINK HERE]`
+  marcado. Para o campo *App Review Information → Notes* (limite 4.000) foi gerada uma versão curta
+  de 3.219 caracteres. Os blocos item-a-item continuam na página, agora dentro de um `<details>`.
+- **Bug corrigido (no texto, antes de ir para a Apple)**: a resposta afirmava que o contratante pode
+  **apagar qualquer comentário** e **revogar o link** do cliente. Nenhuma das duas existe no app —
+  não há `deleteComment` e nada põe `project_share_tokens.is_active = false` (só `ensureShareToken`,
+  que cria). Dizer isso a um revisor que vai procurar o botão é pedir para voltar. O item de
+  conteúdo do usuário agora lista o que existe: apagar foto, apagar fase (leva os comentários dela),
+  apagar o trabalho, apagar a conta, e reportar em support@photoquoteai.com.
+- **Guideline 3.1.1**: entra de frente no item 8 — o app não cobra nada, a tela de Planos só mostra
+  preço futuro e não inicia transação, e a resposta oferece removê-la se eles preferirem.
+- **Roteiro do vídeo**: passa a usar o botão **Client view** (existe desde a G-3) em vez de mandar o
+  link no WhatsApp, e ganha o passo de **apagar uma foto** — é o mecanismo de remoção de conteúdo
+  que a carta pede ver no item 1.
+- **Verificado em produção** antes de publicar: conta `appreview@photoquoteai.com` com 2 clientes e
+  3 jobs (Approved $580.55 / Sent $2.391,05 / Draft $845,20), `INV-2026-0101` com $290,27 pagos;
+  modelos `gpt-5.2`, `gpt-4o-mini-transcribe`, `gpt-4o-mini` conferidos nas Edge Functions.
+- **Arquivos** (repo do portal): `src/app/appstore/review21.json`, `src/app/appstore/review/page.tsx`.
+- **Pendências levantadas**: (1) a conta do revisor não tem fases/fotos no Progress — o "Client view"
+  abre vazio; (2) sem apagar comentário e sem parar de compartilhar, o app fica fraco no quesito
+  UGC da 1.2; (3) a tela de Planos é risco de 3.1.1 na próxima rodada. (1) é dado, (2) e (3) são
+  build 37.
+
 ### [2026-09-09 10:40] — fix: o cliente abria o link e lia "New quote"
 Print + áudio do dono, do portal aberto no celular: *"nessa tela que o cliente visualiza tá escrito
 New quote… acho que não seria essa mensagem, seria o nome da pessoa, do projeto"*.
