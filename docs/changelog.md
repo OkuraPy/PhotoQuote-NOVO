@@ -4,6 +4,34 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-14 21:45] — fix: "Delete account" nunca funcionou em produção
+Áudio do dono, gravando o vídeo que a App Review pediu: *"seguiu todos os passos, mas na hora de
+deletar a conta deu erro"*. Achei no log, com nome e sobrenome:
+
+```
+ERROR: update or delete on table "users" violates foreign key constraint
+       "estimates_user_id_fkey" on table "estimates" (SQLSTATE 23503)
+```
+
+- **A raiz**: a Edge Function `delete-account` apaga memberships, `ai_jobs` e o storage e então
+  chama `auth.admin.deleteUser`, confiando no CASCADE — o comentário dela até afirma *"grafo
+  conferido em prod: tudo CASCADE"*. **Não era**: 5 FKs apontavam para `auth.users` com **NO
+  ACTION** (`estimates.user_id`, `invoices.user_id`, `agreements.user_id`,
+  `contract_templates.user_id`, `project_members.assigned_by`) e travavam o delete. Como o storage
+  é limpo **antes** do `deleteUser`, a conta ficava pela metade: fotos apagadas, conta viva.
+- **O conserto**: migration `20260914213000_fix_account_deletion_cascade.sql` — as 5 viram
+  `ON DELETE CASCADE`, mais as duas de `agreements` para `client`/`project`, que travariam pelo
+  mesmo motivo quando o cascade chegasse em clients/projects. Aplicada em produção.
+- **Prova em produção** (usuário sintético com cliente + job + orçamento + fatura + contrato +
+  template, `delete from auth.users`, tudo dentro de um bloco que dá rollback no fim):
+  `auth.users=0 public.users=0 clients=0 projects=0 estimates=0 invoices=0 agreements=0
+  templates=0`. Nenhuma FK para users continua NO ACTION/RESTRICT.
+- **Não precisa de build nova**: o app e a Edge Function não mudaram — o furo era do banco. A
+  build 36 que está no aparelho dele já deleta conta depois desta migration.
+- **Arquivos**: `supabase/migrations/20260914213000_fix_account_deletion_cascade.sql`.
+- **Efeito colateral do erro**: a conta de teste `cleonicereche@gmail.com` (criada 21:16 para o
+  vídeo) perdeu as fotos na tentativa que falhou; o job, o orçamento e a fatura seguem lá.
+
 ### [2026-09-12 23:05] — fix: o campo da Apple tem limite de 4.000 caracteres (portal `6e246db`)
 Print do dono, do próprio Resolution Center: *"Tem de ter menos de 4000 caracteres. **-6050**"*.
 
