@@ -1,0 +1,31 @@
+-- Segunda trava da exclusão de conta, achada minutos depois da primeira (log de 14/09 23:20 UTC):
+--
+--   ERROR:    permission denied for table line_items (SQLSTATE 42501)
+--   contexto: SQL statement "SELECT COALESCE(SUM(...)) FROM line_items li WHERE li.estimate_id = ..."
+--             PL/pgSQL function update_estimate_totals() line 18
+--   query:    DELETE FROM "users" AS users WHERE users.id = $1
+--   usuário:  supabase_auth_admin
+--
+-- Com as FKs já em CASCADE (migration 20260914213000), o delete finalmente anda — e morre um
+-- degrau adiante. O detalhe que explica tudo: o CASCADE em si roda como DONO da tabela filha
+-- (postgres), mas o GATILHO disparado por ele herda o usuário da chamada original, que é
+-- `supabase_auth_admin`, o papel do GoTrue — e esse papel não tem UM privilégio sequer no schema
+-- public (conferido: has_table_privilege = false em todas as 26 tabelas).
+-- `update_estimate_totals()` lê line_items para recalcular o total do orçamento e bate na parede.
+--
+-- SECURITY DEFINER resolve na raiz: a função passa a rodar como o dono (postgres), que já é dono
+-- das tabelas que ela lê e escreve. O `search_path` continua fixado em public, pg_temp (Fase 4),
+-- então não há caminho para sequestro de schema.
+--
+-- Por que não abre brecha: a função só recalcula o orçamento da linha tocada
+-- (COALESCE(NEW.estimate_id, OLD.estimate_id)), e a RLS de line_items já exige que esse orçamento
+-- seja do próprio usuário (ou do dono do time, para quem é 'office') para inserir, alterar ou
+-- apagar. Não existe caminho para mexer no total de um orçamento alheio por aqui.
+--
+-- PROVADO EM PRODUÇÃO, duas vezes, em blocos que terminam em rollback:
+--   1) papel de teste com ZERO privilégio em line_items apagou o orçamento pai: o cascade desceu,
+--      o gatilho rodou e sobrou line_items=0, estimates=0 (antes: "permission denied");
+--   2) o grafo inteiro (cliente, job, orçamento, itens, fatura, parcelas, pagamento, crédito,
+--      contrato, fases, fotos, comentários, token, tabela de preços, mídia, equipe, atribuição)
+--      apagado por esse mesmo papel: sobrou NADA.
+alter function public.update_estimate_totals() security definer;

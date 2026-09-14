@@ -4,6 +4,38 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-14 23:35] — fix: a segunda trava do "Delete account" — o gatilho de totais
+Prints do dono: o alerta de confirmação e, logo depois, *"Could not delete the account"*. A primeira
+correção destravou as FKs e o delete andou — e morreu um degrau adiante:
+
+```
+ERROR:  permission denied for table line_items (SQLSTATE 42501)
+contexto: PL/pgSQL function update_estimate_totals() line 18
+query:    DELETE FROM "users" AS users WHERE users.id = $1
+usuário:  supabase_auth_admin
+```
+
+- **O detalhe que explica tudo**: o CASCADE roda como **dono da tabela filha** (postgres), mas o
+  **gatilho disparado por ele herda o usuário da chamada original** — `supabase_auth_admin`, o papel
+  do GoTrue, que não tem **um privilégio sequer** no schema public (conferido: `has_table_privilege`
+  = false nas 26 tabelas). `update_estimate_totals()` lê `line_items` para recalcular o total e bate
+  na parede.
+- **O conserto**: migration `20260914233000_estimate_totals_trigger_security_definer.sql` —
+  `alter function public.update_estimate_totals() security definer`. A função passa a rodar como o
+  dono das tabelas; `search_path` segue fixado em `public, pg_temp` (Fase 4). Não abre brecha: ela
+  só recalcula o orçamento da linha tocada, e a RLS de `line_items` já exige que esse orçamento seja
+  do próprio usuário para inserir/alterar/apagar.
+- **Provado em produção, duas vezes, em blocos que terminam em rollback**: (1) um papel de teste com
+  **zero privilégio** em `line_items` apagou o orçamento pai — cascade desceu, gatilho rodou,
+  sobrou `line_items=0 estimates=0`, exatamente onde antes dava "permission denied"; (2) o grafo
+  inteiro (cliente, job, orçamento, itens, fatura, parcelas, pagamento, crédito, contrato, fases,
+  fotos, comentários, token, tabela de preços, mídia, equipe, atribuição) apagado por esse papel:
+  **sobrou NADA**. Zero papéis e zero usuários de teste ficaram no banco.
+- **Continua sem precisar de build nova** — as duas correções são de banco.
+- **Método que achou**: `logs` do Supabase com `log_attributes` completo. O `event_message` sozinho
+  dizia só "permission denied for table line_items"; foi `parsed.context` que entregou a função e a
+  linha, e `parsed.user_name` que entregou o papel.
+
 ### [2026-09-14 21:45] — fix: "Delete account" nunca funcionou em produção
 Áudio do dono, gravando o vídeo que a App Review pediu: *"seguiu todos os passos, mas na hora de
 deletar a conta deu erro"*. Achei no log, com nome e sobrenome:
