@@ -4,6 +4,32 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-09-18 18:40] — build: build 37 entregue à Apple
+Áudio do dono: *"eu não consigo mandar a mesma versão para a Apple testar"* — a App Review pediu
+informações e um vídeo, e o App Store Connect não deixa reenviar à revisão a mesma build já
+submetida. Precisava de build nova. Pedido dele: *"uma alteraçãozinha mínima, coisa boba, só para
+gerar uma versão nova"*; ao confirmar o plano: *"Não, não. Só gera build, só."*
+
+- **O que mudou**: nada de código foi escrito para isso. **Não precisou** de alteração artificial —
+  o `eas.json` tem `autoIncrement: true` + `appVersionSource: local`, então o EAS gravou
+  `expo.ios.buildNumber` **36 → 37** no `app.json` (`Bumping expo.ios.buildNumber from 36 to 37`).
+  Build number novo é tudo o que a Apple exige para aceitar como versão nova.
+- **Arquivos**: `app.json` (buildNumber 37), `docs/changelog.md`.
+- **O que a 37 leva a mais que a 36**: o fix de `667e85e` — o cliente abria o link e lia
+  *"New quote"* no lugar do título do próprio trabalho. Os dois consertos do **Delete account**
+  (`86d7876` e `af0a5df`) são de banco e já estavam valendo em produção desde 14/09, inclusive para
+  quem está na build 36 — ou seja, o vídeo que a App Review pediu já pode ser gravado com o fluxo
+  funcionando.
+- **Pré-checagem antes de disparar**: `tsc --noEmit` limpo, **jest 224/224**.
+- **Entregue**: Build ID `77b5fe08-aa22-4258-b626-960fded96623`, submission
+  `b9396a30-ed78-45de-8208-c38ae9bbcccb`, **upload aceito pelo App Store Connect**. Processamento da
+  Apple leva 5-10 min; depois a 37 aparece na lista e o dono a seleciona na revisão.
+- **Decisão técnica**: não inventar mudança cosmética só para "marcar" versão nova. Uma alteração
+  boba entraria no binário sem ter sido revisada e sem motivo de produto; o `buildNumber` já
+  cumpre o papel sozinho e o commit fica honesto sobre o que mudou.
+- **Credenciais conferidas no build**: cert de distribuição e provisioning profile ativos até
+  03/04/2027 (team C5B4QG6NBQ).
+
 ### [2026-09-14 23:35] — fix: a segunda trava do "Delete account" — o gatilho de totais
 Prints do dono: o alerta de confirmação e, logo depois, *"Could not delete the account"*. A primeira
 correção destravou as FKs e o delete andou — e morreu um degrau adiante:
