@@ -4,6 +4,21 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-10-12 20:07] — build: build 38 pronta; envio à Apple travado por contrato pendente
+- **O que mudou**: o EAS gravou `buildNumber` **37 → 38** no `app.json` (autoIncrement). Build
+  `598af806-aca0-4cea-b675-f2407588b8e2` terminou sem erro com o código de `f41b513`.
+- **Ícone conferido dentro do binário**: baixei o `.ipa` e extraí `AppIcon60x60@2x.png` (iPhone) e
+  `AppIcon76x76@2x~ipad.png`. Os PNGs do iOS vêm no formato **CgBI** (BGRA + deflate cru, sem
+  cabeçalho zlib), que `convert`/`identify` não abrem; converti com um script Python de 20 linhas.
+  Os dois mostram a câmera com cifrão.
+- **Envio ao App Store Connect FALHOU 2×** (submissions `9cad2aff…` e `56500b4d…`). O `eas submit`
+  só dizia *"Something went wrong"*, e `submission.error` voltava `null` na API. Quem tinha o motivo
+  era o **`jobRun.errors`** da GraphQL do Expo: `EAS_ASC_REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED`,
+  ou seja, contrato da Apple pendente ou vencido. Só o Account Holder (GUIVI) aceita, em
+  appstoreconnect.apple.com/business e developer.apple.com/account. Pedido ao dono pelo Telegram.
+  A build **não precisa ser refeita**: depois do aceite basta `eas submit --id 598af806…`.
+- **Arquivos**: `app.json`, `docs/changelog.md`.
+
 ### [2026-10-12 20:00] — fix: lançamento grátis + ícone de verdade (App Review recusou a build 37)
 A Apple recusou a **2.0.0 (37)** em 23/09 (submission `19f144a4-4be8-4914-90a3-5226c8646db0`,
 revisada num **iPad Air 11" M3, iPadOS 27.0**). O dono só viu agora e mandou os prints. Dois motivos:
