@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Icon } from '../Icon';
 import { colors, fonts, radii, shadow } from '../theme';
-import { billingState, ClosedKind, fmt, fmt0, fold, homeMetrics, initials, Job, searchJobs, shortDocLabel, split, STAGES, trialDaysLeft } from '../data';
+import { BILLING_ENABLED, ClosedKind, effectiveBillingState, fmt, fmt0, fold, homeMetrics, initials, Job, searchJobs, shortDocLabel, split, STAGES, trialDaysLeft } from '../data';
 import { Avatar, Between, Btn, Card, Empty, NavBtn, Row, SearchBar, SectionTitle, StageChip, Switch, SwipeRow, useStore } from '../ui';
 import { useAuth } from '../lib/auth';
 import { deleteAccount, deleteProject, fetchClients, fetchCompanyProfile, fetchJobs, fetchOwnBilling, projectDeleteFacts } from '../lib/api';
@@ -13,15 +13,16 @@ import { LOCALES, registerStrings, useLocale, useT } from '../lib/i18n';
 
 // Owner-only billing pulse (Onda D): members never see billing; anything but an
 // expired trial behaves exactly like before (state 'ok'/'trial' never blocks).
+// Free launch: with BILLING_ENABLED off this is always 'ok' — banner hidden, gates dormant.
 export function useBilling() {
   const { user, role } = useAuth();
   const { data } = useQuery({
     queryKey: ['billing', user?.id],
     queryFn: () => fetchOwnBilling(user!.id),
-    enabled: !!user?.id && role === 'owner',
+    enabled: BILLING_ENABLED && !!user?.id && role === 'owner',
     staleTime: 5 * 60 * 1000,
   });
-  const state = role === 'owner' ? billingState(data?.status, data?.expiresAt) : 'ok';
+  const state = effectiveBillingState(role, data?.status, data?.expiresAt);
   return { state, days: trialDaysLeft(data?.expiresAt), planName: data?.planName ?? null };
 }
 
@@ -732,8 +733,9 @@ export function ProfileScreen({ go }: NavProp) {
 
         <SectionTitle title={t('tabs.account')} />
         <SetGroup rows={[
-          // subscription entry is the owner's (members never bill); office keeps password/logout
-          ...(role === 'owner' ? [{ ico: 'card', name: t('tabs.subscription'), val: subscriptionVal, onPress: () => go('plans') } as SetRowDef] : []),
+          // subscription entry is the owner's (members never bill); office keeps password/logout.
+          // Hidden in the free launch — there is nothing to buy until Apple IAP ships.
+          ...(BILLING_ENABLED && role === 'owner' ? [{ ico: 'card', name: t('tabs.subscription'), val: subscriptionVal, onPress: () => go('plans') } as SetRowDef] : []),
           { ico: 'lock', name: t('tabs.changePassword'), onPress: () => go('changePassword') },
           { ico: 'logout', name: t('tabs.logOut'), danger: true, onPress: () => signOut() },
           { ico: 'trash', name: t('tabs.deleteAccount'), danger: true, onPress: onDeleteAccount },

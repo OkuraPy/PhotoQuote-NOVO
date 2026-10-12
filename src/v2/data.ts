@@ -658,12 +658,31 @@ export function credentialsMessage(locale: 'en' | 'es' | 'pt', p: { company?: st
 // these helpers only shape UI state (banner/paywall). 'active' (legacy/paid) never blocks.
 export type BillingState = 'ok' | 'trial' | 'expired';
 
+// FREE LAUNCH (App Review 23/09/2026, Guideline 2.1(a)): Apple tapped "Choose plan", got the
+// stub alert and rejected — and the review account's trial had expired, so the creation gates
+// locked them out with no way to pay. Until real in-app purchase ships, EVERY billing surface
+// (trial banner, expired-trial creation gates, Profile → Subscription) is off. Flip to true ONLY
+// in the same build that wires Apple IAP.
+export const BILLING_ENABLED = false;
+
 // users.subscription_status/expires_at → what the OWNER's UI should do.
 // Unknown/legacy statuses degrade to 'ok' (never lock a paying/grandfathered account by accident).
 export function billingState(status?: string | null, expiresAt?: string | null, now: Date = new Date()): BillingState {
   if (status !== 'trial') return 'ok';
   if (!expiresAt) return 'trial';
   return new Date(expiresAt).getTime() >= now.getTime() ? 'trial' : 'expired';
+}
+
+// What the gates/banner actually see: billing off (free launch) or a non-owner → always 'ok'.
+export function effectiveBillingState(
+  role: string | null | undefined,
+  status?: string | null,
+  expiresAt?: string | null,
+  now: Date = new Date(),
+  enabled: boolean = BILLING_ENABLED,
+): BillingState {
+  if (!enabled || role !== 'owner') return 'ok';
+  return billingState(status, expiresAt, now);
 }
 
 // Days left on the trial, for the banner (ceil: "expira hoje" = 1, nunca 0 enquanto válido).

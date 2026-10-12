@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#17866C"/>
+      <stop offset="1" stop-color="#0B5544"/>
+    </linearGradient>
+    <linearGradient id="lens" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#14806A"/>
+      <stop offset="1" stop-color="#0B5544"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <rect x="392" y="258" width="240" height="140" rx="46" fill="#FFFFFF"/>
+  <rect x="184" y="340" width="656" height="452" rx="112" fill="#FFFFFF"/>
+  <circle cx="512" cy="572" r="184" fill="#0B5544"/>
+  <circle cx="512" cy="572" r="154" fill="url(#lens)"/>
+  <circle cx="728" cy="420" r="28" fill="#C8A24B"/>
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke-width="36" d="M566 514 C554 492 534 482 508 482 C476 482 454 498 454 524 C454 550 476 560 512 570 C548 580 570 592 570 622 C570 648 546 662 512 662 C482 662 460 650 448 628"/>
+    <path stroke-width="32" d="M512 446 L512 482 M512 662 L512 698"/>
+  </g>
+</svg>

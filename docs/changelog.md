@@ -4,6 +4,57 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-10-12 20:00] — fix: lançamento grátis + ícone de verdade (App Review recusou a build 37)
+A Apple recusou a **2.0.0 (37)** em 23/09 (submission `19f144a4-4be8-4914-90a3-5226c8646db0`,
+revisada num **iPad Air 11" M3, iPadOS 27.0**). O dono só viu agora e mandou os prints. Dois motivos:
+
+1. **Guideline 2.1(a) App Completeness**: *"We were unable to use the core feature, subscription
+   purchase, because we received an error message when we tapped the button."*
+   - **Causa provada no banco**: a conta do revisor `appreview@photoquoteai.com` nasceu em 08/09 com
+     `subscription_status='trial'` (o `handle_new_user` dá 14 dias). Venceu em **22/09 03:58 UTC**,
+     e a revisão foi em 23/09. Com o teste vencido, o app **bloqueava criar** em 3 lugares (Home,
+     botão + de Jobs, "New quote for X" no cliente) e mandava para Planos. Lá, "Choose Solo/Team" e
+     "Restore purchases" eram **stub** (`Alert` "Almost there… you keep full access", que ainda
+     contradizia o bloqueio). O revisor ficou preso: não criava e não pagava.
+2. **Guideline 2.3.8 Accurate Metadata**: ícones placeholder. `assets/icon.png`, `splash-icon.png`
+   e `adaptive-icon.png` eram o **template padrão do Expo** (grade com círculos), nunca trocados.
+
+- **Decisão do dono**: *"lança grátis"*. Assinatura volta numa atualização, com IAP de verdade.
+- **O que mudou**:
+  - `src/v2/data.ts`: `export const BILLING_ENABLED = false` + `effectiveBillingState()`, que
+    devolve `'ok'` com o billing desligado ou para quem não é dono.
+  - `src/v2/screens/Tabs.tsx`: `useBilling()` passa por `effectiveBillingState` e só busca o
+    billing com o interruptor ligado. Isso **desliga de uma vez** a faixa de teste da Home e os
+    3 bloqueios de criação (o de `Misc.tsx` usa o mesmo hook). A linha "Subscription" do Perfil
+    some atrás do mesmo interruptor. Conferido: os 5 `go('plans')` do app ficaram inalcançáveis.
+    A rota `plans` segue registrada de propósito, porque rota órfã é mais segura que rota
+    inexistente.
+  - **Ícone novo** (escolha do dono entre 2 opções): câmera branca com **cifrão na lente** sobre o
+    verde do app (`#11705A` → `#0B5544`) e o flash no dourado de destaque (`#C8A24B`).
+    `icon.png` 1024×1024 **sem canal alfa** (o App Store recusa ícone com alfa); `splash-icon.png`
+    com o ícone arredondado no centro de uma tela transparente (o splash legado do Expo 54 usa
+    `enableFullScreenImage_legacy` + `contain`, então a imagem ocupa a largura toda); 
+    `adaptive-icon.png` só com o desenho dentro da zona segura e fundo `#11705A` no `app.json`;
+    `favicon.png`. Fonte vetorial em `assets/source/icon.svg`.
+  - `billing.test.ts`: +3 testes. Um deles é **tripwire** (`BILLING_ENABLED === false`): ligar o
+    interruptor sem IAP de verdade quebra o teste de propósito.
+- **Banco (prod)**: a conta `appreview@photoquoteai.com` passou para `subscription_status='active'`
+  e `expires_at = null`. Com o interruptor desligado isso não muda nada no app; é para a conta de
+  revisão nunca mais vencer quando a assinatura voltar.
+- **Revisão (feita à mão; o Workflow foi negado pelo modo de permissão)**: grep de todo
+  `go('plans')`, de preço/plano/trial/"Restore"/"coming soon"/stub em `src/v2`, das URLs que o app
+  abre, de `Share.share` no iPad e do objeto `COMPANY` "Apex Renovations" (constante morta; só
+  aparece como *placeholder* de campo no onboarding). O único "Almost there" que sobrou é a
+  confirmação de e-mail do cadastro, que nem aparece (`mailer_autoconfirm = true`). O aviso
+  "Team plan required" de `Team.tsx` só dispara se o dono tiver plano `Solo`, e **ninguém tem**
+  (`subscription_plan_id` nulo em todas as contas, e o `handle_new_user` não preenche).
+- **tsc** limpo, **jest 227/227**.
+- **Arquivos**: `src/v2/data.ts`, `src/v2/screens/Tabs.tsx`, `src/v2/lib/__tests__/billing.test.ts`,
+  `assets/{icon,splash-icon,adaptive-icon,favicon}.png`, `assets/source/icon.svg`, `app.json`.
+- **Dívida para quando a assinatura voltar**: o `handle_new_user` continua criando `trial` de 14
+  dias. Quem se cadastrar no período grátis vai aparecer como "teste vencido" no dia em que o
+  interruptor ligar. Decidir antes: dar carência a essas contas ou tratar todas como `active`.
+
 ### [2026-09-18 18:40] — build: build 37 entregue à Apple
 Áudio do dono: *"eu não consigo mandar a mesma versão para a Apple testar"* — a App Review pediu
 informações e um vídeo, e o App Store Connect não deixa reenviar à revisão a mesma build já
