@@ -4,6 +4,19 @@ Registro por commit (Regra #0). Mais recente no topo.
 
 ---
 
+### [2026-10-13 20:09] — build: build 38 entregue à Apple
+- **O que mudou**: nada no código. O dono aceitou o contrato pendente da Apple (*"pronto,
+  assinei"*) e eu reenviei a **mesma** build 38 (`598af806-aca0-4cea-b675-f2407588b8e2`).
+  Submission `eb159eef-58bd-40e0-a32b-c02122982444`, **upload aceito** pelo App Store Connect.
+- **Decisão técnica**: o dono pediu para refazer a build. Não precisou, porque a 38 nunca tinha
+  chegado à Apple (o contrato barrou antes do upload; `appStoreConnectBuildUpload` vazio), então o
+  número 38 continuava livre. Reenviar levou ~1 min, contra ~30 de uma build nova. Ficou combinado
+  gerar a 39 na hora se a Apple recusasse a 38.
+- **Falta (lado do dono no ASC)**: trocar 37 → 38 na versão 2.0.0, deixar o app Gratuito, tirar
+  IAP da versão, tirar preço da descrição, atualizar as Notes e responder no Resolution Center
+  com o texto já enviado.
+- **Arquivos**: `docs/changelog.md`.
+
 ### [2026-10-12 20:07] — build: build 38 pronta; envio à Apple travado por contrato pendente
 - **O que mudou**: o EAS gravou `buildNumber` **37 → 38** no `app.json` (autoIncrement). Build
   `598af806-aca0-4cea-b675-f2407588b8e2` terminou sem erro com o código de `f41b513`.
